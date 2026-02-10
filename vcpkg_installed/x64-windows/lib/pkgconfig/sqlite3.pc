@@ -1,0 +1,13 @@
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: SQLite
+Description: SQL database engine
+Version: 3.51.2
+Libs: "-L${libdir}" -lsqlite3
+Libs.private: 
+Requires.private: 
+Cflags: "-I${includedir}"
+
