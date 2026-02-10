@@ -2,6 +2,7 @@
 build/
 out/
 cmake-build-*/
+.cache/
 
 # IDE
 .vs/
@@ -26,9 +27,15 @@ compile_commands.json
 
 # vcpkg (local clone)
 vcpkg/
+vcpkg_installed/
 
-# shuati runtime
+# shuati runtime & user data
 .shuati/
+*.db
+*.log
+
+# Design Docs (Private)
+prd.md
 
 # OS
 Thumbs.db
