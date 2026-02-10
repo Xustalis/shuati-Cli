@@ -1,0 +1,180 @@
+#include "database.hpp"
+#include <fmt/core.h>
+
+namespace shuati {
+
+Database::Database(const std::string& db_path) {
+    std::filesystem::path p(db_path);
+    if (p.has_parent_path())
+        std::filesystem::create_directories(p.parent_path());
+
+    db_ = std::make_unique<SQLite::Database>(db_path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
+    init_schema();
+}
+
+void Database::init_schema() {
+    db_->exec(
+        "CREATE TABLE IF NOT EXISTS problems ("
+        "  id TEXT PRIMARY KEY,"
+        "  source TEXT,"
+        "  title TEXT,"
+        "  url TEXT,"
+        "  content_path TEXT,"
+        "  tags TEXT DEFAULT '',"
+        "  difficulty TEXT DEFAULT 'medium',"
+        "  created_at INTEGER"
+        ")");
+
+    db_->exec(
+        "CREATE TABLE IF NOT EXISTS mistakes ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  problem_id TEXT,"
+        "  type TEXT,"
+        "  description TEXT,"
+        "  timestamp INTEGER,"
+        "  FOREIGN KEY(problem_id) REFERENCES problems(id)"
+        ")");
+
+    db_->exec(
+        "CREATE TABLE IF NOT EXISTS reviews ("
+        "  problem_id TEXT PRIMARY KEY,"
+        "  next_review INTEGER,"
+        "  interval INTEGER DEFAULT 1,"
+        "  ease_factor REAL DEFAULT 2.5,"
+        "  repetitions INTEGER DEFAULT 0,"
+        "  FOREIGN KEY(problem_id) REFERENCES problems(id)"
+        ")");
+}
+
+// ---- Problem ----
+
+void Database::add_problem(const Problem& p) {
+    SQLite::Statement q(*db_,
+        "INSERT OR REPLACE INTO problems (id,source,title,url,content_path,tags,difficulty,created_at) "
+        "VALUES (?,?,?,?,?,?,?,?)");
+    q.bind(1, p.id);
+    q.bind(2, p.source);
+    q.bind(3, p.title);
+    q.bind(4, p.url);
+    q.bind(5, p.content_path);
+    q.bind(6, p.tags);
+    q.bind(7, p.difficulty);
+    q.bind(8, p.created_at ? p.created_at : (long long)std::time(nullptr));
+    q.exec();
+}
+
+bool Database::problem_exists(const std::string& url) {
+    SQLite::Statement q(*db_, "SELECT count(*) FROM problems WHERE url=?");
+    q.bind(1, url);
+    return q.executeStep() && q.getColumn(0).getInt() > 0;
+}
+
+std::vector<Problem> Database::get_all_problems() {
+    std::vector<Problem> out;
+    SQLite::Statement q(*db_, "SELECT id,source,title,url,content_path,tags,difficulty,created_at FROM problems ORDER BY created_at DESC");
+    while (q.executeStep()) {
+        out.push_back({
+            q.getColumn(0).getString(), q.getColumn(1).getString(),
+            q.getColumn(2).getString(), q.getColumn(3).getString(),
+            q.getColumn(4).getString(), q.getColumn(5).getString(),
+            q.getColumn(6).getString(), q.getColumn(7).getInt64()
+        });
+    }
+    return out;
+}
+
+Problem Database::get_problem(const std::string& id) {
+    SQLite::Statement q(*db_, "SELECT id,source,title,url,content_path,tags,difficulty,created_at FROM problems WHERE id=?");
+    q.bind(1, id);
+    if (q.executeStep()) {
+        return {
+            q.getColumn(0).getString(), q.getColumn(1).getString(),
+            q.getColumn(2).getString(), q.getColumn(3).getString(),
+            q.getColumn(4).getString(), q.getColumn(5).getString(),
+            q.getColumn(6).getString(), q.getColumn(7).getInt64()
+        };
+    }
+    return {};
+}
+
+// ---- Mistake ----
+
+void Database::log_mistake(const std::string& pid, const std::string& type, const std::string& desc) {
+    SQLite::Statement q(*db_, "INSERT INTO mistakes (problem_id,type,description,timestamp) VALUES (?,?,?,?)");
+    q.bind(1, pid);
+    q.bind(2, type);
+    q.bind(3, desc);
+    q.bind(4, (long long)std::time(nullptr));
+    q.exec();
+}
+
+std::vector<Mistake> Database::get_mistakes_for(const std::string& pid) {
+    std::vector<Mistake> out;
+    SQLite::Statement q(*db_, "SELECT id,problem_id,type,description,timestamp FROM mistakes WHERE problem_id=? ORDER BY timestamp DESC");
+    q.bind(1, pid);
+    while (q.executeStep()) {
+        out.push_back({
+            q.getColumn(0).getInt(), q.getColumn(1).getString(),
+            q.getColumn(2).getString(), q.getColumn(3).getString(),
+            q.getColumn(4).getInt64()
+        });
+    }
+    return out;
+}
+
+std::vector<std::pair<std::string, int>> Database::get_mistake_stats() {
+    std::vector<std::pair<std::string, int>> out;
+    SQLite::Statement q(*db_, "SELECT type, count(*) as cnt FROM mistakes GROUP BY type ORDER BY cnt DESC");
+    while (q.executeStep()) {
+        out.emplace_back(q.getColumn(0).getString(), q.getColumn(1).getInt());
+    }
+    return out;
+}
+
+// ---- Review / SM-2 ----
+
+void Database::upsert_review(const ReviewItem& r) {
+    SQLite::Statement q(*db_,
+        "INSERT OR REPLACE INTO reviews (problem_id,next_review,interval,ease_factor,repetitions) "
+        "VALUES (?,?,?,?,?)");
+    q.bind(1, r.problem_id);
+    q.bind(2, r.next_review);
+    q.bind(3, r.interval);
+    q.bind(4, r.ease_factor);
+    q.bind(5, r.repetitions);
+    q.exec();
+}
+
+std::vector<ReviewItem> Database::get_due_reviews(long long now) {
+    std::vector<ReviewItem> out;
+    SQLite::Statement q(*db_,
+        "SELECT r.problem_id, p.title, r.next_review, r.interval, r.ease_factor, r.repetitions "
+        "FROM reviews r JOIN problems p ON r.problem_id=p.id "
+        "WHERE r.next_review <= ? ORDER BY r.next_review ASC");
+    q.bind(1, now);
+    while (q.executeStep()) {
+        out.push_back({
+            q.getColumn(0).getString(), q.getColumn(1).getString(),
+            q.getColumn(2).getInt64(), q.getColumn(3).getInt(),
+            q.getColumn(4).getDouble(), q.getColumn(5).getInt()
+        });
+    }
+    return out;
+}
+
+ReviewItem Database::get_review(const std::string& pid) {
+    SQLite::Statement q(*db_,
+        "SELECT problem_id, '', next_review, interval, ease_factor, repetitions "
+        "FROM reviews WHERE problem_id=?");
+    q.bind(1, pid);
+    if (q.executeStep()) {
+        return {
+            q.getColumn(0).getString(), "",
+            q.getColumn(2).getInt64(), q.getColumn(3).getInt(),
+            q.getColumn(4).getDouble(), q.getColumn(5).getInt()
+        };
+    }
+    return {pid, "", 0, 1, 2.5, 0};
+}
+
+} // namespace shuati

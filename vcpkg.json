@@ -1,0 +1,12 @@
+{
+  "name": "shuati-cli",
+  "version-string": "0.1.0",
+  "dependencies": [
+    "cli11",
+    "nlohmann-json",
+    "cpr",
+    "sqlitecpp",
+    "fmt",
+    "ftxui"
+  ]
+}
