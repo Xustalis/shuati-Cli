@@ -16,6 +16,7 @@
 #include "problem_manager.hpp"
 #include "mistake_analyzer.hpp"
 #include "ai_coach.hpp"
+#include "sm2_algorithm.hpp"
 
 namespace fs = std::filesystem;
 using namespace shuati;
@@ -25,7 +26,7 @@ using namespace shuati;
 static fs::path find_root_or_die() {
     auto root = Config::find_root();
     if (root.empty()) {
-        fmt::print(fg(fmt::color::red), "[!] 未找到项目根目录。请先运行: shuati init\n");
+        fmt::print(fg(fmt::color::red), "[!] 未找到项目根目录。请先运行: shuati init\\n");
         throw std::runtime_error("Root not found");
     }
     return root;
@@ -53,22 +54,6 @@ struct Services {
     }
 };
 
-static ReviewItem sm2_update(ReviewItem r, int quality) {
-    if (quality < 3) {
-        r.repetitions = 0;
-        r.interval = 1;
-    } else {
-        if (r.repetitions == 0)      r.interval = 1;
-        else if (r.repetitions == 1) r.interval = 6;
-        else                         r.interval = (int)(r.interval * r.ease_factor);
-        r.repetitions++;
-    }
-    r.ease_factor += 0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02);
-    if (r.ease_factor < 1.3) r.ease_factor = 1.3;
-    r.next_review = std::time(nullptr) + r.interval * 86400;
-    return r;
-}
-
 // ─── Command Context ──────────────────────────────────
 
 struct CommandContext {
@@ -94,11 +79,13 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
         }
         auto dir = fs::current_path() / Config::DIR_NAME;
         fs::create_directory(dir);
+        fs::create_directory(dir / "templates");
         Config cfg;
         cfg.save(Config::config_path(fs::current_path()));
         Database db(Config::db_path(fs::current_path()).string());
         fmt::print(fg(fmt::color::green_yellow), "[+] 初始化成功: {}\n", dir.string());
         fmt::print("    请设置 API Key: config --api-key <YOUR_KEY>\n");
+        fmt::print(fg(fmt::color::dim_gray), "    提示: 在 {}/templates/ 放置自定义代码模板\n", Config::DIR_NAME);
     });
 
     // ── pull ──
@@ -108,7 +95,11 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
         try {
             auto svc = Services::load(find_root_or_die());
             svc.pm->pull_problem(ctx.pull_url);
-        } catch (...) {}
+        } catch (const std::exception& e) {
+            fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
+        } catch (...) {
+            fmt::print(fg(fmt::color::red), "[!] 发生未知错误\n");
+        }
     });
 
     // ── new ──
@@ -120,7 +111,11 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
         try {
             auto svc = Services::load(find_root_or_die());
             svc.pm->create_local(ctx.new_title, ctx.new_tags, ctx.new_diff);
-        } catch (...) {}
+        } catch (const std::exception& e) {
+            fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
+        } catch (...) {
+            fmt::print(fg(fmt::color::red), "[!] 发生未知错误\n");
+        }
     });
 
     // ── solve ──
@@ -140,17 +135,45 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
             fmt::print(fg(fmt::color::cyan), "=== 开始练习: {} ===\n", prob.title);
             fmt::print("题目描述: {}\n", prob.content_path);
 
-            std::string filename = "solution_" + prob.id + ".cpp";
+            std::string ext = svc.cfg.language == "python" ? ".py" : ".cpp";
+            std::string filename = "solution_" + prob.id + ext;
             if (fs::exists(filename)) {
                 fmt::print(fg(fmt::color::yellow), "[!] 代码文件已存在: {}\n", filename);
             } else {
+                // Check for user-defined template in .shuati/templates/
+                auto tmpl_path = root / Config::DIR_NAME / "templates" / ("template" + ext);
                 std::ofstream out(filename);
-                out << "// Problem: " << prob.title << "\n// URL: " << prob.url << "\n\n#include <iostream>\n#include <vector>\nusing namespace std;\n\nint main() {\n    cout << \"Hello Shuati!\" << endl;\n    return 0;\n}\n";
+                if (fs::exists(tmpl_path)) {
+                    // Use custom template, replace placeholders
+                    std::ifstream tmpl(tmpl_path);
+                    std::string content((std::istreambuf_iterator<char>(tmpl)), {});
+                    // Replace {{TITLE}} and {{URL}} placeholders
+                    auto replace_all = [](std::string& s, const std::string& from, const std::string& to) {
+                        size_t pos = 0;
+                        while ((pos = s.find(from, pos)) != std::string::npos) {
+                            s.replace(pos, from.length(), to);
+                            pos += to.length();
+                        }
+                    };
+                    replace_all(content, "{{TITLE}}", prob.title);
+                    replace_all(content, "{{URL}}", prob.url);
+                    replace_all(content, "{{ID}}", prob.id);
+                    out << content;
+                    fmt::print(fg(fmt::color::green), "[+] 使用自定义模板生成: {}\n", filename);
+                } else {
+                    // Default template
+                    out << "// Problem: " << prob.title << "\n// URL: " << prob.url << "\n\n#include <iostream>\n#include <vector>\nusing namespace std;\n\nint main() {\n    // Your code here\n    return 0;\n}\n";
+                    fmt::print(fg(fmt::color::green), "[+] 代码模板已生成: {}\n", filename);
+                    fmt::print(fg(fmt::color::dim_gray), "    提示: 在 .shuati/templates/template{} 放置自定义模板\n", ext);
+                }
                 out.close();
-                fmt::print(fg(fmt::color::green), "[+] 代码模板已生成: {}\n", filename);
             }
             fmt::print("\n完成后使用以下命令提交:\n  submit {} -f {}\n", prob.id, filename);
-        } catch (...) {}
+        } catch (const std::exception& e) {
+            fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
+        } catch (...) {
+            fmt::print(fg(fmt::color::red), "[!] 发生未知错误\n");
+        }
     });
 
     // ── list ──
@@ -168,7 +191,11 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
                 std::string title = p.title.length() > 28 ? p.title.substr(0, 25) + "..." : p.title;
                 fmt::print("{:<20} {:<30} {:<8} {}\n", p.id.substr(0, 18), title, p.difficulty, p.source);
             }
-        } catch (...) {}
+        } catch (const std::exception& e) {
+            fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
+        } catch (...) {
+            fmt::print(fg(fmt::color::red), "[!] 发生未知错误\n");
+        }
     });
 
     // ── submit ──
@@ -199,8 +226,17 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
 
             if (ctx.submit_quality < 0 || ctx.submit_quality > 5) {
                 fmt::print("本次练习感觉如何? (0=完全不会, 3=有挑战, 5=轻松秒杀): ");
-                std::cin >> ctx.submit_quality;
-                std::cin.ignore();
+                std::string input;
+                std::getline(std::cin, input);
+                try {
+                    ctx.submit_quality = std::stoi(input);
+                    if (ctx.submit_quality < 0 || ctx.submit_quality > 5) {
+                        throw std::out_of_range("Quality must be 0-5");
+                    }
+                } catch (...) {
+                    fmt::print(fg(fmt::color::yellow), "[!] 无效输入，默认设为 3\n");
+                    ctx.submit_quality = 3;
+                }
             }
 
             if (ctx.submit_quality < 3) {
@@ -209,8 +245,13 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
                 for (size_t i = 0; i < types.size(); i++) fmt::print("  {}. {}\n", i + 1, types[i]);
                 int choice = 0;
                 fmt::print("选择主要错误类型 (1-{}): ", types.size());
-                std::cin >> choice;
-                std::cin.ignore();
+                std::string choice_input;
+                std::getline(std::cin, choice_input);
+                try {
+                    choice = std::stoi(choice_input);
+                } catch (...) {
+                    choice = 0;
+                }
                 std::string desc;
                 fmt::print("简要描述错误原因: ");
                 std::getline(std::cin, desc);
@@ -218,10 +259,14 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
             }
 
             auto review = svc.db->get_review(ctx.submit_pid);
-            review = sm2_update(review, ctx.submit_quality);
+            review = SM2Algorithm::update(review, ctx.submit_quality);
             svc.db->upsert_review(review);
             fmt::print(fg(fmt::color::green_yellow), "[+] 记录成功。下次复习时间: {} 天后\n", review.interval);
-        } catch (...) {}
+        } catch (const std::exception& e) {
+            fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
+        } catch (...) {
+            fmt::print(fg(fmt::color::red), "[!] 发生未知错误\n");
+        }
     });
 
     // ── review ──
@@ -236,7 +281,11 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
             fmt::print(fg(fmt::color::yellow), "=== 今日待复习 ({} 题) ===\n\n", due.size());
             for (auto& r : due) fmt::print("  [{}] {} (间隔: {}天)\n", r.problem_id.substr(0, 15), r.title, r.interval);
             fmt::print("\n开始练习: solve <id>\n");
-        } catch (...) {}
+        } catch (const std::exception& e) {
+            fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
+        } catch (...) {
+            fmt::print(fg(fmt::color::red), "[!] 发生未知错误\n");
+        }
     });
 
     // ── next ──
@@ -255,7 +304,11 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
                 fmt::print(fg(fmt::color::yellow), "[教练] 你的薄弱点: {} ({} 次)\n  建议专项练习。\n\n", stats[0].first, stats[0].second);
             }
             fmt::print(fg(fmt::color::green_yellow), "[教练] 按计划推进，拉取新题:\n  pull <url>\n");
-        } catch (...) {}
+        } catch (const std::exception& e) {
+            fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
+        } catch (...) {
+            fmt::print(fg(fmt::color::red), "[!] 发生未知错误\n");
+        }
     });
 
     // ── hint ──
@@ -277,7 +330,11 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
 
             fmt::print(fg(fmt::color::yellow), "\n[教练] 正在分析...\n\n");
             fmt::print("{}\n", svc.ai->analyze(content, code));
-        } catch (...) {}
+        } catch (const std::exception& e) {
+            fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
+        } catch (...) {
+            fmt::print(fg(fmt::color::red), "[!] 发生未知错误\n");
+        }
     });
 
     // ── stats ──
@@ -293,7 +350,11 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
                 fmt::print("  {:<22} {:>3}  {}\n", type, count, std::string(len, '#'));
             }
             fmt::print("\n");
-        } catch (...) {}
+        } catch (const std::exception& e) {
+            fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
+        } catch (...) {
+            fmt::print(fg(fmt::color::red), "[!] 发生未知错误\n");
+        }
     });
 
     // ── config ──
@@ -308,7 +369,11 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
             if (!ctx.cfg_model.empty()) c.model = ctx.cfg_model;
             c.save(Config::config_path(root));
             fmt::print(fg(fmt::color::green_yellow), "[+] 配置更新。\n");
-        } catch (...) {}
+        } catch (const std::exception& e) {
+            fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
+        } catch (...) {
+            fmt::print(fg(fmt::color::red), "[!] 发生未知错误\n");
+        }
     });
 }
 
@@ -347,7 +412,7 @@ void run_repl() {
         "  ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝\n"
         "\n"
     );
-    fmt::print("  欢迎使用 shuati CLI 交互模式 (Alpha)\n");
+    fmt::print("  欢迎使用 shuati CLI\n");
     fmt::print("  输入 'help' 查看命令，'exit' 退出\n\n");
 
     std::string line;

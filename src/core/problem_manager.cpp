@@ -26,6 +26,12 @@ void ProblemManager::pull_problem(const std::string& url) {
 
     Problem p = parse_html(html, url);
 
+    // Validate parsing result - don't save if title is generic and HTML was empty
+    if (p.title == "未命名题目" && html.empty()) {
+        fmt::print(fg(fmt::color::red), "[!] HTML 解析失败，无法提取题目信息。\n");
+        return;
+    }
+
     std::string filename = p.id + ".md";
     std::ofstream out(filename);
     out << "# " << p.title << "\n\n"
