@@ -10,7 +10,8 @@
 namespace shuati {
 
 struct Problem {
-    std::string id;
+    int display_id = 0;   // 1-based numeric ID (TID)
+    std::string id;       // UUID or original string ID
     std::string source;   // "web", "local"
     std::string title;
     std::string url;
@@ -49,6 +50,8 @@ public:
     bool problem_exists(const std::string& url);
     std::vector<Problem> get_all_problems();
     Problem get_problem(const std::string& id);
+    Problem get_problem_by_display_id(int tid);
+    void delete_problem(int tid);
 
     // Mistake CRUD
     void log_mistake(const std::string& problem_id, const std::string& type, const std::string& desc);

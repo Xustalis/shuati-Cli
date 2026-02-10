@@ -71,30 +71,83 @@ bool Database::problem_exists(const std::string& url) {
 
 std::vector<Problem> Database::get_all_problems() {
     std::vector<Problem> out;
-    SQLite::Statement q(*db_, "SELECT id,source,title,url,content_path,tags,difficulty,created_at FROM problems ORDER BY created_at DESC");
+    // Fetch rowid as display_id
+    SQLite::Statement q(*db_, "SELECT rowid, id,source,title,url,content_path,tags,difficulty,created_at FROM problems ORDER BY created_at DESC");
     while (q.executeStep()) {
-        out.push_back({
-            q.getColumn(0).getString(), q.getColumn(1).getString(),
-            q.getColumn(2).getString(), q.getColumn(3).getString(),
-            q.getColumn(4).getString(), q.getColumn(5).getString(),
-            q.getColumn(6).getString(), q.getColumn(7).getInt64()
-        });
+        Problem p;
+        p.display_id = q.getColumn(0).getInt();
+        p.id = q.getColumn(1).getString();
+        p.source = q.getColumn(2).getString();
+        p.title = q.getColumn(3).getString();
+        p.url = q.getColumn(4).getString();
+        p.content_path = q.getColumn(5).getString();
+        p.tags = q.getColumn(6).getString();
+        p.difficulty = q.getColumn(7).getString();
+        p.created_at = q.getColumn(8).getInt64();
+        out.push_back(p);
     }
     return out;
 }
 
 Problem Database::get_problem(const std::string& id) {
-    SQLite::Statement q(*db_, "SELECT id,source,title,url,content_path,tags,difficulty,created_at FROM problems WHERE id=?");
+    SQLite::Statement q(*db_, "SELECT rowid, id,source,title,url,content_path,tags,difficulty,created_at FROM problems WHERE id=?");
     q.bind(1, id);
     if (q.executeStep()) {
-        return {
-            q.getColumn(0).getString(), q.getColumn(1).getString(),
-            q.getColumn(2).getString(), q.getColumn(3).getString(),
-            q.getColumn(4).getString(), q.getColumn(5).getString(),
-            q.getColumn(6).getString(), q.getColumn(7).getInt64()
-        };
+        Problem p;
+        p.display_id = q.getColumn(0).getInt();
+        p.id = q.getColumn(1).getString();
+        p.source = q.getColumn(2).getString();
+        p.title = q.getColumn(3).getString();
+        p.url = q.getColumn(4).getString();
+        p.content_path = q.getColumn(5).getString();
+        p.tags = q.getColumn(6).getString();
+        p.difficulty = q.getColumn(7).getString();
+        p.created_at = q.getColumn(8).getInt64();
+        return p;
     }
     return {};
+}
+
+Problem Database::get_problem_by_display_id(int tid) {
+    SQLite::Statement q(*db_, "SELECT rowid, id,source,title,url,content_path,tags,difficulty,created_at FROM problems WHERE rowid=?");
+    q.bind(1, tid);
+    if (q.executeStep()) {
+        Problem p;
+        p.display_id = q.getColumn(0).getInt();
+        p.id = q.getColumn(1).getString();
+        p.source = q.getColumn(2).getString();
+        p.title = q.getColumn(3).getString();
+        p.url = q.getColumn(4).getString();
+        p.content_path = q.getColumn(5).getString();
+        p.tags = q.getColumn(6).getString();
+        p.difficulty = q.getColumn(7).getString();
+        p.created_at = q.getColumn(8).getInt64();
+        return p;
+    }
+    return {};
+}
+
+void Database::delete_problem(int tid) {
+    // Get UUID first to delete related records
+    std::string uuid;
+    {
+        SQLite::Statement q(*db_, "SELECT id FROM problems WHERE rowid=?");
+        q.bind(1, tid);
+        if (q.executeStep()) uuid = q.getColumn(0).getString();
+    }
+    
+    if (uuid.empty()) return;
+
+    db_->exec("BEGIN TRANSACTION");
+    try {
+        SQLite::Statement q1(*db_, "DELETE FROM mistakes WHERE problem_id=?"); q1.bind(1, uuid); q1.exec();
+        SQLite::Statement q2(*db_, "DELETE FROM reviews WHERE problem_id=?"); q2.bind(1, uuid); q2.exec();
+        SQLite::Statement q3(*db_, "DELETE FROM problems WHERE id=?"); q3.bind(1, uuid); q3.exec();
+        db_->exec("COMMIT");
+    } catch (...) {
+        db_->exec("ROLLBACK");
+        throw;
+    }
 }
 
 // ---- Mistake ----

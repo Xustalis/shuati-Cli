@@ -32,7 +32,9 @@ void ProblemManager::pull_problem(const std::string& url) {
         return;
     }
 
-    std::string filename = p.id + ".md";
+    std::string problems_dir = Config::DIR_NAME + std::string("/problems/");
+    if (!std::filesystem::exists(problems_dir)) std::filesystem::create_directories(problems_dir);
+    std::string filename = problems_dir + p.id + ".md";
     std::ofstream out(filename);
     out << "# " << p.title << "\n\n"
         << "来源: " << url << "\n\n"
@@ -65,7 +67,9 @@ void ProblemManager::create_local(const std::string& title, const std::string& t
     p.difficulty = difficulty;
     p.created_at = std::time(nullptr);
 
-    std::string filename = p.id + ".md";
+    std::string problems_dir = Config::DIR_NAME + std::string("/problems/");
+    if (!std::filesystem::exists(problems_dir)) std::filesystem::create_directories(problems_dir);
+    std::string filename = problems_dir + p.id + ".md";
     std::ofstream out(filename);
     out << "# " << title << "\n\n"
         << "标签: " << tags << "\n"
@@ -87,8 +91,48 @@ void ProblemManager::create_local(const std::string& title, const std::string& t
     fmt::print(fg(fmt::color::green), "[+] 本地题目 '{}' 已创建: {}\n", title, filename);
 }
 
+
 Problem ProblemManager::get_problem(const std::string& id) {
+    // Try parsing as integer first
+    try {
+        int tid = std::stoi(id);
+        auto p = db_->get_problem_by_display_id(tid);
+        if (!p.id.empty()) return p;
+    } catch (...) {}
+    
+    // Fallback to UUID string
     return db_->get_problem(id);
+}
+
+void ProblemManager::delete_problem(int tid) {
+    auto p = db_->get_problem_by_display_id(tid);
+    if (!p.id.empty()) delete_problem(p.id);
+}
+
+void ProblemManager::delete_problem(const std::string& id) {
+    auto p = db_->get_problem(id);
+    if (p.id.empty()) return;
+
+    // Delete problem file
+    if (std::filesystem::exists(p.content_path)) {
+        std::filesystem::remove(p.content_path);
+    }
+    
+    // Delete solution file(s)
+    for (const auto& ext : {".cpp", ".py"}) {
+        std::string sol = "solution_" + p.id + ext;
+        if (std::filesystem::exists(sol)) std::filesystem::remove(sol);
+    }
+
+    // Delete from DB
+    // We need delete_problem(string id) in DB too? Or map back to TID?
+    // DB only has delete_problem(int tid).
+    // Let's use tid if available, or add delete_problem(string id) to DB.
+    // Actually DB::delete_problem(int tid) calls internal logic using UUID.
+    // So we need DB to support delete by UUID or just map here.
+    if (p.display_id > 0) db_->delete_problem(p.display_id);
+    
+    fmt::print(fg(fmt::color::green), "[+] 题目已删除: {} (TID: {})\n", p.title, p.display_id);
 }
 
 std::vector<Problem> ProblemManager::list_problems() {

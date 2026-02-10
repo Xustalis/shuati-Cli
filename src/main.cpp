@@ -10,6 +10,7 @@
 #include <CLI/CLI.hpp>
 #include <fmt/core.h>
 #include <fmt/color.h>
+#include <replxx.hxx>
 
 #include "config.hpp"
 #include "database.hpp"
@@ -80,6 +81,7 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
         auto dir = fs::current_path() / Config::DIR_NAME;
         fs::create_directory(dir);
         fs::create_directory(dir / "templates");
+        fs::create_directory(dir / "problems"); // Create problems repo
         Config cfg;
         cfg.save(Config::config_path(fs::current_path()));
         Database db(Config::db_path(fs::current_path()).string());
@@ -185,11 +187,31 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
                 fmt::print("暂无题目。请使用: pull <url>\n");
                 return;
             }
-            fmt::print("{:<20} {:<30} {:<8} {}\n", "ID", "标题", "难度", "来源");
-            fmt::print("{}\n", std::string(70, '-'));
+            fmt::print("{:<4} {:<20} {:<30} {:<8} {}\n", "TID", "ID", "标题", "难度", "来源");
+            fmt::print("{}\n", std::string(80, '-'));
             for (auto& p : problems) {
                 std::string title = p.title.length() > 28 ? p.title.substr(0, 25) + "..." : p.title;
-                fmt::print("{:<20} {:<30} {:<8} {}\n", p.id.substr(0, 18), title, p.difficulty, p.source);
+                fmt::print("{:<4} {:<20} {:<30} {:<8} {}\n", p.display_id, p.id.substr(0, 18), title, p.difficulty, p.source);
+            }
+        } catch (const std::exception& e) {
+            fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
+        } catch (...) {
+            fmt::print(fg(fmt::color::red), "[!] 发生未知错误\n");
+        }
+    });
+
+    // ── delete ──
+    auto delete_cmd = app.add_subcommand("delete", "删除题目");
+    delete_cmd->add_option("id", ctx.solve_pid, "题目 ID 或 TID")->required();
+    delete_cmd->callback([&]() {
+        try {
+            auto root = find_root_or_die();
+            auto svc = Services::load(root);
+            try {
+                int tid = std::stoi(ctx.solve_pid);
+                svc.pm->delete_problem(tid);
+            } catch (...) {
+                svc.pm->delete_problem(ctx.solve_pid);
             }
         } catch (const std::exception& e) {
             fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
@@ -402,6 +424,48 @@ std::vector<std::string> tokenize(const std::string& line) {
 // ─── REPL Loop ────────────────────────────────────────
 
 void run_repl() {
+    using Replxx = replxx::Replxx;
+    Replxx rx;
+
+    // Load history
+    auto history_path = (Config::find_root().empty() ? fs::current_path() : Config::find_root() / Config::DIR_NAME) / "history.txt";
+    std::string history_file = history_path.string();
+    rx.history_load(history_file);
+
+    // Completion callback
+    rx.set_completion_callback([&](std::string const& input, int& contextLen) {
+        std::vector<Replxx::Completion> completions;
+        std::string prefix = input.substr(input.find_last_of(" \t") + 1);
+        contextLen = prefix.length();
+
+        // 1. Commands
+        std::vector<std::string> commands = {"init", "pull", "new", "solve", "list", "submit", "review", "next", "hint", "stats", "config", "clear", "exit", "delete", "help"};
+        for (const auto& cmd : commands) {
+            if (cmd.find(prefix) == 0) completions.emplace_back(cmd);
+        }
+
+        // 2. IDs (only if input starts with solve/delete)
+        if (input.find("solve ") == 0 || input.find("delete ") == 0 || input.find("submit ") == 0) {
+            try {
+                auto svc = Services::load(find_root_or_die());
+                auto problems = svc.pm->list_problems();
+                for (const auto& p : problems) {
+                    std::string tid = std::to_string(p.display_id);
+                    if (tid.find(prefix) == 0) completions.emplace_back(tid);
+                }
+            } catch (...) {}
+        }
+        return completions;
+    });
+
+    // Syntax highlighting (simple)
+    rx.set_highlighter_callback([](std::string const& input, Replxx::colors_t& colors) {
+        for (size_t i = 0; i < input.length(); i++) {
+            if (isdigit(input[i])) colors[i] = Replxx::Color::BRIGHTMAGENTA;
+            else if (input.find("shuati") != std::string::npos && i < 6) colors[i] = Replxx::Color::GREEN;
+        }
+    });
+
     fmt::print(fg(fmt::color::cyan) | fmt::emphasis::bold,
         "\n"
         "  ███████╗██╗  ██╗██╗   ██╗ █████╗ ████████╗██╗\n"
@@ -412,59 +476,76 @@ void run_repl() {
         "  ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝\n"
         "\n"
     );
-    fmt::print("  欢迎使用 shuati CLI\n");
+    fmt::print("  欢迎使用 shuati CLI (v2.0)\n");
     fmt::print("  输入 'help' 查看命令，'exit' 退出\n\n");
 
-    std::string line;
+    const char* example = "shuati > ";
     while (true) {
-        fmt::print(fg(fmt::color::green), "shuati");
-        fmt::print(fg(fmt::color::white), " > ");
-        
-        if (!std::getline(std::cin, line)) break;
+        const char* cinput = rx.input(example);
+        if (cinput == nullptr) break;
+        std::string line(cinput);
         if (line.empty()) continue;
-        
+
+        rx.history_add(line);
+        rx.history_save(history_file);
+
+        if (line == "exit" || line == "quit") break;
+        if (line == "clear") {
+            rx.clear_screen();
+            continue;
+        }
+        if (line == "help") {
+             fmt::print("\n  可用命令:\n");
+             fmt::print("  {:<12} {}\n", "init",   "在当前目录初始化项目");
+             fmt::print("  {:<12} {}\n", "pull",   "从 URL 拉取题目");
+             fmt::print("  {:<12} {}\n", "new",    "创建本地题目");
+             fmt::print("  {:<12} {}\n", "solve",  "开始解题 (输入 ID/TID)");
+             fmt::print("  {:<12} {}\n", "list",   "列出所有题目");
+             fmt::print("  {:<12} {}\n", "delete", "删除题目 (输入 ID/TID)");
+             fmt::print("  {:<12} {}\n", "submit", "提交记录");
+             fmt::print("  {:<12} {}\n", "review", "查看待复习题目");
+             fmt::print("  {:<12} {}\n", "next",   "智能推荐下一题");
+             fmt::print("  {:<12} {}\n", "hint",   "AI 教练提示");
+             fmt::print("  {:<12} {}\n", "stats",  "查看错误统计");
+             fmt::print("  {:<12} {}\n", "config", "配置 API Key");
+             fmt::print("  {:<12} {}\n", "clear",  "清屏");
+             fmt::print("  {:<12} {}\n", "exit",   "退出");
+             fmt::print("\n");
+             continue;
+        }
+
         auto args = tokenize(line);
         if (args.empty()) continue;
 
-        if (args[0] == "exit" || args[0] == "quit") break;
-        if (args[0] == "clear" || args[0] == "cls") {
-            system("cls");
-            continue;
-        }
-        if (args[0] == "help" || args[0] == "?") {
-            fmt::print("\n  可用命令:\n");
-            fmt::print("  {:<12} {}\n", "init",   "在当前目录初始化项目");
-            fmt::print("  {:<12} {}\n", "pull",   "从 URL 拉取题目");
-            fmt::print("  {:<12} {}\n", "new",    "创建本地题目");
-            fmt::print("  {:<12} {}\n", "solve",  "开始解题 (生成模板)");
-            fmt::print("  {:<12} {}\n", "list",   "列出所有题目");
-            fmt::print("  {:<12} {}\n", "submit", "提交记录");
-            fmt::print("  {:<12} {}\n", "review", "查看待复习题目");
-            fmt::print("  {:<12} {}\n", "next",   "智能推荐下一题");
-            fmt::print("  {:<12} {}\n", "hint",   "AI 教练提示");
-            fmt::print("  {:<12} {}\n", "stats",  "查看错误统计");
-            fmt::print("  {:<12} {}\n", "config", "配置 API Key");
-            fmt::print("  {:<12} {}\n", "clear",  "清屏");
-            fmt::print("  {:<12} {}\n", "exit",   "退出");
-            fmt::print("\n");
-            continue;
-        }
-
-        // Create fresh context and app to avoid state pollution
+        // Create fresh context and app
         CommandContext ctx;
         CLI::App app{"shuati REPL"};
         setup_commands(app, ctx);
 
+        // Strip redundant program name
+        if (args[0] == "shuati") {
+            args.erase(args.begin());
+            if (args.empty()) continue;
+        }
+
         args.insert(args.begin(), "shuati");
+        std::vector<char*> argv;
+        for (auto& s : args) argv.push_back(&s[0]);
 
         try {
-            app.parse(args);
+            app.parse(argv.size(), argv.data());
         } catch (const CLI::CallForHelp& e) {
+            // Do nothing, already handled by help command or default
+            // But CLI11 help output is sent to cout by exit(0) usually?
+            // CLI11 exits on help by default? usage of CLI11_PARSE handles it.
+            // app.parse throws CallForHelp.
             std::cout << app.help();
         } catch (const CLI::ParseError& e) {
-            fmt::print(fg(fmt::color::red), "[!] 命令错误: {}\n", e.what());
+           // app.exit(e); // prints error but might exit?
+           // print error manually
+           fmt::print(fg(fmt::color::red), "[!] 命令错误: {}\n", e.what());
         } catch (const std::exception& e) {
-             fmt::print(fg(fmt::color::red), "[!] 执行错误: {}\n", e.what());
+             fmt::print(fg(fmt::color::red), "[!] 运行时错误: {}\n", e.what());
         }
     }
 }

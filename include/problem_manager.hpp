@@ -15,6 +15,8 @@ public:
     void create_local(const std::string& title, const std::string& tags, const std::string& difficulty);
     Problem get_problem(const std::string& id);
     std::vector<Problem> list_problems();
+    void delete_problem(int tid);
+    void delete_problem(const std::string& id);
 
 private:
     std::shared_ptr<Database> db_;

@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# MSVC requires /utf-8 for proper Unicode handling
+
 if(MSVC)
     add_compile_options(/utf-8)
 endif()
@@ -17,6 +17,8 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(cpr CONFIG REQUIRED)
 find_package(SQLiteCpp CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
+find_package(replxx CONFIG REQUIRED)
+find_package(Threads REQUIRED)
 
 # Include directories
 include_directories(include)
@@ -34,4 +36,5 @@ target_link_libraries(shuati PRIVATE
     cpr::cpr
     SQLiteCpp
     fmt::fmt
+    replxx::replxx
 )
