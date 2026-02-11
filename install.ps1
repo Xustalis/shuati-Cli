@@ -1,4 +1,4 @@
-# Shuati CLI Installer v1.0.0
+# Shuati CLI Installer v1.2.0
 $ErrorActionPreference = "Stop"
 
 $InstallDir = "$env:LOCALAPPDATA\shuati-cli"
@@ -19,7 +19,8 @@ if ($UserPath -notlike "*$InstallDir*") {
     [Environment]::SetEnvironmentVariable("Path", "$UserPath;$InstallDir", "User")
     Write-Host "[+] 已添加 $InstallDir 到用户 PATH 环境变量。" -ForegroundColor Green
     Write-Host "    注意: 您需要重启终端 (Terminal) 才能生效。" -ForegroundColor Yellow
-} else {
+}
+else {
     Write-Host "[=] PATH 环境变量已配置。" -ForegroundColor Green
 }
 

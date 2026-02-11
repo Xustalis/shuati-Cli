@@ -168,7 +168,7 @@ void Database::log_mistake(const std::string& pid, const std::string& type, cons
     q.bind(1, pid);
     q.bind(2, type);
     q.bind(3, desc);
-    q.bind(4, (long long)std::time(nullptr));
+    q.bind(4, static_cast<int64_t>(std::time(nullptr)));
     q.exec();
 }
 
@@ -202,7 +202,7 @@ void Database::upsert_review(const ReviewItem& r) {
         "INSERT OR REPLACE INTO reviews (problem_id,next_review,interval,ease_factor,repetitions) "
         "VALUES (?,?,?,?,?)");
     q.bind(1, r.problem_id);
-    q.bind(2, r.next_review);
+    q.bind(2, static_cast<int64_t>(r.next_review));
     q.bind(3, r.interval);
     q.bind(4, r.ease_factor);
     q.bind(5, r.repetitions);
@@ -215,7 +215,7 @@ std::vector<ReviewItem> Database::get_due_reviews(long long now) {
         "SELECT r.problem_id, p.title, r.next_review, r.interval, r.ease_factor, r.repetitions "
         "FROM reviews r JOIN problems p ON r.problem_id=p.id "
         "WHERE r.next_review <= ? ORDER BY r.next_review ASC");
-    q.bind(1, now);
+    q.bind(1, static_cast<int64_t>(now));
     while (q.executeStep()) {
         out.push_back({
             q.getColumn(0).getString(), q.getColumn(1).getString(),
