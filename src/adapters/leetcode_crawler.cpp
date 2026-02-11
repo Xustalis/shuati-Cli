@@ -1,127 +1,21 @@
-#include "shuati/crawler.hpp"
+#include "shuati/crawlers.hpp"
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
 #include <fmt/core.h>
 #include <regex>
+#include <algorithm>
+#include <sstream>
 
 namespace shuati {
 
-class LeetCodeCrawler : public ICrawler {
-public:
-    bool can_handle(const std::string& url) const override {
-        return url.find("leetcode.com") != std::string::npos ||
-               url.find("leetcode.cn") != std::string::npos;
-    }
-
-    Problem fetch_problem(const std::string& url) override {
-        Problem p;
-        p.source = "web";
-        p.url = url;
-        
-        auto slug = extract_slug(url);
-        if (slug.empty()) {
-            p.title = "Failed to extract problem slug";
-            return p;
-        }
-
-        try {
-            auto data = query_graphql(slug);
-            if (data.contains("questionFrontendId")) {
-                p.id = "lc_" + data["questionFrontendId"].get<std::string>();
-            } else {
-                p.id = "lc_" + slug;
-            }
-            
-            p.title = data.value("title", "Untitled");
-            p.difficulty = to_lower(data.value("difficulty", "medium"));
-            
-            // Extract tags
-            if (data.contains("topicTags") && data["topicTags"].is_array()) {
-                std::vector<std::string> tags;
-                for (auto& tag : data["topicTags"]) {
-                    tags.push_back(tag.value("name", ""));
-                }
-                p.tags = join(tags, ",");
-            }
-            
-        } catch (const std::exception& e) {
-            p.title = fmt::format("Error fetching from LeetCode: {}", e.what());
-        }
-        
-        return p;
-    }
-
-    std::vector<TestCase> fetch_test_cases(const std::string& url) override {
-        std::vector<TestCase> cases;
-        auto slug = extract_slug(url);
-        if (slug.empty()) return cases;
-
-        try {
-            auto data = query_graphql(slug);
-            
-            // Parse exampleTestcases (LeetCode格式: "input1\ninput2\n...")
-            if (data.contains("exampleTestcases")) {
-                std::string examples = data["exampleTestcases"];
-                auto lines = split(examples, '\n');
-                
-                // Typically pairs of input/output, but LeetCode doesn't always provide expected output
-                // We'll just store inputs as test cases
-                for (size_t i = 0; i < lines.size(); i++) {
-                    TestCase tc;
-                    tc.input = lines[i];
-                    tc.output = "";  // LeetCode doesn't provide outputs in GraphQL
-                    tc.is_sample = true;
-                    cases.push_back(tc);
-                }
-            }
-        } catch (...) {
-            // If fetching test cases fails, return empty
-        }
-        
-        return cases;
-    }
-
-private:
+namespace {
     std::string extract_slug(const std::string& url) {
-        // Extract problem slug from URL like: https://leetcode.com/problems/two-sum/
         std::regex re(R"(/problems/([^/]+))");
         std::smatch m;
         if (std::regex_search(url, m, re)) {
             return m[1].str();
         }
         return "";
-    }
-
-    nlohmann::json query_graphql(const std::string& slug) {
-        std::string query = R"(
-        {
-            question(titleSlug: ")" + slug + R"(") {
-                questionFrontendId
-                title
-                difficulty
-                topicTags { name }
-                content
-                exampleTestcases
-            }
-        }
-        )";
-
-        nlohmann::json body;
-        body["query"] = query;
-
-        auto r = cpr::Post(
-            cpr::Url{"https://leetcode.com/graphql/"},
-            cpr::Header{{"Content-Type", "application/json"}},
-            cpr::Body{body.dump()},
-            cpr::Timeout{10000}
-        );
-
-        if (r.status_code != 200) {
-            throw std::runtime_error(fmt::format("HTTP {}", r.status_code));
-        }
-
-        auto resp = nlohmann::json::parse(r.text);
-        return resp["data"]["question"];
     }
 
     std::string to_lower(std::string s) {
@@ -147,6 +41,139 @@ private:
         }
         return result;
     }
-};
+
+    nlohmann::json query_graphql(const std::string& slug) {
+        std::string query = R"(
+        query questionData($titleSlug: String!) {
+            question(titleSlug: $titleSlug) {
+                questionFrontendId
+                title
+                difficulty
+                topicTags { name }
+                content
+                exampleTestcases
+            }
+        }
+        )";
+
+        nlohmann::json body;
+        body["query"] = query;
+        body["variables"] = {{"titleSlug", slug}};
+
+        auto r = cpr::Post(
+            cpr::Url{"https://leetcode.com/graphql"},
+            cpr::Header{
+                {"Content-Type", "application/json"},
+                {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
+            },
+            cpr::Body{body.dump()},
+            cpr::Timeout{10000}
+        );
+
+        if (r.status_code != 200) {
+            throw std::runtime_error(fmt::format("HTTP {}", r.status_code));
+        }
+
+        auto resp = nlohmann::json::parse(r.text);
+        if (resp.contains("errors")) {
+             throw std::runtime_error("GraphQL Error: " + resp["errors"][0]["message"].get<std::string>());
+        }
+        return resp["data"]["question"];
+    }
+}
+
+// LeetCodeCrawler Implementation
+
+bool LeetCodeCrawler::can_handle(const std::string& url) const {
+    return url.find("leetcode.com") != std::string::npos ||
+           url.find("leetcode.cn") != std::string::npos;
+}
+
+Problem LeetCodeCrawler::fetch_problem(const std::string& url) {
+    Problem p;
+    p.source = "LeetCode";
+    p.url = url;
+    
+    auto slug = extract_slug(url);
+    if (slug.empty()) {
+        p.title = "Failed to extract problem slug";
+        return p;
+    }
+
+    try {
+        auto data = query_graphql(slug);
+        
+        if (data.is_null()) {
+             throw std::runtime_error("Problem not found");
+        }
+
+        if (data.contains("questionFrontendId")) {
+            p.id = "lc_" + data["questionFrontendId"].get<std::string>();
+            p.display_id = std::stoi(data["questionFrontendId"].get<std::string>());
+        } else {
+            p.id = "lc_" + slug;
+        }
+        
+        p.title = data.value("title", "Untitled");
+        p.difficulty = to_lower(data.value("difficulty", "medium"));
+        
+        if (data.contains("topicTags") && data["topicTags"].is_array()) {
+            std::vector<std::string> tags;
+            for (auto& tag : data["topicTags"]) {
+                tags.push_back(tag.value("name", ""));
+            }
+            p.tags = join(tags, ",");
+        }
+        
+        // Save content to a temporary file or return path? 
+        // Logic in main.cpp suggests content_path is used. 
+        // For now, we don't save file here, just minimal info.
+        // The original code didn't save content either, just set ID/Title.
+        
+    } catch (const std::exception& e) {
+        p.title = fmt::format("Error: {}", e.what());
+    }
+    
+    return p;
+}
+
+std::vector<TestCase> LeetCodeCrawler::fetch_test_cases(const std::string& url) {
+    std::vector<TestCase> cases;
+    auto slug = extract_slug(url);
+    if (slug.empty()) return cases;
+
+    try {
+        auto data = query_graphql(slug);
+        if (data.is_null()) return cases;
+        
+        if (data.contains("exampleTestcases")) {
+            std::string examples = data.value("exampleTestcases", "");
+            auto lines = split(examples, '\n');
+            
+            for (size_t i = 0; i < lines.size(); i++) {
+                TestCase tc;
+                tc.input = lines[i];
+                tc.output = ""; 
+                tc.is_sample = true;
+                cases.push_back(tc);
+            }
+        }
+    } catch (...) {}
+    
+    return cases;
+}
+
+// Stubs for other crawlers to match header
+bool CodeforcesCrawler::can_handle(const std::string&) const { return false; }
+Problem CodeforcesCrawler::fetch_problem(const std::string&) { return {}; }
+std::vector<TestCase> CodeforcesCrawler::fetch_test_cases(const std::string&) { return {}; }
+
+bool LuoguCrawler::can_handle(const std::string&) const { return false; }
+Problem LuoguCrawler::fetch_problem(const std::string&) { return {}; }
+std::vector<TestCase> LuoguCrawler::fetch_test_cases(const std::string&) { return {}; }
+
+bool LanqiaoCrawler::can_handle(const std::string&) const { return false; }
+Problem LanqiaoCrawler::fetch_problem(const std::string&) { return {}; }
+std::vector<TestCase> LanqiaoCrawler::fetch_test_cases(const std::string&) { return {}; }
 
 } // namespace shuati

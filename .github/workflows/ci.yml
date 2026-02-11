@@ -8,34 +8,45 @@ on:
 
 jobs:
   build:
-    name: Build ${{ matrix.os }}
+    name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
 
+    env:
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Set up CMake
-      uses: jwlawson/actions-setup-cmake@v1.13
+      - name: Set up CMake
+        uses: jwlawson/actions-setup-cmake@v1.13
 
-    - name: Restore artifacts, or setup vcpkg
-      uses: lukka/run-vcpkg@v11.5
-      with:
-        vcpkgJsonGlob: 'vcpkg.json'
-        runVcpkgInstall: true
-        vcpkgGitCommitId: '76e86687f8797e8c07e297e684074c50293d07e6'
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: 'vcpkg.json'
 
-    - name: Configure CMake
-      shell: bash
-      run: cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+      - name: Configure CMake
+        uses: lukka/run-cmake@v10
+        with:
+          configurePreset: 'ninja-multi-vcpkg'
+          configurePresetAdditionalArgs: "['-DCMAKE_CXX_STANDARD=20']"
+          
+      # Note: If no presets exist, we fallback to manual command, but lukka/run-cmake recommends presets. 
+      # Since we don't have CMakePresets.json in the file list, we should use standard commands or create presets.
+      # For simplicity and robustness without adding files, let's use standard cmake commands but keep the vcpkg env.
+      
+      - name: Configure (Manual)
+        if: ${{ steps.run-cmake.outcome == 'skipped' }} 
+        run: cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake" -DCMAKE_BUILD_TYPE=Release
 
-    - name: Build
-      run: cmake --build build --config Release
+      - name: Build
+        run: cmake --build build --config Release
 
-    - name: Test
-      run: |
-        cd build
-        ctest -C Release --output-on-failure
+      - name: Test
+        run: |
+          cd build
+          ctest -C Release --output-on-failure

@@ -143,6 +143,11 @@ JudgeResult Judge::run_case(const std::string& executable,
     si.hStdOutput = hChildStd_OUT_Wr;
     si.hStdInput = hChildStd_IN_Rd;
     si.dwFlags |= STARTF_USESTDHANDLES;
+#ifdef _WIN32
+    // On Windows, if we don't hide the window, it might pop up
+    si.dwFlags |= STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+#endif
 
     ZeroMemory(&pi, sizeof(pi));
 
