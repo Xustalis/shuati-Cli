@@ -303,6 +303,8 @@ JudgeResult Judge::run_case(const std::string& executable,
         bool finished = false;
         auto start_wait = std::chrono::steady_clock::now();
 
+        long long max_memory_kb = 0;
+
         while(true) {
             pid_t w = waitpid(pid, &status, WNOHANG);
             if (w == pid) {
@@ -314,10 +316,39 @@ JudgeResult Judge::run_case(const std::string& executable,
             if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start_wait).count() > time_limit_ms) {
                 break;
             }
+
+            // Check memory usage via /proc/[pid]/status
+            std::string status_path = fmt::format("/proc/{}/status", pid);
+            if (fs::exists(status_path)) {
+                std::ifstream f(status_path);
+                std::string line;
+                while (std::getline(f, line)) {
+                    if (line.compare(0, 6, "VmPeak") == 0) { // Or VmHWM
+                         std::stringstream ss(line);
+                         std::string label;
+                         long long val;
+                         ss >> label >> val;
+                         if (val > max_memory_kb) max_memory_kb = val;
+                         break;
+                    }
+                }
+            }
+            if (max_memory_kb > memory_limit_kb) {
+                 // MLE detected, kill process immediately
+                 kill(pid, SIGKILL);
+                 res.verdict = Verdict::MLE;
+                 res.memory_kb = max_memory_kb;
+                 finished = true; // technically finished by our kill
+                 waitpid(pid, &status, 0); // reap
+                 break;
+            }
+
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
-        if (!finished) {
+        if (res.verdict == Verdict::MLE) {
+            // Already handled above
+        } else if (!finished) {
             kill(pid, SIGKILL);
             waitpid(pid, &status, 0);
             res.verdict = Verdict::TLE;
@@ -325,6 +356,7 @@ JudgeResult Judge::run_case(const std::string& executable,
         } else {
             auto end_time = std::chrono::steady_clock::now();
             res.time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_wait).count();
+            res.memory_kb = max_memory_kb;
 
              if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
                 res.verdict = Verdict::RE;

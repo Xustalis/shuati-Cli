@@ -152,6 +152,7 @@ void Database::delete_problem(int tid) {
     try {
         SQLite::Statement q1(*db_, "DELETE FROM mistakes WHERE problem_id=?"); q1.bind(1, uuid); q1.exec();
         SQLite::Statement q2(*db_, "DELETE FROM reviews WHERE problem_id=?"); q2.bind(1, uuid); q2.exec();
+        SQLite::Statement q_tc(*db_, "DELETE FROM test_cases WHERE problem_id=?"); q_tc.bind(1, uuid); q_tc.exec();
         SQLite::Statement q3(*db_, "DELETE FROM problems WHERE id=?"); q3.bind(1, uuid); q3.exec();
         db_->exec("COMMIT");
     } catch (...) {

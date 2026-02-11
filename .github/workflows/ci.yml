@@ -15,9 +15,6 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
 
-    env:
-      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
-
     steps:
       - uses: actions/checkout@v3
 
@@ -33,22 +30,21 @@ jobs:
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
+          # Explicitly clone vcpkg, do not attempt to find submodule
+          vcpkgGitCommitId: 'f310de9dc9f16bd016e06d6c9a1decc07a918273'
           vcpkgJsonGlob: 'vcpkg.json'
 
       - name: Configure CMake
-        uses: lukka/run-cmake@v10
-        with:
-          configurePreset: 'ninja-multi-vcpkg'
-          configurePresetAdditionalArgs: "['-DCMAKE_CXX_STANDARD=20']"
-      
-      - name: Configure (Manual Fallback)
-        if: ${{ steps.run-cmake.outcome == 'skipped' }} 
-        run: cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake" -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+        run: |
+          cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
+        shell: bash
         run: cmake --build build --config Release
 
       - name: Test
+        shell: bash
         run: |
           cd build
           ctest -C Release --output-on-failure
