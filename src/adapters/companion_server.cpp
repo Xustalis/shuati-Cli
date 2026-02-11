@@ -1,15 +1,20 @@
 #include "shuati/adapters/companion_server.hpp"
 #include <fmt/core.h>
 #include <fmt/color.h>
-#include <thread>
 #include <nlohmann/json.hpp>
+#include <chrono>
 
 namespace shuati {
 
-CompanionServer::CompanionServer(ProblemManager& pm, Database& db) : pm_(pm), db_(db) {}
+CompanionServer::CompanionServer(ProblemManager& pm, Database& db) 
+    : pm_(pm), db_(db) {}
+
+CompanionServer::~CompanionServer() {
+    stop();
+}
 
 void CompanionServer::start() {
-    if (server_) return;
+    if (running_) return;
     
     server_ = std::make_unique<httplib::Server>();
     
@@ -17,23 +22,30 @@ void CompanionServer::start() {
         handle_post(req, res);
     });
 
-    // Competitive Companion typically sends POST to /
-    // We'll run this in a separate thread
-    std::thread([this]() {
+    running_ = true;
+    worker_ = std::thread([this]() {
         try {
             fmt::print(fg(fmt::color::cyan), "  [Companion] Listening on port 10043...\n");
+            // listen is blocking
             server_->listen("127.0.0.1", 10043);
         } catch (...) {
             fmt::print(fg(fmt::color::red), "  [Companion] Failed to start server\n");
         }
-    }).detach();
+        running_ = false;
+    });
 }
 
 void CompanionServer::stop() {
     if (server_) {
-        server_->stop();
-        server_.reset();
+        server_->stop(); // Breaks the blocking listen loop
     }
+    
+    if (worker_.joinable()) {
+        worker_.join();
+    }
+    
+    server_.reset();
+    running_ = false;
 }
 
 void CompanionServer::handle_post(const httplib::Request& req, httplib::Response& res) {
@@ -79,13 +91,7 @@ void CompanionServer::handle_post(const httplib::Request& req, httplib::Response
             fmt::print(fg(fmt::color::green), "  Saved with {} test cases.\n", json["tests"].size());
         }
 
-        // Create file via ProblemManager (reusing existing logic or new method)
-        // For now, we manually create a basic file if needed, or let user 'solve' it
-        // Ideally ProblemManager should expose a method to 'create_workspace(p)'
-        
-        // Auto open solve if user wants?
-        // For now just ack
-        
+        // Ideally we would notify the main thread or ProblemManager here
         res.status = 200;
     } catch (const std::exception& e) {
         fmt::print(fg(fmt::color::red), "  [Companion] Error parsing: {}\n", e.what());

@@ -42,9 +42,9 @@ add_executable(shuati
     src/adapters/ai_coach.cpp
     src/adapters/leetcode_crawler.cpp
     src/adapters/codeforces_crawler.cpp
+    src/adapters/companion_server.cpp
     src/adapters/luogu_crawler.cpp
     src/adapters/lanqiao_crawler.cpp
-    src/adapters/companion_server.cpp
 )
 
 # Link libraries
