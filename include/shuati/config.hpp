@@ -16,6 +16,9 @@ struct Config {
     std::string model = "deepseek-chat";
     std::string language = "cpp";     // default solution language
     int max_tokens = 300;
+    std::string editor;               // Editor command (e.g., "code", "vim")
+    bool ai_enabled = true;           // Enable AI features
+    bool template_enabled = true;     // Enable template generation
 
     static constexpr const char* DIR_NAME = ".shuati";
     static constexpr const char* DB_NAME = "shuati.db";
@@ -52,6 +55,9 @@ struct Config {
         j["model"] = model;
         j["language"] = language;
         j["max_tokens"] = max_tokens;
+        j["editor"] = editor;
+        j["ai_enabled"] = ai_enabled;
+        j["template_enabled"] = template_enabled;
         std::ofstream(path) << j.dump(2);
     }
 
@@ -65,6 +71,9 @@ struct Config {
             if (j.contains("model"))      c.model      = j["model"];
             if (j.contains("language"))   c.language   = j["language"];
             if (j.contains("max_tokens")) c.max_tokens = j["max_tokens"];
+            if (j.contains("editor"))     c.editor     = j["editor"];
+            if (j.contains("ai_enabled")) c.ai_enabled = j["ai_enabled"];
+            if (j.contains("template_enabled")) c.template_enabled = j["template_enabled"];
         } catch (...) {}
         return c;
     }

@@ -1,10 +1,10 @@
-#include "problem_manager.hpp"
+#include "shuati/problem_manager.hpp"
 #include <cpr/cpr.h>
 #include <fmt/core.h>
 #include <regex>
 #include <fstream>
 #include <ctime>
-#include "config.hpp"
+#include "shuati/config.hpp"
 #include <fmt/color.h>
 
 namespace shuati {

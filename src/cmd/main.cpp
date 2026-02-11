@@ -12,12 +12,12 @@
 #include <fmt/color.h>
 #include <replxx.hxx>
 
-#include "config.hpp"
-#include "database.hpp"
-#include "problem_manager.hpp"
-#include "mistake_analyzer.hpp"
-#include "ai_coach.hpp"
-#include "sm2_algorithm.hpp"
+#include "shuati/config.hpp"
+#include "shuati/database.hpp"
+#include "shuati/problem_manager.hpp"
+#include "shuati/mistake_analyzer.hpp"
+#include "shuati/ai_coach.hpp"
+#include "shuati/sm2_algorithm.hpp"
 
 namespace fs = std::filesystem;
 using namespace shuati;

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <string>
-#include "config.hpp"
+#include "shuati/config.hpp"
 
 namespace shuati {
 

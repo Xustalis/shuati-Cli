@@ -9,6 +9,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(MSVC)
     add_compile_options(/utf-8)
+else()
+    add_compile_options(-finput-charset=UTF-8 -fexec-charset=UTF-8)
 endif()
 
 # Find packages provided by vcpkg
@@ -18,16 +20,23 @@ find_package(cpr CONFIG REQUIRED)
 find_package(SQLiteCpp CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(replxx CONFIG REQUIRED)
+find_package(httplib CONFIG REQUIRED)
+find_package(ftxui CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 
 # Include directories
 include_directories(include)
 
 # Add source files
-file(GLOB_RECURSE SOURCES "src/*.cpp")
-
-# Define executable
-add_executable(shuati ${SOURCES})
+add_executable(shuati
+    src/cmd/main.cpp
+    src/core/problem_manager.cpp
+    src/core/mistake_analyzer.cpp
+    src/core/sm2_algorithm.cpp
+    src/infra/database.cpp
+    src/adapters/ai_coach.cpp
+    src/adapters/leetcode_crawler.cpp
+)
 
 # Link libraries
 target_link_libraries(shuati PRIVATE
@@ -37,4 +46,7 @@ target_link_libraries(shuati PRIVATE
     SQLiteCpp
     fmt::fmt
     replxx::replxx
+    httplib::httplib
+    ftxui::screen ftxui::dom ftxui::component
+    Threads::Threads
 )

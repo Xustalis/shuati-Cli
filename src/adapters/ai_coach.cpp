@@ -1,4 +1,4 @@
-#include "ai_coach.hpp"
+#include "shuati/ai_coach.hpp"
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
 #include <fmt/core.h>

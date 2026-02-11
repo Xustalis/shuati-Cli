@@ -8,6 +8,7 @@
         "sqlitecpp",
         "replxx",
         "fmt",
-        "ftxui"
+        "ftxui",
+        "cpp-httplib"
     ]
 }

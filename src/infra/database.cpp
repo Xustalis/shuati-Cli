@@ -1,4 +1,4 @@
-#include "database.hpp"
+#include "shuati/database.hpp"
 #include <fmt/core.h>
 
 namespace shuati {
@@ -42,6 +42,16 @@ void Database::init_schema() {
         "  interval INTEGER DEFAULT 1,"
         "  ease_factor REAL DEFAULT 2.5,"
         "  repetitions INTEGER DEFAULT 0,"
+        "  FOREIGN KEY(problem_id) REFERENCES problems(id)"
+        ")");
+    
+    db_->exec(
+        "CREATE TABLE IF NOT EXISTS test_cases ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  problem_id TEXT NOT NULL,"
+        "  input TEXT,"
+        "  output TEXT,"
+        "  is_sample INTEGER DEFAULT 1,"
         "  FOREIGN KEY(problem_id) REFERENCES problems(id)"
         ")");
 }
@@ -228,6 +238,27 @@ ReviewItem Database::get_review(const std::string& pid) {
         };
     }
     return {pid, "", 0, 1, 2.5, 0};
+}
+
+// ---- Test Cases ----
+
+void Database::add_test_case(const std::string& problem_id, const std::string& input, const std::string& output, bool is_sample) {
+    SQLite::Statement q(*db_, "INSERT INTO test_cases (problem_id,input,output,is_sample) VALUES (?,?,?,?)");
+    q.bind(1, problem_id);
+    q.bind(2, input);
+    q.bind(3, output);
+    q.bind(4, is_sample ? 1 : 0);
+    q.exec();
+}
+
+std::vector<std::pair<std::string, std::string>> Database::get_test_cases(const std::string& problem_id) {
+    std::vector<std::pair<std::string, std::string>> out;
+    SQLite::Statement q(*db_, "SELECT input, output FROM test_cases WHERE problem_id=? ORDER BY is_sample DESC, id ASC");
+    q.bind(1, problem_id);
+    while (q.executeStep()) {
+        out.emplace_back(q.getColumn(0).getString(), q.getColumn(1).getString());
+    }
+    return out;
 }
 
 } // namespace shuati
