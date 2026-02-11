@@ -38,6 +38,7 @@ add_executable(shuati
     src/core/problem_manager.cpp
     src/core/mistake_analyzer.cpp
     src/core/sm2_algorithm.cpp
+    src/core/judge.cpp
     src/infra/database.cpp
     src/adapters/ai_coach.cpp
     src/adapters/leetcode_crawler.cpp

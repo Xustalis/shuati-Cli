@@ -18,6 +18,7 @@
 #include "shuati/mistake_analyzer.hpp"
 #include "shuati/ai_coach.hpp"
 #include "shuati/sm2_algorithm.hpp"
+#include "shuati/judge.hpp"
 #include "../adapters/leetcode_crawler.cpp"
 #include "../adapters/codeforces_crawler.cpp"
 #include "../adapters/luogu_crawler.cpp"
@@ -44,6 +45,7 @@ struct Services {
     std::shared_ptr<MistakeAnalyzer> ma;
     std::unique_ptr<AICoach>        ai;
     std::unique_ptr<CompanionServer> companion;
+    std::unique_ptr<Judge>          judge;
     Config                          cfg;
 
     static Services load(const fs::path& root) {
@@ -62,6 +64,7 @@ struct Services {
             s.ma  = std::make_shared<MistakeAnalyzer>(s.db);
             s.ai  = std::make_unique<AICoach>(s.cfg);
             s.companion = std::make_unique<CompanionServer>(*s.pm, *s.db);
+            s.judge = std::make_unique<Judge>();
         } catch (...) {
             throw; // Let caller handle
         }
@@ -390,6 +393,105 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
             fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
         } catch (...) {
             fmt::print(fg(fmt::color::red), "[!] 发生未知错误\n");
+        }
+    });
+
+    // ── test ──
+    auto test_cmd = app.add_subcommand("test", "运行本地测试");
+    test_cmd->add_option("id", ctx.solve_pid, "题目 ID")->required();
+    test_cmd->callback([&]() {
+        try {
+            auto root = find_root_or_die();
+            auto svc = Services::load(root);
+            auto prob = svc.pm->get_problem(ctx.solve_pid);
+            if (prob.id.empty()) { fmt::print(fg(fmt::color::red), "[!] 未找到题目。\n"); return; }
+            
+            std::string ext = svc.cfg.language == "python" ? ".py" : ".cpp";
+            std::string src_file = "solution_" + prob.id + ext;
+            if (!fs::exists(src_file)) {
+                fmt::print(fg(fmt::color::red), "[!] 代码文件 {} 不存在。\n", src_file);
+                return;
+            }
+
+            // Fetch test cases
+            // We need to convert from DB format (string pairs) to TestCase struct
+            auto db_cases = svc.db->get_test_cases(prob.id);
+            std::vector<TestCase> cases;
+            for(auto& p : db_cases) {
+                TestCase tc; tc.input = p.first; tc.output = p.second; tc.is_sample = true;
+                cases.push_back(tc);
+            }
+            
+            if (cases.empty()) {
+                fmt::print(fg(fmt::color::yellow), "[!] 暂无测试用例。请使用 add-case 添加。\n");
+                return;
+            }
+
+            fmt::print("[*] 正在编译并运行 {} 个测试用例...\n", cases.size());
+            auto results = svc.judge->judge(src_file, svc.cfg.language, cases);
+            
+            int accepted = 0;
+            for (size_t i = 0; i < results.size(); i++) {
+                auto& r = results[i];
+                std::string status;
+                fmt::color color = fmt::color::white;
+                switch(r.verdict) {
+                    case Verdict::AC: status = "AC"; color = fmt::color::green; accepted++; break;
+                    case Verdict::WA: status = "WA"; color = fmt::color::red; break;
+                    case Verdict::TLE: status = "TLE"; color = fmt::color::yellow; break;
+                    case Verdict::MLE: status = "MLE"; color = fmt::color::yellow; break;
+                    case Verdict::RE: status = "RE"; color = fmt::color::magenta; break;
+                    case Verdict::CE: status = "CE"; color = fmt::color::dark_red; break;
+                    case Verdict::SE: status = "SE"; color = fmt::color::gray; break;
+                }
+                
+                fmt::print(fg(color), "  Case {}: {} ({:.1f}ms)\n", i+1, status, (float)r.time_ms);
+                if (r.verdict != Verdict::AC) {
+                    if (r.verdict == Verdict::CE) {
+                         fmt::print(fg(fmt::color::red), "    Compile Error:\n{}\n", r.message);
+                    } else {
+                         fmt::print(fg(fmt::color::dim_gray), "    Input:    {}\n", cases[i].input.substr(0, 50) + (cases[i].input.size()>50?"...":""));
+                         fmt::print(fg(fmt::color::dim_gray), "    Output:   {}\n", r.output.substr(0, 50) + (r.output.size()>50?"...":""));
+                         fmt::print(fg(fmt::color::dim_gray), "    Expected: {}\n", r.expected.substr(0, 50) + (r.expected.size()>50?"...":""));
+                    }
+                }
+            }
+            
+            if (accepted == cases.size()) {
+                fmt::print(fg(fmt::color::green) | fmt::emphasis::bold, "\n[Passed] 全部通过！\n");
+            } else {
+                fmt::print(fg(fmt::color::red) | fmt::emphasis::bold, "\n[Failed] 通过率: {}/{}\n", accepted, cases.size());
+            }
+
+        } catch (const std::exception& e) {
+            fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
+        }
+    });
+
+    // ── add-case ──
+    auto add_case_cmd = app.add_subcommand("add-case", "添加自定义测试用例");
+    add_case_cmd->add_option("id", ctx.solve_pid, "题目 ID")->required();
+    add_case_cmd->callback([&]() {
+        try {
+            auto root = find_root_or_die();
+            auto svc = Services::load(root);
+            auto prob = svc.pm->get_problem(ctx.solve_pid);
+            if (prob.id.empty()) { fmt::print(fg(fmt::color::red), "[!] 未找到题目。\n"); return; }
+
+            std::string input, output;
+            fmt::print("输入 (输入 END 结束):\n");
+            std::string line;
+            while(std::getline(std::cin, line) && line != "END") input += line + "\n";
+            if (!input.empty() && input.back() == '\n') input.pop_back();
+
+            fmt::print("预期输出 (输入 END 结束):\n");
+            while(std::getline(std::cin, line) && line != "END") output += line + "\n";
+            if (!output.empty() && output.back() == '\n') output.pop_back();
+            
+            svc.db->add_test_case(prob.id, input, output, false); // User added is not sample? or maybe sample.
+            fmt::print(fg(fmt::color::green), "[+] 测试用例已添加。\n");
+        } catch (const std::exception& e) {
+            fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
         }
     });
 
