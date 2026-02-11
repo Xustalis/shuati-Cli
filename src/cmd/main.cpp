@@ -11,6 +11,9 @@
 #include <CLI/CLI.hpp>
 #include <fmt/core.h>
 #include <fmt/color.h>
+#include <ftxui/component/component.hpp>
+#include <ftxui/component/screen_interactive.hpp>
+#include <ftxui/dom/elements.hpp>
 #include <replxx.hxx>
 
 #include "shuati/config.hpp"
@@ -86,6 +89,7 @@ struct CommandContext {
     int submit_quality = -1;
     std::string hint_pid, hint_file;
     std::string cfg_key, cfg_model;
+    bool cfg_show = false;
 };
 
 // ─── Command Setup ────────────────────────────────────
@@ -141,18 +145,57 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
 
     // ── solve ──
     auto solve_cmd = app.add_subcommand("solve", "开始解决一道题 (支持 ID 或 TID)");
-    solve_cmd->add_option("id", ctx.solve_pid, "题目 ID 或 TID")->required();
+    solve_cmd->add_option("id", ctx.solve_pid, "题目 ID 或 TID");
     solve_cmd->callback([&]() {
         try {
             auto root = find_root_or_die();
             auto svc = Services::load(root);
             
             Problem prob;
-            try {
-                int tid = std::stoi(ctx.solve_pid);
-                prob = svc.db->get_problem_by_display_id(tid);
-            } catch (...) {
-                prob = svc.db->get_problem(ctx.solve_pid);
+            if (ctx.solve_pid.empty()) {
+                // Interactive Selection
+                auto problems = svc.pm->list_problems();
+                if (problems.empty()) { fmt::print("题库为空。\n"); return; }
+                
+                using namespace ftxui;
+                std::vector<std::string> entries;
+                for (const auto& p : problems) {
+                    entries.push_back(fmt::format("{:<4} {:<20} {}", p.display_id, p.id.substr(0, 18), p.title));
+                }
+                int selected = 0;
+                auto menu = Menu(&entries, &selected);
+                auto screen = ScreenInteractive::TerminalOutput();
+                
+                auto component = CatchEvent(menu, [&](Event event) {
+                    if (event == Event::Return) {
+                        screen.ExitLoopClosure()();
+                        return true;
+                    }
+                    if (event == Event::Escape || event == Event::Character('q')) {
+                        selected = -1; 
+                        screen.ExitLoopClosure()();
+                        return true;
+                    }
+                    return false;
+                });
+
+                auto renderer = Renderer(component, [&] {
+                    return window(text("选择题目 (Enter 确认, q 退出)"), menu->Render() | vscroll_indicator | frame | size(HEIGHT, LESS_THAN, 20)) | border;
+                });
+                
+                screen.Loop(renderer);
+                if (selected >= 0 && selected < problems.size()) {
+                    prob = problems[selected];
+                } else {
+                    return;
+                }
+            } else {
+                try {
+                    int tid = std::stoi(ctx.solve_pid);
+                    prob = svc.db->get_problem_by_display_id(tid);
+                } catch (...) {
+                    prob = svc.db->get_problem(ctx.solve_pid);
+                }
             }
 
             if (prob.id.empty()) {
@@ -227,11 +270,60 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
     });
 
     // ── delete ──
+    // ── delete ──
     auto delete_cmd = app.add_subcommand("delete", "删除题目 (支持 TID)");
-    delete_cmd->add_option("id", ctx.solve_pid, "题目 ID 或 TID")->required();
+    delete_cmd->add_option("id", ctx.solve_pid, "题目 ID 或 TID");
     delete_cmd->callback([&]() {
         try {
             auto svc = Services::load(find_root_or_die());
+            
+            if (ctx.solve_pid.empty()) {
+                // Interactive Selection
+                auto problems = svc.pm->list_problems();
+                if (problems.empty()) { fmt::print("题库为空。\n"); return; }
+                
+                using namespace ftxui;
+                std::vector<std::string> entries;
+                for (const auto& p : problems) {
+                    entries.push_back(fmt::format("{:<4} {:<20} {}", p.display_id, p.id.substr(0, 18), p.title));
+                }
+                int selected = 0;
+                auto menu = Menu(&entries, &selected);
+                auto screen = ScreenInteractive::TerminalOutput();
+
+                auto component = CatchEvent(menu, [&](Event event) {
+                    if (event == Event::Return) {
+                        screen.ExitLoopClosure()();
+                        return true;
+                    }
+                    if (event == Event::Escape || event == Event::Character('q')) {
+                        selected = -1;
+                        screen.ExitLoopClosure()();
+                        return true;
+                    }
+                    return false;
+                });
+
+                auto renderer = Renderer(component, [&] {
+                    return window(text("选择要删除的题目 (Enter 确认, q 退出)"), menu->Render() | vscroll_indicator | frame | size(HEIGHT, LESS_THAN, 20)) | border;
+                });
+                
+                screen.Loop(renderer);
+                if (selected >= 0 && selected < problems.size()) {
+                    ctx.solve_pid = problems[selected].id;
+                } else {
+                    return;
+                }
+            }
+
+            // Confirm deletion
+            fmt::print(fg(fmt::color::yellow), "确定要删除题目 '{}' 吗? [y/N] ", ctx.solve_pid);
+            char confirm; std::cin >> confirm;
+            if (confirm != 'y' && confirm != 'Y') {
+                fmt::print("操作取消。\n");
+                return;
+            }
+
             try {
                 int tid = std::stoi(ctx.solve_pid);
                 svc.pm->delete_problem(tid);
@@ -343,17 +435,46 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
 
     // ── config ──
     auto cfg_cmd = app.add_subcommand("config", "配置 API 或编辑器");
-    cfg_cmd->add_option("--api-key", ctx.cfg_key, "API Key");
-    cfg_cmd->add_option("--model", ctx.cfg_model, "模型名称");
+    cfg_cmd->add_flag("--show", ctx.cfg_show, "显示当前配置");
+    cfg_cmd->add_option("--api-key", ctx.cfg_key, "API Key (例如: sk-...)");
+    cfg_cmd->add_option("--model", ctx.cfg_model, "模型名称 (例如: gpt-3.5-turbo)");
     cfg_cmd->callback([&]() {
         try {
             auto root = find_root_or_die();
-            auto cfg = Config::load(Config::config_path(root));
-            if (!ctx.cfg_key.empty()) cfg.api_key = ctx.cfg_key;
-            if (!ctx.cfg_model.empty()) cfg.model = ctx.cfg_model;
-            cfg.save(Config::config_path(root));
-            fmt::print(fg(fmt::color::green), "[+] 配置已保存。\n");
-        } catch (...) { fmt::print("[!] 保存配置失败\n"); }
+            auto cfg_path = Config::config_path(root);
+            auto cfg = Config::load(cfg_path);
+
+            if (ctx.cfg_show) {
+                fmt::print(fg(fmt::color::cyan) | fmt::emphasis::bold, "当前配置:\n");
+                fmt::print("  API Key:      {}\n", cfg.api_key.empty() ? "(未设置)" : "******" + cfg.api_key.substr(std::max(0, (int)cfg.api_key.length()-4)));
+                fmt::print("  Model:        {}\n", cfg.model);
+                fmt::print("  Language:     {}\n", cfg.language);
+                fmt::print("  Editor:       {}\n", cfg.editor.empty() ? "(未设置)" : cfg.editor);
+                fmt::print("  AI Enabled:   {}\n", cfg.ai_enabled ? "Yes" : "No");
+                return;
+            }
+
+            bool changed = false;
+            if (!ctx.cfg_key.empty()) {
+                if (ctx.cfg_key.length() < 10) {
+                     fmt::print(fg(fmt::color::red), "[!] API Key 格式似乎不正确。\n");
+                     return;
+                }
+                cfg.api_key = ctx.cfg_key;
+                changed = true;
+            }
+            if (!ctx.cfg_model.empty()) {
+                cfg.model = ctx.cfg_model;
+                changed = true;
+            }
+            
+            if (changed) {
+                cfg.save(cfg_path);
+                fmt::print(fg(fmt::color::green), "[+] 配置已保存。\n");
+            } else {
+                fmt::print("未检测到修改。使用 --show 查看当前配置。\n");
+            }
+        } catch (...) { fmt::print(fg(fmt::color::red), "[!] 操作失败\n"); }
     });
 
     app.add_subcommand("exit", "退出程序")->callback([]() { exit(0); });
@@ -378,14 +499,47 @@ void run_repl() {
     rx.set_completion_callback([&](std::string const& input, int& contextLen) {
         std::vector<Replxx::Completion> completions;
         std::vector<std::string> cmds = {"init", "pull", "new", "solve", "list", "delete", "submit", "test", "hint", "config", "exit"};
-        std::string prefix = input;
-        for (auto& c : cmds) if (c.find(prefix) == 0) completions.push_back({c});
+        
+        // Command completion
+        size_t last_space = input.rfind(' ');
+        if (last_space == std::string::npos) {
+            for (auto& c : cmds) if (c.find(input) == 0) completions.push_back({c});
+            contextLen = input.length();
+        } else {
+            // Context-aware completion
+            std::string cmd = input.substr(0, last_space);
+            std::string prefix = input.substr(last_space + 1);
+            
+            if (cmd == "solve" || cmd == "delete" || cmd == "submit" || cmd == "hint" || cmd == "test") {
+                if (global_svc && global_svc->pm) {
+                    auto problems = global_svc->pm->list_problems();
+                    for (const auto& p : problems) {
+                        std::string label = std::to_string(p.display_id);
+                        // Match against ID or Title
+                        if (std::to_string(p.display_id).find(prefix) == 0 || p.title.find(prefix) == 0) {
+                             completions.push_back({label});
+                        }
+                    }
+                }
+            }
+            contextLen = prefix.length();
+        }
         return completions;
     });
 
-    fmt::print(fg(fmt::color::cyan) | fmt::emphasis::bold, "\n  shuati CLI REPL (v1.2.0)\n  输入 'help' 查看命令, 'exit' 退出\n\n");
+    fmt::print(fg(fmt::color::cyan) | fmt::emphasis::bold, 
+        R"(
+  ███████╗██╗  ██╗██╗   ██╗ █████╗ ████████╗██╗
+  ██╔════╝██║  ██║██║   ██║██╔══██╗╚══██╔══╝██║
+  ███████╗███████║██║   ██║███████║   ██║   ██║
+  ╚════██║██╔══██║██║   ██║██╔══██║   ██║   ██║
+  ███████║██║  ██║╚██████╔╝██║  ██║   ██║   ██║
+  ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝
+        )" "\n");
+    fmt::print("  输入 'help' 查看命令, 'exit' 退出\n\n");
 
     while (true) {
+        // ... (existing loop code, but "input" variable declaration is handled by replxx)
         const char* input = rx.input("shuati > ");
         if (input == nullptr) break;
         std::string line(input);
@@ -402,7 +556,20 @@ void run_repl() {
         if (args.size() == 1) continue;
         if (args[1] == "exit" || args[1] == "quit") break;
         if (args[1] == "help") { 
-             fmt::print("可用命令: init, pull, new, solve, list, delete, submit, test, hint, config, exit\n");
+             fmt::print(fg(fmt::color::white) | fmt::emphasis::bold, "{:<10} {:<35} {}\n", "命令", "说明", "用法");
+             fmt::print("{}\n", std::string(80, '-'));
+             fmt::print("{:<10} {:<35} {}\n", "init", "初始化项目结构", "init");
+             fmt::print("{:<10} {:<35} {}\n", "pull", "从 URL 拉取题目", "pull <url>");
+             fmt::print("{:<10} {:<35} {}\n", "new", "创建本地题目", "new <title>");
+             fmt::print("{:<10} {:<35} {}\n", "solve", "开始做题 (支持交互选择)", "solve [id]");
+             fmt::print("{:<10} {:<35} {}\n", "list", "列出所有题目", "list");
+             fmt::print("{:<10} {:<35} {}\n", "delete", "删除题目", "delete <id>");
+             fmt::print("{:<10} {:<35} {}\n", "submit", "提交记录与心得", "submit <id>");
+             fmt::print("{:<10} {:<35} {}\n", "test", "运行测试用例", "test <id>");
+             fmt::print("{:<10} {:<35} {}\n", "hint", "获取 AI 提示", "hint <id>");
+             fmt::print("{:<10} {:<35} {}\n", "config", "配置工具", "config [--show]");
+             fmt::print("{:<10} {:<35} {}\n", "exit", "退出", "exit");
+             fmt::print("\n");
              continue; 
         }
 

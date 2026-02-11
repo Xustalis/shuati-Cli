@@ -55,8 +55,10 @@ target_link_libraries(shuati PRIVATE
     SQLiteCpp
     fmt::fmt
     replxx::replxx
+    ftxui::screen
+    ftxui::dom
+    ftxui::component
     httplib::httplib
-    ftxui::screen ftxui::dom ftxui::component
     Threads::Threads
 )
 
