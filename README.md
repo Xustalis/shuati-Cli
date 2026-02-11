@@ -32,18 +32,18 @@ Shuati CLI 采用分层架构设计，核心包括爬虫适配器、本地判题
 
 ```mermaid
 graph TD
-    User((用户)) -->|命令| CLI[命令行接口 (CLI11/Replxx)]
-    CLI --> PM[题目管理器 ProblemManager]
+    User((用户)) -->|命令| CLI["命令行接口 (CLI11/Replxx)"]
+    CLI --> PM["题目管理器 ProblemManager"]
     
     subgraph Core Logic
         PM -->|拉取| Crawler[多平台爬虫]
         PM -->|生成| Template[代码模板引擎]
         PM -->|测试| Judge[本地判题引擎]
-        PM -->|诊断| AI[AI Coach (LLM)]
+        PM -->|诊断| AI["AI Coach (LLM)"]
     end
     
     subgraph Data Layer
-        DB[(SQLite 数据库)]
+        DB[("SQLite 数据库")]
         FS[文件系统]
     end
     
@@ -54,39 +54,45 @@ graph TD
     AI -->|读取上下文| DB
 ```
 
-## 📦 安装
+## 📦 快速安装 (Quick Start)
 
-### 用户 (Zero Cost)
+### 1. 普通用户 (推荐)
 
-无需配置复杂的编译环境，直接下载，开箱即用。
+**适用人群**: 算法竞赛选手、刷题爱好者。无需懂 C++ 编译。
 
-1.  **下载**: 前往 [Releases](https://github.com/yourusername/shuati-cli/releases) 页面下载适合您系统的二进制文件 (Windows x64 / Linux x64)。
-2.  **配置 PATH**: 解压并将 `shuati.exe` (或 `shuati`) 所在目录加入系统环境变量 `PATH`。
-3.  **运行**:
+**核心依赖**:
+1.  **Git**: 用于项目版本管理（本项目基于 git 目录结构）。
+2.  **编译器**:
+    *   **C++ 选手**: 需安装 `g++` (推荐 MinGW-w64) 并加入环境变量 `PATH`。
+    *   **Python 选手**: 需安装 `python` 并加入环境变量 `PATH`。
+
+**安装步骤**:
+1.  **下载**: 前往 [Releases](https://github.com/yourusername/shuati-cli/releases) 下载最新版本的 `shuati.exe` (Windows) 或二进制文件 (Linux/macOS)。
+2.  **配置**: 将 `shuati.exe` 放入任意目录（如 `C:\Program Files\Shuati\`），并将该目录添加到系统 `PATH` 环境变量中。
+3.  **验证**:
     ```bash
     shuati --version
-    # 输出: 1.2.0
+    # 应输出: 1.2.0
     ```
 
-**运行时依赖**:
-*   **编译器**: 需确保 `g++` (MinGW/GCC/Clang) 或 `python` 在 `PATH` 中，用于通过 `shuati test` 编译和运行代码。
+### 2. 开发者 (源码构建)
 
-### 开发者 (Build from Source)
+**适用人群**: 希望贡献代码或自行修改功能的开发者。
 
-如果你需要定制功能或参与贡献，请从源码构建。
-
-**环境要求**:
-*   CMake 3.20+
-*   C++20 Compiler (MSVC v143+, GCC 10+, Clang 12+)
-*   vcpkg (依赖管理)
+**开发依赖**:
+*   **Git**: `git`
+*   **构建工具**: `CMake` 3.20+
+*   **编译器**: MSVC (Visual Studio 2022), GCC 10+, 或 Clang 12+
+*   **包管理**: `vcpkg` (强烈推荐，用于管理 CLI11, fmt, nlohmann-json 等库)
 
 ```bash
 # Clone
 git clone https://github.com/yourusername/shuati-cli.git
 cd shuati-cli
 
-# Configure (Windows Example)
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=[path/to/vcpkg]/scripts/buildsystems/vcpkg.cmake
+# Configure (以 Windows + vcpkg 为例)
+# 请替换 <VCPKG_ROOT> 为你的 vcpkg 安装路径
+cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=<VCPKG_ROOT>/scripts/buildsystems/vcpkg.cmake
 
 # Build
 cmake --build build --config Release
