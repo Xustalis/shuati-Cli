@@ -20,6 +20,7 @@
 #include "shuati/sm2_algorithm.hpp"
 #include "../adapters/leetcode_crawler.cpp"
 #include "../adapters/codeforces_crawler.cpp"
+#include "../adapters/luogu_crawler.cpp"
 #include "../adapters/companion_server.cpp"
 
 namespace fs = std::filesystem;
@@ -54,6 +55,7 @@ struct Services {
             // Register crawlers
             s.pm->register_crawler(std::make_unique<LeetCodeCrawler>());
             s.pm->register_crawler(std::make_unique<CodeforcesCrawler>());
+            s.pm->register_crawler(std::make_unique<LuoguCrawler>());
             
             s.ma  = std::make_shared<MistakeAnalyzer>(s.db);
             s.ai  = std::make_unique<AICoach>(s.cfg);

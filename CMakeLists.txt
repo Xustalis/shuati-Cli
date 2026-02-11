@@ -43,6 +43,7 @@ add_executable(shuati
     src/adapters/leetcode_crawler.cpp
     src/adapters/codeforces_crawler.cpp
     src/adapters/companion_server.cpp
+    src/adapters/luogu_crawler.cpp
 )
 
 # Link libraries
