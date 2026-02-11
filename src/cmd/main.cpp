@@ -162,7 +162,31 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
                 // Check for user-defined template in .shuati/templates/
                 auto tmpl_path = root / Config::DIR_NAME / "templates" / ("template" + ext);
                 std::ofstream out(filename);
-                if (fs::exists(tmpl_path)) {
+                
+                std::string content = "";
+                if (svc.cfg.ai_enabled && svc.ai->enabled()) {
+                     fmt::print("[*] 正在请求 AI 生成模版...\n");
+                     if (fs::exists(prob.content_path)) {
+                         std::ifstream t(prob.content_path);
+                         std::stringstream buffer;
+                         buffer << t.rdbuf();
+                         std::string full_desc = buffer.str();
+                         std::string ai_tmpl = svc.ai->generate_template(prob.title, full_desc, svc.cfg.language);
+                         if (ai_tmpl.find("```") != std::string::npos) {
+                             std::regex code_re(R"(```\w*\n([\s\S]*?)```)");
+                             std::smatch m;
+                             if (std::regex_search(ai_tmpl, m, code_re)) content = m[1].str();
+                             else content = ai_tmpl;
+                         } else {
+                             content = ai_tmpl;
+                         }
+                     }
+                }
+
+                if (!content.empty() && content.find("[Error]") == std::string::npos) {
+                     out << content;
+                     fmt::print(fg(fmt::color::green), "[+] 使用 AI 生成模板: {}\n", filename);
+                } else if (fs::exists(tmpl_path)) {
                     // Use custom template, replace placeholders
                     std::ifstream tmpl(tmpl_path);
                     std::string content((std::istreambuf_iterator<char>(tmpl)), {});
@@ -181,13 +205,25 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
                     fmt::print(fg(fmt::color::green), "[+] 使用自定义模板生成: {}\n", filename);
                 } else {
                     // Default template
-                    out << "// Problem: " << prob.title << "\n// URL: " << prob.url << "\n\n#include <iostream>\n#include <vector>\nusing namespace std;\n\nint main() {\n    // Your code here\n    return 0;\n}\n";
+                    if (svc.cfg.language == "python") {
+                         out << "import sys\n\n# Problem: " << prob.title << "\n# URL: " << prob.url << "\n\ndef solve():\n    pass\n\nif __name__ == '__main__':\n    solve()\n";
+                    } else {
+                         out << "// Problem: " << prob.title << "\n// URL: " << prob.url << "\n\n#include <iostream>\n#include <vector>\nusing namespace std;\n\nint main() {\n    // Your code here\n    return 0;\n}\n";
+                    }
                     fmt::print(fg(fmt::color::green), "[+] 代码模板已生成: {}\n", filename);
                     fmt::print(fg(fmt::color::dim_gray), "    提示: 在 .shuati/templates/template{} 放置自定义模板\n", ext);
                 }
                 out.close();
             }
-            fmt::print("\n完成后使用以下命令提交:\n  submit {} -f {}\n", prob.id, filename);
+            
+            // Auto open editor
+            if (!svc.cfg.editor.empty()) {
+                std::string cmd = fmt::format("{} \"{}\"", svc.cfg.editor, filename);
+                fmt::print("[*] 正在打开编辑器: {}\n", cmd);
+                std::system(cmd.c_str());
+            } else {
+                fmt::print("\n完成后使用以下命令提交:\n  submit {} -f {}\n", prob.id, filename);
+            }
         } catch (const std::exception& e) {
             fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
         } catch (...) {
@@ -416,6 +452,8 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
             // Fetch test cases
             // We need to convert from DB format (string pairs) to TestCase struct
             auto db_cases = svc.db->get_test_cases(prob.id);
+
+
             std::vector<TestCase> cases;
             for(auto& p : db_cases) {
                 TestCase tc; tc.input = p.first; tc.output = p.second; tc.is_sample = true;

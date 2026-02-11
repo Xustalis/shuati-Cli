@@ -69,4 +69,19 @@ std::string AICoach::analyze(const std::string& problem_desc, const std::string&
     return call_api(sys, user);
 }
 
+bool AICoach::enabled() const {
+    return !cfg_.api_key.empty();
+}
+
+std::string AICoach::generate_template(const std::string& title, const std::string& desc, const std::string& lang) {
+    std::string sys = "You are an algorithm contest expert. "
+                      "Generate a starter code template for the given problem. "
+                      "Include comments about potential algorithms (Time Complexity constraints). "
+                      "Do NOT solve the problem, just set up IO and structure. "
+                      "Use " + lang + ".";
+    
+    std::string user = fmt::format("Title: {}\nDescription:\n{}", title, desc.substr(0, 1000));
+    return call_api(sys, user);
+}
+
 } // namespace shuati

@@ -9,11 +9,17 @@ class AICoach {
 public:
     explicit AICoach(const Config& cfg);
 
+    // Check if AI is enabled (has key)
+    bool enabled() const;
+
     // Send code + error context to AI, get coaching hint (not full solution)
     std::string get_hint(const std::string& problem_desc, const std::string& user_code, const std::string& mistake_type);
 
     // Analyze code for common mistakes
     std::string analyze(const std::string& problem_desc, const std::string& user_code);
+
+    // Generate starter code with algorithm hints
+    std::string generate_template(const std::string& title, const std::string& desc, const std::string& lang);
 
 private:
     Config cfg_;
