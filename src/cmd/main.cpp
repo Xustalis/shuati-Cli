@@ -827,7 +827,7 @@ int main(int argc, char** argv) {
     } else {
         CommandContext ctx;
         CLI::App app{"shuati CLI - 你的 AI 算法教练"};
-        app.set_version_flag("--version", "3.0.0");
+        app.set_version_flag("--version", "1.2.0");
         setup_commands(app, ctx);
         CLI11_PARSE(app, argc, argv);
     }

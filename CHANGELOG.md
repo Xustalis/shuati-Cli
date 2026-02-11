@@ -2,26 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v3.0.0] - 2026-02-11
+## [1.2.0] - 2024-02-11
 
-### 🚀 New Features
+### Added
+- **Multi-Platform Crawler**: Added support for LeetCode (GraphQL), Codeforces, Luogu, and Lanqiao.
+- **Local Judge Engine**:
+  - Implemented sandbox execution for C++ and Python.
+  - Added verdicts: AC, WA, TLE, MLE (Windows), RE, CE.
+  - Added memory usage monitoring using Windows PSAPI.
+- **AI Coach**:
+  - Integrated `debug` command for AI-powered error diagnosis.
+  - Added smart template generation with `solve` command.
+- **CLI Improvements**:
+  - Added interactive REPL mode (`run_repl`).
+  - Added `init` command for project scaffolding.
+  - Added `test` and `add-case` commands for local testing.
 
-- **Polyglot Crawler**: Added support for LeetCode, Codeforces, Luogu, and Lanqiao.
-- **Local Judge**: Implemented a standalone judge engine with AC, WA, TLE, MLE, RE, CE verdicts.
-- **AI Coach**: Integrated AI for hints, code analysis, and smart template generation.
-- **Workflow**: Auto-open editor, `test` command, `add-case` command.
-- **REPL**: Enhanced interactive shell with autocompletion for commands and problem IDs.
-- **Companion Server**: Support for competitive-companion browser extension.
+### Changed
+- **Architecture**: Refactored codebase into Domain-Driven Design (DDD) layers (`core`, `infra`, `adapters`).
+- **Build System**: optimized `CMakeLists.txt` and `vcpkg.json` for better dependency management.
+- **Documentation**: Rewrote README to professional standards; added Contribution Guide and CI workflows.
 
-### 🛠 Improvements
-
-- **Architecture**: Refactored to Domain-Driven Design (DDD) directory structure.
-- **Config**: Enhanced configuration system for user preferences.
-- **Dependencies**: Migrated to `vcpkg` manifest mode.
-- **Templates**: Added support for customizable templates with `{{DATE}}`, `{{TAGS}}` placeholders.
-
-### 🐛 Fixes
-
-- Fixed build issues with `fmt` library.
-- Resolved service lifetime issues in REPL mode.
-- Fixed UI text encoding for Windows console.
+### Fixed
+- Fixed silent crash issue caused by missing DLL dependencies.
+- Fixed `run_repl` crash by adding proper exception handling and initialization.

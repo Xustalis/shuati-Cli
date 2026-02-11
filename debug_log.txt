@@ -1,0 +1,6 @@
+Starting shuati... argc=2
+argv[0]=G:\project\shuati CLI\build\Release\shuati.exe
+argv[1]=debug_startup
+Starting shuati... argc=1
+argv[0]=G:\project\shuati CLI\build\Release\shuati.exe
+[DEBUG] Entering run_repl...

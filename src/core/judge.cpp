@@ -9,6 +9,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <psapi.h>
 #else
 #include <unistd.h>
 #include <sys/wait.h>
@@ -168,6 +169,18 @@ JudgeResult Judge::run_case(const std::string& executable,
     } else {
         DWORD exit_code = 0;
         GetExitCodeProcess(pi.hProcess, &exit_code);
+        
+        // Check Memory Usage
+        PROCESS_MEMORY_COUNTERS pmc;
+        if (GetProcessMemoryInfo(pi.hProcess, &pmc, sizeof(pmc))) {
+            if (pmc.PeakPagefileUsage > (size_t)memory_limit_kb * 1024) {
+                res.verdict = Verdict::MLE;
+                res.memory_kb = pmc.PeakPagefileUsage / 1024;
+                return res;
+            }
+            res.memory_kb = pmc.PeakPagefileUsage / 1024;
+        }
+
         if (exit_code != 0) {
             res.verdict = Verdict::RE;
             res.message = fmt::format("Exit code: {}", exit_code);
