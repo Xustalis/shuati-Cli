@@ -6,10 +6,15 @@
 #include <ctime>
 #include "shuati/config.hpp"
 #include <fmt/color.h>
+#include "shuati/crawler.hpp"
 
 namespace shuati {
 
 ProblemManager::ProblemManager(std::shared_ptr<Database> db) : db_(db) {}
+
+void ProblemManager::register_crawler(std::unique_ptr<ICrawler> crawler) {
+    crawlers_.push_back(std::move(crawler));
+}
 
 void ProblemManager::pull_problem(const std::string& url) {
     if (db_->problem_exists(url)) {
@@ -18,18 +23,38 @@ void ProblemManager::pull_problem(const std::string& url) {
     }
 
     fmt::print("[*] 正在拉取 {}...\n", url);
-    std::string html = fetch_html(url);
-    if (html.empty()) {
-        fmt::print(fg(fmt::color::red), "[!] 拉取失败 (网络错误或无效 URL)。\n");
-        return;
+
+    Problem p;
+    std::vector<TestCase> cases;
+    bool handled = false;
+
+    // Try crawlers first
+    for (auto& crawler : crawlers_) {
+        if (crawler->can_handle(url)) {
+            fmt::print(fg(fmt::color::cyan), "    使用适配器: {}\n", typeid(*crawler).name());
+            p = crawler->fetch_problem(url);
+            if (p.id.empty() || p.id.find("_error") != std::string::npos) {
+                fmt::print(fg(fmt::color::red), "[!] 爬取失败: {}\n", p.title);
+                return;
+            }
+            cases = crawler->fetch_test_cases(url);
+            handled = true;
+            break;
+        }
     }
 
-    Problem p = parse_html(html, url);
-
-    // Validate parsing result - don't save if title is generic and HTML was empty
-    if (p.title == "未命名题目" && html.empty()) {
-        fmt::print(fg(fmt::color::red), "[!] HTML 解析失败，无法提取题目信息。\n");
-        return;
+    // Fallback to generic HTML parsing
+    if (!handled) {
+        std::string html = fetch_html(url);
+        if (html.empty()) {
+            fmt::print(fg(fmt::color::red), "[!] 拉取失败 (网络错误或无效 URL)。\n");
+            return;
+        }
+        p = parse_html(html, url);
+        if (p.title == "未命名题目" && html.empty()) {
+            fmt::print(fg(fmt::color::red), "[!] HTML 解析失败，无法提取题目信息。\n");
+            return;
+        }
     }
 
     std::string problems_dir = Config::DIR_NAME + std::string("/problems/");
@@ -37,14 +62,24 @@ void ProblemManager::pull_problem(const std::string& url) {
     std::string filename = problems_dir + p.id + ".md";
     std::ofstream out(filename);
     out << "# " << p.title << "\n\n"
-        << "来源: " << url << "\n\n"
+        << "来源: " << url << "\n"
+        << "难度: " << p.difficulty << "\n"
+        << "标签: " << p.tags << "\n\n"
         << "## 题目描述\n\n"
-        << "(在此处补充题目描述)\n\n"
+        << "(数据抓取自 " << p.source << ")\n\n"
         << "## 笔记\n\n";
     out.close();
 
     p.content_path = std::filesystem::absolute(filename).string();
     db_->add_problem(p);
+
+    // Save test cases
+    if (!cases.empty()) {
+        for (const auto& tc : cases) {
+            db_->add_test_case(p.id, tc.input, tc.output, tc.is_sample);
+        }
+        fmt::print(fg(fmt::color::cyan), "    获取到 {} 个测试用例。\n", cases.size());
+    }
 
     ReviewItem r;
     r.problem_id = p.id;

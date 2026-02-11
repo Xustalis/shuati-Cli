@@ -18,6 +18,9 @@
 #include "shuati/mistake_analyzer.hpp"
 #include "shuati/ai_coach.hpp"
 #include "shuati/sm2_algorithm.hpp"
+#include "../adapters/leetcode_crawler.cpp"
+#include "../adapters/codeforces_crawler.cpp"
+#include "../adapters/companion_server.cpp"
 
 namespace fs = std::filesystem;
 using namespace shuati;
@@ -38,6 +41,7 @@ struct Services {
     std::shared_ptr<ProblemManager> pm;
     std::shared_ptr<MistakeAnalyzer> ma;
     std::unique_ptr<AICoach>        ai;
+    std::unique_ptr<CompanionServer> companion;
     Config                          cfg;
 
     static Services load(const fs::path& root) {
@@ -46,8 +50,14 @@ struct Services {
             s.cfg = Config::load(Config::config_path(root));
             s.db  = std::make_shared<Database>(Config::db_path(root).string());
             s.pm  = std::make_shared<ProblemManager>(s.db);
+            
+            // Register crawlers
+            s.pm->register_crawler(std::make_unique<LeetCodeCrawler>());
+            s.pm->register_crawler(std::make_unique<CodeforcesCrawler>());
+            
             s.ma  = std::make_shared<MistakeAnalyzer>(s.db);
             s.ai  = std::make_unique<AICoach>(s.cfg);
+            s.companion = std::make_unique<CompanionServer>(*s.pm, *s.db);
         } catch (...) {
             throw; // Let caller handle
         }
@@ -426,6 +436,18 @@ std::vector<std::string> tokenize(const std::string& line) {
 void run_repl() {
     using Replxx = replxx::Replxx;
     Replxx rx;
+
+    // Start background services (Companion Server)
+    auto root = Config::find_root();
+    std::unique_ptr<Services> global_svc;
+    
+    if (!root.empty()) {
+        try {
+            global_svc = std::make_unique<Services>(Services::load(root));
+            global_svc->companion->start(); 
+            // Now global_svc stays alive during REPL
+        } catch (...) {}
+    }
 
     // Load history
     auto history_path = (Config::find_root().empty() ? fs::current_path() : Config::find_root() / Config::DIR_NAME) / "history.txt";

@@ -13,6 +13,11 @@ else()
     add_compile_options(-finput-charset=UTF-8 -fexec-charset=UTF-8)
 endif()
 
+# Prevent min/max macros on Windows
+if(WIN32)
+    add_definitions(-DNOMINMAX)
+endif()
+
 # Find packages provided by vcpkg
 find_package(CLI11 CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
@@ -36,6 +41,8 @@ add_executable(shuati
     src/infra/database.cpp
     src/adapters/ai_coach.cpp
     src/adapters/leetcode_crawler.cpp
+    src/adapters/codeforces_crawler.cpp
+    src/adapters/companion_server.cpp
 )
 
 # Link libraries
