@@ -273,21 +273,41 @@ JudgeResult Judge::run_case(const std::string& executable,
         write(pipe_in[1], tc.input.c_str(), tc.input.size());
         close(pipe_in[1]); // Send EOF
 
-        // Wait with timeout
+        // Wait with timeout using polling (safer than async waitpid)
         int status;
-        auto result_future = std::async(std::launch::async, [pid, &status]() {
-            return waitpid(pid, &status, 0);
-        });
+        bool finished = false;
+        auto start_poll = std::chrono::steady_clock::now();
+        
+        while (true) {
+            int wres = waitpid(pid, &status, WNOHANG);
+            if (wres == pid) {
+                finished = true;
+                break;
+            }
+            if (wres < 0) {
+                // Error in waitpid
+                res.verdict = Verdict::SE;
+                res.message = "waitpid failed";
+                close(pipe_out[0]);
+                return res;
+            }
+            
+            auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start_poll).count() > time_limit_ms) {
+                break;
+            }
+            
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
 
-        if (result_future.wait_for(std::chrono::milliseconds(time_limit_ms)) == std::future_status::timeout) {
+        if (!finished) {
             kill(pid, SIGKILL);
-            waitpid(pid, &status, 0);
+            waitpid(pid, &status, 0); // Reap zombie
             res.verdict = Verdict::TLE;
             res.time_ms = time_limit_ms;
         } else {
-            result_future.get();
-            auto end_time = std::chrono::high_resolution_clock::now();
-            res.time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+            auto end_time = std::chrono::steady_clock::now(); // Use steady_clock consistently
+            res.time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_poll).count();
 
             if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
                  res.verdict = Verdict::RE;
