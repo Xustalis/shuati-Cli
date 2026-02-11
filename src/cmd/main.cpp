@@ -198,7 +198,7 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
             
             if (!svc.cfg.editor.empty()) {
                 std::string cmd = fmt::format("{} \"{}\"", svc.cfg.editor, filename);
-                (void)std::system(cmd.c_str());
+                if (std::system(cmd.c_str()) != 0) {}
             }
         } catch (const std::exception& e) {
             fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());

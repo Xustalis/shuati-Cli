@@ -295,7 +295,7 @@ JudgeResult Judge::run_case(const std::string& executable,
         close(pipe_out[1]);
 
         // Write input
-        (void)write(pipe_in[1], tc.input.c_str(), tc.input.size());
+        if (::write(pipe_in[1], tc.input.c_str(), tc.input.size()) < 0) {}
         close(pipe_in[1]); 
 
         // Wait loop

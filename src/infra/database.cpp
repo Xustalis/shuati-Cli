@@ -69,7 +69,7 @@ void Database::add_problem(const Problem& p) {
     q.bind(5, p.content_path);
     q.bind(6, p.tags);
     q.bind(7, p.difficulty);
-    q.bind(8, p.created_at ? p.created_at : (long long)std::time(nullptr));
+    q.bind(8, static_cast<int64_t>(p.created_at ? p.created_at : std::time(nullptr)));
     q.exec();
 }
 

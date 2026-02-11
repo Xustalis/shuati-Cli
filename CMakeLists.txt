@@ -18,7 +18,7 @@ if(WIN32)
 endif()
 
 # Find packages provided by vcpkg
-find_package(CLI11 REQUIRED)
+find_package(CLI11 CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(cpr CONFIG REQUIRED)
 find_package(SQLiteCpp CONFIG REQUIRED)
