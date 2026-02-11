@@ -60,3 +60,7 @@ target_link_libraries(shuati PRIVATE
     ftxui::screen ftxui::dom ftxui::component
     Threads::Threads
 )
+
+if(WIN32)
+    target_link_libraries(shuati PRIVATE Psapi)
+endif()
