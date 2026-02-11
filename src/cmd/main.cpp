@@ -190,7 +190,7 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
                     // Use custom template, replace placeholders
                     std::ifstream tmpl(tmpl_path);
                     std::string content((std::istreambuf_iterator<char>(tmpl)), {});
-                    // Replace {{TITLE}} and {{URL}} placeholders
+                    // Replace placeholders
                     auto replace_all = [](std::string& s, const std::string& from, const std::string& to) {
                         size_t pos = 0;
                         while ((pos = s.find(from, pos)) != std::string::npos) {
@@ -198,9 +198,18 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
                             pos += to.length();
                         }
                     };
+                    
+                    std::time_t now = std::time(nullptr);
+                    char buf[80];
+                    std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", std::localtime(&now));
+                    
                     replace_all(content, "{{TITLE}}", prob.title);
                     replace_all(content, "{{URL}}", prob.url);
                     replace_all(content, "{{ID}}", prob.id);
+                    replace_all(content, "{{DATE}}", std::string(buf));
+                    replace_all(content, "{{TAGS}}", prob.tags);
+                    replace_all(content, "{{DIFFICULTY}}", prob.difficulty);
+                    
                     out << content;
                     fmt::print(fg(fmt::color::green), "[+] 使用自定义模板生成: {}\n", filename);
                 } else {
@@ -605,13 +614,15 @@ void run_repl() {
         contextLen = prefix.length();
 
         // 1. Commands
-        std::vector<std::string> commands = {"init", "pull", "new", "solve", "list", "submit", "review", "next", "hint", "stats", "config", "clear", "exit", "delete", "help"};
+        std::vector<std::string> commands = {"init", "pull", "new", "solve", "list", "submit", "review", "next", "hint", "stats", "config", "test", "add-case", "clear", "exit", "delete", "help"};
         for (const auto& cmd : commands) {
-            if (cmd.find(prefix) == 0) completions.emplace_back(cmd);
+            if (cmd.find(prefix) == 0 && prefix.length() > 0) completions.emplace_back(cmd);
+            else if (prefix.empty()) completions.emplace_back(cmd);
         }
 
-        // 2. IDs (only if input starts with solve/delete)
-        if (input.find("solve ") == 0 || input.find("delete ") == 0 || input.find("submit ") == 0) {
+        // 2. IDs (only if input starts with solve/delete/test/add-case/submit/hint)
+        if (input.find("solve ") == 0 || input.find("delete ") == 0 || input.find("submit ") == 0 || 
+            input.find("test ") == 0 || input.find("add-case ") == 0 || input.find("hint ") == 0) {
             try {
                 auto svc = Services::load(find_root_or_die());
                 auto problems = svc.pm->list_problems();
