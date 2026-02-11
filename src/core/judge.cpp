@@ -24,6 +24,19 @@ std::string trim_right(const std::string& s) {
     return (end == std::string::npos) ? "" : s.substr(0, end + 1);
 }
 
+std::string JudgeResult::verdict_str() const {
+    switch (verdict) {
+        case Verdict::AC: return "AC";
+        case Verdict::WA: return "WA";
+        case Verdict::TLE: return "TLE";
+        case Verdict::MLE: return "MLE";
+        case Verdict::RE: return "RE";
+        case Verdict::CE: return "CE";
+        case Verdict::SE: return "SE";
+        default: return "UNKNOWN";
+    }
+}
+
 std::vector<JudgeResult> Judge::judge(const std::string& source_file, 
                                       const std::string& language, 
                                       const std::vector<TestCase>& test_cases,

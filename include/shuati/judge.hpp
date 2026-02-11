@@ -27,6 +27,8 @@ struct JudgeResult {
     std::string input;
     std::string output;
     std::string expected;
+    
+    std::string verdict_str() const;
 };
 
 class Judge {

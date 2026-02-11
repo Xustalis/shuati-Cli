@@ -84,4 +84,22 @@ std::string AICoach::generate_template(const std::string& title, const std::stri
     return call_api(sys, user);
 }
 
+std::string AICoach::diagnose(const std::string& problem_desc, 
+                              const std::string& user_code, 
+                              const std::string& failure_info,
+                              const std::string& user_history) {
+    std::string sys = "You are a competitive programming coach. "
+                      "Diagnose the user's Wrong Answer or Runtime Error. "
+                      "I will provide the Problem, Code, Failed Test Case, and User's stats. "
+                      "Explain WHY the code failed on this specific case. "
+                      "Reference their past weaknesses if relevant. "
+                      "Keep it concise (< 200 words). Use Chinese.";
+
+    std::string user = fmt::format(
+        "Problem:\n{}\n\nCode:\n```\n{}\n```\n\nFailed Case:\n{}\n\nUser History:\n{}",
+        problem_desc.substr(0, 500), user_code.substr(0, 1000), failure_info, user_history);
+
+    return call_api(sys, user);
+}
+
 } // namespace shuati

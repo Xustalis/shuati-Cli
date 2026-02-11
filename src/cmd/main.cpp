@@ -560,6 +560,94 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
             fmt::print(fg(fmt::color::red), "[!] 发生未知错误\n");
         }
     });
+    // ── debug ──
+    auto debug_cmd = app.add_subcommand("debug", "AI 诊断错题 (分析 Failing Case)");
+    debug_cmd->add_option("id", ctx.solve_pid, "题目 ID")->required();
+    debug_cmd->callback([&]() {
+        try {
+             auto root = find_root_or_die();
+             auto svc = Services::load(root);
+             auto prob = svc.pm->get_problem(ctx.solve_pid);
+             if (prob.id.empty()) { fmt::print(fg(fmt::color::red), "[!] 未找到题目。\n"); return; }
+             
+             std::string ext = svc.cfg.language == "python" ? ".py" : ".cpp";
+             std::string src_file = "solution_" + prob.id + ext;
+             if (!fs::exists(src_file)) {
+                 fmt::print(fg(fmt::color::red), "[!] 代码文件 {} 不存在。\n", src_file);
+                 return;
+             }
+
+             // Run tests
+             auto db_cases = svc.db->get_test_cases(prob.id);
+             std::vector<TestCase> cases;
+             for(auto& p : db_cases) {
+                 TestCase tc; tc.input = p.first; tc.output = p.second; tc.is_sample = true;
+                 cases.push_back(tc);
+             }
+             if (cases.empty()) { fmt::print("[!] 无测试用例。\n"); return; }
+
+             fmt::print("[*] 正在运行测试...\n");
+             auto results = svc.judge->judge(src_file, svc.cfg.language, cases);
+             
+             int failure_idx = -1;
+             for(size_t i=0; i<results.size(); ++i) {
+                 if (results[i].verdict != Verdict::AC) {
+                     failure_idx = (int)i;
+                     break;
+                 }
+             }
+
+             if (failure_idx == -1) {
+                 fmt::print(fg(fmt::color::green), "[*] 所有测试通过！\n");
+                 return;
+             }
+             
+             const auto& failure = results[failure_idx];
+             const auto& failed_case = cases[failure_idx];
+
+             // Simplified print to avoid fmt overload resolution issues
+             std::string v_str = failure.verdict_str();
+             fmt::print(fg(fmt::color::yellow), "[!] 发现错误: {}\n", v_str);
+             
+             if (svc.cfg.ai_enabled && svc.ai->enabled()) {
+                 fmt::print("[*] AI 教练正在分析...\n");
+                 
+                 std::string content = "Content";
+                 if (fs::exists(prob.content_path)) {
+                     std::ifstream t(prob.content_path);
+                     std::stringstream buffer;
+                     buffer << t.rdbuf();
+                     content = buffer.str();
+                 }
+                 
+                 std::ifstream s(src_file);
+                 std::string code((std::istreambuf_iterator<char>(s)), {});
+
+                 // Manually construct fail info to ensure string types
+                 std::stringstream ss;
+                 ss << "Input: " << failed_case.input << "\n"
+                    << "Expected: " << failed_case.output << "\n"
+                    << "Actual: " << failure.output << "\n"
+                    << "Error: " << failure.message;
+                 std::string fail_info = ss.str();
+
+                 // Get stats
+                 auto stats = svc.ma->get_stats();
+                 std::string history = "";
+                 for(auto& [k,v] : stats) history += fmt::format("{}: {}, ", k, v);
+
+                 std::string analysis = svc.ai->diagnose(content, code, fail_info, history);
+                 fmt::print(fg(fmt::color::cyan), "\n[诊断报告]\n{}\n", analysis);
+             } else {
+                 fmt::print("[!] AI 未启用。\n");
+             }
+
+        } catch (const std::exception& e) {
+            fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
+        } catch (...) {
+            fmt::print(fg(fmt::color::red), "[!] 发生未知错误\n");
+        }
+    });
 }
 
 // ─── Tokenizer ────────────────────────────────────────
@@ -739,6 +827,7 @@ int main(int argc, char** argv) {
     } else {
         CommandContext ctx;
         CLI::App app{"shuati CLI - 你的 AI 算法教练"};
+        app.set_version_flag("--version", "3.0.0");
         setup_commands(app, ctx);
         CLI11_PARSE(app, argc, argv);
     }
