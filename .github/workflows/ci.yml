@@ -22,9 +22,11 @@ jobs:
       uses: jwlawson/actions-setup-cmake@v1.13
 
     - name: Restore artifacts, or setup vcpkg
-      uses: lukka/run-vcpkg@v11
+      uses: lukka/run-vcpkg@v11.5
       with:
         vcpkgJsonGlob: 'vcpkg.json'
+        runVcpkgInstall: true
+        vcpkgGitCommitId: '76e86687f8797e8c07e297e684074c50293d07e6'
 
     - name: Configure CMake
       shell: bash
