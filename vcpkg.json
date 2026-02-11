@@ -1,6 +1,7 @@
 {
     "name": "shuati-cli",
-    "version-string": "0.1.0",
+    "version-string": "1.2.0",
+    "builtin-baseline": "76e86687f8797e8c07e297e684074c50293d07e6",
     "dependencies": [
         "cli11",
         "nlohmann-json",
