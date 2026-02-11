@@ -7,7 +7,7 @@ namespace shuati {
 
 AICoach::AICoach(const Config& cfg) : cfg_(cfg) {}
 
-std::string AICoach::call_api(const std::string& system_prompt, const std::string& user_prompt) {
+std::string AICoach::call_api(const std::string& system_prompt, const std::string& user_prompt, bool stream, std::function<void(std::string)> callback) {
     if (cfg_.api_key.empty()) {
         return "[Error] API key not set. Run: shuati config --api-key <YOUR_KEY>";
     }
@@ -16,57 +16,103 @@ std::string AICoach::call_api(const std::string& system_prompt, const std::strin
     body["model"] = cfg_.model;
     body["max_tokens"] = cfg_.max_tokens;
     body["temperature"] = 0.3;
+    body["stream"] = stream;
     body["messages"] = nlohmann::json::array({
         {{"role", "system"}, {"content", system_prompt}},
         {{"role", "user"},   {"content", user_prompt}}
     });
 
     try {
-        auto r = cpr::Post(
-            cpr::Url{cfg_.api_base + "/chat/completions"},
-            cpr::Header{
+        if (stream && callback) {
+            // Streaming Request
+            auto url = cpr::Url{cfg_.api_base + "/chat/completions"};
+            auto header = cpr::Header{
                 {"Content-Type", "application/json"},
                 {"Authorization", "Bearer " + cfg_.api_key}
-            },
-            cpr::Body{body.dump()},
-            cpr::Timeout{30000}
-        );
+            };
+            auto body_str = cpr::Body{body.dump()};
+            
+            // Chunk buffer to handle split JSON lines
+            std::string buffer;
+            
+            auto r = cpr::PostCallback(
+                [&](std::string data, intptr_t userdata) -> bool {
+                    buffer += data;
+                    size_t pos = 0;
+                    while ((pos = buffer.find('\n')) != std::string::npos) {
+                        std::string line = buffer.substr(0, pos);
+                        buffer.erase(0, pos + 1);
+                        
+                        if (line.empty()) continue;
+                        if (line.find("data: ") == 0) {
+                            std::string json_str = line.substr(6);
+                            if (json_str == "[DONE]") return true;
+                            
+                            try {
+                                auto j = nlohmann::json::parse(json_str);
+                                if (j.contains("choices") && !j["choices"].empty()) {
+                                    auto& delta = j["choices"][0]["delta"];
+                                    if (delta.contains("content")) {
+                                        std::string content = delta["content"].get<std::string>();
+                                        callback(content);
+                                    }
+                                }
+                            } catch (...) {
+                                // Ignore parse errors for incomplete chunks
+                            }
+                        }
+                    }
+                    return true;
+                },
+                url, header, body_str, cpr::Timeout{60000}
+            );
+            
+            if (r.status_code != 200) {
+                return fmt::format("[API Error] HTTP {}: {}", r.status_code, r.text.substr(0, 200));
+            }
+            return "";
+        } else {
+            // Non-Streaming Request
+            auto r = cpr::Post(
+                cpr::Url{cfg_.api_base + "/chat/completions"},
+                cpr::Header{
+                    {"Content-Type", "application/json"},
+                    {"Authorization", "Bearer " + cfg_.api_key}
+                },
+                cpr::Body{body.dump()},
+                cpr::Timeout{30000}
+            );
 
-        if (r.status_code != 200) {
-            return fmt::format("[API Error] HTTP {}: {}", r.status_code, r.text.substr(0, 200));
+            if (r.status_code != 200) {
+                return fmt::format("[API Error] HTTP {}: {}", r.status_code, r.text.substr(0, 200));
+            }
+
+            auto resp = nlohmann::json::parse(r.text);
+            return resp["choices"][0]["message"]["content"].get<std::string>();
         }
-
-        auto resp = nlohmann::json::parse(r.text);
-        return resp["choices"][0]["message"]["content"].get<std::string>();
     } catch (const std::exception& e) {
         return fmt::format("[Error] {}", e.what());
     }
 }
 
-std::string AICoach::get_hint(const std::string& problem_desc, const std::string& user_code, const std::string& mistake_type) {
-    std::string sys = "You are a strict algorithm coach. "
-                      "NEVER give the full solution. "
-                      "Only point out WHERE the mistake is and WHY it's wrong. "
-                      "Keep your response under 150 words. Use Chinese.";
+void AICoach::analyze(const std::string& problem_desc, const std::string& user_code, std::function<void(std::string)> callback) {
+    std::string sys = "You are an algorithm coach. "
+                      "Analyze the user's code for logical errors or provide a hint if they are stuck. "
+                      "Do NOT give the full solution code. "
+                      "Guide them with hints. Use Markdown. Use Chinese.";
 
     std::string user = fmt::format(
-        "Problem:\n{}\n\nMy Code:\n```\n{}\n```\n\nMistake Type: {}\n\nPlease give me a hint.",
-        problem_desc.substr(0, 500), user_code.substr(0, 1000), mistake_type);
+        "Problem Description:\n{}\n\nUser's Current Code:\n```\n{}\n```\n\nPlease provide a hint.",
+        problem_desc.substr(0, 1000), user_code.substr(0, 2000));
 
-    return call_api(sys, user);
+    call_api(sys, user, true, callback);
 }
 
-std::string AICoach::analyze(const std::string& problem_desc, const std::string& user_code) {
-    std::string sys = "You are an algorithm coach. "
-                      "Analyze the code for common mistakes (off-by-one, wrong state, greedy misuse, TLE). "
-                      "Do NOT give the solution. Only identify the error category and give a brief hint. "
-                      "Keep response under 100 words. Use Chinese.";
-
-    std::string user = fmt::format(
-        "Problem:\n{}\n\nCode:\n```\n{}\n```",
-        problem_desc.substr(0, 500), user_code.substr(0, 1000));
-
-    return call_api(sys, user);
+std::string AICoach::analyze_sync(const std::string& problem_desc, const std::string& user_code) {
+    // Fallback for non-streaming usage if any
+     std::string sys = "You are an algorithm coach. Use Chinese.";
+     std::string user = fmt::format("Problem:\n{}\n\nCode:\n```\n{}\n```", problem_desc, user_code);
+     return call_api(sys, user, false, nullptr);
 }
 
 bool AICoach::enabled() const {

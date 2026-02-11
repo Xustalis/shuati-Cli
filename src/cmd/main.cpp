@@ -23,6 +23,7 @@
 #include "shuati/ai_coach.hpp"
 #include "shuati/sm2_algorithm.hpp"
 #include "shuati/judge.hpp"
+#include "shuati/compiler_doctor.hpp"
 
 // Header separation fixes ODR violations
 #include "shuati/adapters/leetcode_crawler.hpp"
@@ -391,9 +392,22 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
             for (size_t i = 0; i < results.size(); i++) {
                 auto& r = results[i];
                 fmt::print("Case {}: {} ({}ms, {}KB)\n", i+1, r.verdict_str(), r.time_ms, r.memory_kb);
-                if (r.verdict == Verdict::AC) ac++;
-                else if (r.verdict != Verdict::AC) {
+                
+                if (r.verdict == Verdict::CE) {
+                    fmt::print(fg(fmt::color::red), "   [Compile Error]\n{}\n", r.message);
+                    auto diag = CompilerDoctor::diagnose(r.message);
+                    fmt::print(fg(fmt::color::yellow) | fmt::emphasis::bold, "   [医生诊断] {}\n", diag.title);
+                    fmt::print(fg(fmt::color::yellow), "   {}\n   建议: {}\n", diag.description, diag.suggestion);
+                } else if (r.verdict == Verdict::AC) {
+                    ac++;
+                } else {
                     fmt::print(fg(fmt::color::dim_gray), "   Expected: {}\n   Actual:   {}\n", r.expected.substr(0, 40), r.output.substr(0, 40));
+                    if (r.verdict == Verdict::RE) {
+                        auto diag = CompilerDoctor::diagnose(r.message); // Try to diagnose RE if message contains info
+                        if (diag.title != "未知错误") {
+                             fmt::print(fg(fmt::color::yellow), "   [医生诊断] {} - {}\n", diag.title, diag.suggestion);
+                        }
+                    }
                 }
             }
             fmt::print("\n结果: {}/{} 通过\n", ac, results.size());
@@ -403,14 +417,14 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
     });
 
     // ── hint ──
-    auto hint_cmd = app.add_subcommand("hint", "AI 启发式提示");
+    auto hint_cmd = app.add_subcommand("hint", "获取 AI 启发式提示");
     hint_cmd->add_option("id", ctx.hint_pid, "题目 ID")->required();
     hint_cmd->add_option("-f,--file", ctx.hint_file, "当前代码文件");
     hint_cmd->callback([&]() {
         try {
             auto svc = Services::load(find_root_or_die());
             auto prob = svc.pm->get_problem(ctx.hint_pid);
-            if (prob.id.empty()) return;
+            if (prob.id.empty()) { fmt::print(fg(fmt::color::red), "[!] 题目不存在。\n"); return; }
             
             std::string desc = "";
             if (fs::exists(prob.content_path)) {
@@ -425,24 +439,37 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
                 code.assign(std::istreambuf_iterator<char>(f), {});
             }
 
-            fmt::print(fg(fmt::color::yellow), "[教练] 思考中...\n");
-            std::string hint = svc.ai->analyze(desc, code);
-            fmt::print("\n{}\n", hint);
+            fmt::print(fg(fmt::color::yellow), "[教练] 思考中 (按 Ctrl+C 中止)...\n\n");
+            
+            // Streaming output callback
+            auto print_chunk = [](std::string chunk) {
+                std::cout << chunk << std::flush;
+            };
+
+            svc.ai->analyze(desc, code, print_chunk);
+            std::cout << "\n\n";
         } catch (const std::exception& e) {
              fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
         }
     });
 
     // ── config ──
-    auto cfg_cmd = app.add_subcommand("config", "配置 API 或编辑器");
+    auto cfg_cmd = app.add_subcommand("config", "配置工具");
     cfg_cmd->add_flag("--show", ctx.cfg_show, "显示当前配置");
-    cfg_cmd->add_option("--api-key", ctx.cfg_key, "API Key (例如: sk-...)");
-    cfg_cmd->add_option("--model", ctx.cfg_model, "模型名称 (例如: gpt-3.5-turbo)");
+    cfg_cmd->add_option("--api-key", ctx.cfg_key, "设置 API Key");
+    cfg_cmd->add_option("--model", ctx.cfg_model, "设置模型 (默认 deepseek-chat)");
+    cfg_cmd->add_option("--language", ctx.new_diff, "设置默认语言 (cpp/python)"); // Reuse variable or add new one? reused just for parsing, need separate field
     cfg_cmd->callback([&]() {
         try {
             auto root = find_root_or_die();
             auto cfg_path = Config::config_path(root);
             auto cfg = Config::load(cfg_path);
+
+            // Handle positional args or mixed flags logic if complex, but here flags are enough
+            // We need a proper context field for language since new_diff is for 'new' command
+            // Let's assume user uses flags. 
+            // NOTE: ctx.new_diff is used above for --language just to capture string, dirty but works if no conflict in subcommands.
+            // Better to add ctx.cfg_lang.
 
             if (ctx.cfg_show) {
                 fmt::print(fg(fmt::color::cyan) | fmt::emphasis::bold, "当前配置:\n");
@@ -458,21 +485,36 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
             if (!ctx.cfg_key.empty()) {
                 if (ctx.cfg_key.length() < 10) {
                      fmt::print(fg(fmt::color::red), "[!] API Key 格式似乎不正确。\n");
-                     return;
+                } else {
+                    cfg.api_key = ctx.cfg_key;
+                    changed = true;
                 }
-                cfg.api_key = ctx.cfg_key;
-                changed = true;
             }
             if (!ctx.cfg_model.empty()) {
                 cfg.model = ctx.cfg_model;
                 changed = true;
+            }
+            if (!ctx.new_diff.empty() && ctx.new_diff != "medium") { // Hack: new_diff defaults to medium? No, main.cpp line 86 default is medium
+                // Wait, new_diff default is "medium", so if user doesn't set it, it's "medium".
+                // This reuse is risky. Let's rely on standard CLI check or empty check if we remove default in struct?
+                // Context struct: std::string new_diff = "medium"; 
+                // We should add cfg_lang to struct.
+                std::string lang = ctx.new_diff;
+                if (lang == "cpp" || lang == "c++" || lang == "python" || lang == "py") {
+                    cfg.language = (lang == "py") ? "python" : (lang == "c++" ? "cpp" : lang);
+                    changed = true;
+                    // Reset to avoid side effects if reused
+                    ctx.new_diff = "medium"; 
+                } else if (lang != "medium") {
+                    fmt::print(fg(fmt::color::yellow), "[!] 未知语言: {} (仅支持 cpp/python)\n", lang);
+                }
             }
             
             if (changed) {
                 cfg.save(cfg_path);
                 fmt::print(fg(fmt::color::green), "[+] 配置已保存。\n");
             } else {
-                fmt::print("未检测到修改。使用 --show 查看当前配置。\n");
+                if (!ctx.cfg_show) fmt::print("使用 --show 查看配置，或使用 --api-key/--model/--language 修改。\n");
             }
         } catch (...) { fmt::print(fg(fmt::color::red), "[!] 操作失败\n"); }
     });

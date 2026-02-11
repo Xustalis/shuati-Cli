@@ -15,12 +15,18 @@ public:
     // Send code + error context to AI, get coaching hint (not full solution)
     std::string get_hint(const std::string& problem_desc, const std::string& user_code, const std::string& mistake_type);
 
-    // Analyze code for common mistakes
-    std::string analyze(const std::string& problem_desc, const std::string& user_code);
+    // Send code + error context to AI, get coaching hint (not full solution)
+    // Stream hint to stdout or callback
+    void analyze(const std::string& problem_desc,
+                 const std::string& user_code,
+                 std::function<void(std::string)> callback);
+
+    // Legacy non-streaming (deprecated but kept for compatibility if needed)
+    std::string analyze_sync(const std::string& problem_desc, const std::string& user_code);
 
     // Diagnose failure with test case and history
-    std::string diagnose(const std::string& problem_desc, 
-                         const std::string& user_code, 
+    std::string diagnose(const std::string& problem_desc,
+                         const std::string& user_code,
                          const std::string& failure_info,
                          const std::string& user_history);
 
@@ -31,7 +37,7 @@ private:
     Config cfg_;
 
     // Call DeepSeek API
-    std::string call_api(const std::string& system_prompt, const std::string& user_prompt);
+    std::string call_api(const std::string& system_prompt, const std::string& user_prompt, bool stream = false, std::function<void(std::string)> callback = nullptr);
 };
 
 } // namespace shuati
