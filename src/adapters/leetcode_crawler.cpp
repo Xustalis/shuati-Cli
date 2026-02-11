@@ -1,4 +1,4 @@
-#include "shuati/crawlers.hpp"
+#include "shuati/adapters/leetcode_crawler.hpp"
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
 #include <fmt/core.h>
@@ -125,11 +125,6 @@ Problem LeetCodeCrawler::fetch_problem(const std::string& url) {
             p.tags = join(tags, ",");
         }
         
-        // Save content to a temporary file or return path? 
-        // Logic in main.cpp suggests content_path is used. 
-        // For now, we don't save file here, just minimal info.
-        // The original code didn't save content either, just set ID/Title.
-        
     } catch (const std::exception& e) {
         p.title = fmt::format("Error: {}", e.what());
     }
@@ -162,18 +157,5 @@ std::vector<TestCase> LeetCodeCrawler::fetch_test_cases(const std::string& url) 
     
     return cases;
 }
-
-// Stubs for other crawlers to match header
-bool CodeforcesCrawler::can_handle(const std::string&) const { return false; }
-Problem CodeforcesCrawler::fetch_problem(const std::string&) { return {}; }
-std::vector<TestCase> CodeforcesCrawler::fetch_test_cases(const std::string&) { return {}; }
-
-bool LuoguCrawler::can_handle(const std::string&) const { return false; }
-Problem LuoguCrawler::fetch_problem(const std::string&) { return {}; }
-std::vector<TestCase> LuoguCrawler::fetch_test_cases(const std::string&) { return {}; }
-
-bool LanqiaoCrawler::can_handle(const std::string&) const { return false; }
-Problem LanqiaoCrawler::fetch_problem(const std::string&) { return {}; }
-std::vector<TestCase> LanqiaoCrawler::fetch_test_cases(const std::string&) { return {}; }
 
 } // namespace shuati

@@ -21,6 +21,12 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      - name: Install Linux Dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev libx11-dev libxt-dev libgl1-mesa-dev xorg-dev
+
       - name: Set up CMake
         uses: jwlawson/actions-setup-cmake@v1.13
 
@@ -34,12 +40,8 @@ jobs:
         with:
           configurePreset: 'ninja-multi-vcpkg'
           configurePresetAdditionalArgs: "['-DCMAKE_CXX_STANDARD=20']"
-          
-      # Note: If no presets exist, we fallback to manual command, but lukka/run-cmake recommends presets. 
-      # Since we don't have CMakePresets.json in the file list, we should use standard commands or create presets.
-      # For simplicity and robustness without adding files, let's use standard cmake commands but keep the vcpkg env.
       
-      - name: Configure (Manual)
+      - name: Configure (Manual Fallback)
         if: ${{ steps.run-cmake.outcome == 'skipped' }} 
         run: cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake" -DCMAKE_BUILD_TYPE=Release
 

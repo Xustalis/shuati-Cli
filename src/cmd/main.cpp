@@ -20,8 +20,11 @@
 #include "shuati/sm2_algorithm.hpp"
 #include "shuati/judge.hpp"
 #include "shuati/judge.hpp"
-#include "shuati/crawlers.hpp"
-#include "../adapters/companion_server.cpp" // Keep for now as it might be a template or header-only? No, it's likely similar issue, but I focus on crawlers first as per plan. Wait, I should probably check companion_server too. But let's follow the immediate plan for crawlers first. Actually, the user asked to fix "FATAL compilation errors" caused by .cpp includes. I should check if companion_server is also a .cpp file included.
+#include "shuati/adapters/leetcode_crawler.hpp"
+#include "shuati/adapters/codeforces_crawler.hpp"
+#include "shuati/adapters/luogu_crawler.hpp"
+#include "shuati/adapters/lanqiao_crawler.hpp"
+#include "shuati/adapters/companion_server.hpp"
 // Step 4 of the user request says "Step 1... Modify src/cmd/main.cpp... remove .cpp include".
 // I will assume companion_server needs similar treatment or I should comment it out if it causes issues, but for now I will leave it or include its header if it exists.
 // Looking at file list, src/adapters/companion_server.cpp exists. There is NO companion_server.hpp in list_dir output (Step 9).
@@ -67,7 +70,7 @@ struct Services {
     std::shared_ptr<ProblemManager> pm;
     std::shared_ptr<MistakeAnalyzer> ma;
     std::unique_ptr<AICoach>        ai;
-    // std::unique_ptr<CompanionServer> companion; // Temporarily disabling to fix build if header missing
+    std::unique_ptr<CompanionServer> companion;
     std::unique_ptr<Judge>          judge;
     Config                          cfg;
 
@@ -86,7 +89,7 @@ struct Services {
             
             s.ma  = std::make_shared<MistakeAnalyzer>(s.db);
             s.ai  = std::make_unique<AICoach>(s.cfg);
-            // s.companion = std::make_unique<CompanionServer>(*s.pm, *s.db); // Disable temporary
+            s.companion = std::make_unique<CompanionServer>(*s.pm, *s.db);
             s.judge = std::make_unique<Judge>();
         } catch (...) {
             throw; // Let caller handle
@@ -714,7 +717,7 @@ void run_repl() {
     if (!root.empty()) {
         try {
             global_svc = std::make_unique<Services>(Services::load(root));
-            // global_svc->companion->start(); 
+            if(global_svc->companion) global_svc->companion->start(); 
             // Now global_svc stays alive during REPL
         } catch (...) {}
     }
