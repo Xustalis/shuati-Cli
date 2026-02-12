@@ -35,10 +35,20 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Pack
+      - name: Stage
+        shell: pwsh
         run: |
-          cd build/Release
-          7z a ../../shuati-windows-x64-${{ github.ref_name }}.zip shuati.exe
+          $dist = "dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item -Force "build/Release/shuati.exe" "$dist/"
+          Copy-Item -Force "install.ps1" "$dist/"
+          Copy-Item -Force -Recurse "build/vcpkg_installed/x64-windows/bin/*" "$dist/"
+
+      - name: Pack
+        shell: pwsh
+        run: |
+          cd dist
+          7z a ../shuati-windows-x64-${{ github.ref_name }}.zip *
           
       - name: Create Release
         uses: softprops/action-gh-release@v2
