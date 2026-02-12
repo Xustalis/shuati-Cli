@@ -11,10 +11,10 @@
 
 # Shuati CLI
 
-[![CI](https://github.com/yourusername/shuati-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/yourusername/shuati-cli/actions/workflows/ci.yml)
+[![CI](https://github.com/Xustalis/shuati-Cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Xustalis/shuati-Cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![C++20](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
-[![Version](https://img.shields.io/badge/version-1.2.0-green.svg)](https://github.com/yourusername/shuati-cli/releases)
+[![Version](https://img.shields.io/badge/version-1.2.0-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
 
 **Shuati CLI** 是一个基于命令行的算法竞赛（ACM/OI）辅助工具，旨在通过自动化繁琐流程（拉题、样例生成、本地测试）并集成 AI 辅助，构建一个高效、闭环的本地练习环境。
 
@@ -67,7 +67,7 @@ graph TD
     *   **Python 选手**: 需安装 `python` 并加入环境变量 `PATH`。
 
 **安装步骤**:
-1.  **下载**: 前往 [Releases](https://github.com/yourusername/shuati-cli/releases) 下载最新版本的 `shuati.exe` (Windows) 或二进制文件 (Linux/macOS)。
+1.  **下载**: 前往 [Releases](https://github.com/Xustalis/shuati-Cli/releases) 下载最新版本的 `shuati.exe` (Windows) 或二进制文件 (Linux/macOS)。
 2.  **配置**: 将 `shuati.exe` 放入任意目录（如 `C:\Program Files\Shuati\`），并将该目录添加到系统 `PATH` 环境变量中。
 3.  **验证**:
     ```bash
@@ -87,7 +87,7 @@ graph TD
 
 ```bash
 # Clone
-git clone https://github.com/yourusername/shuati-cli.git
+git clone https://github.com/Xustalis/shuati-Cli.git
 cd shuati-cli
 
 # Configure (以 Windows + vcpkg 为例)

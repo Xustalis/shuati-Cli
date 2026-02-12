@@ -1,5 +1,6 @@
 # Build
 build/
+build_*/
 out/
 cmake-build-*/
 .cache/
@@ -28,6 +29,9 @@ compile_commands.json
 # vcpkg (local clone)
 vcpkg/
 vcpkg_installed/
+
+# Build validation artifacts
+build_validation/
 
 # shuati runtime & user data
 .shuati/

@@ -2,6 +2,7 @@
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
 #include <fmt/core.h>
+#include <string_view>
 
 namespace shuati {
 
@@ -24,7 +25,6 @@ std::string AICoach::call_api(const std::string& system_prompt, const std::strin
 
     try {
         if (stream && callback) {
-            // Streaming Request
             auto url = cpr::Url{cfg_.api_base + "/chat/completions"};
             auto header = cpr::Header{
                 {"Content-Type", "application/json"},
@@ -32,47 +32,50 @@ std::string AICoach::call_api(const std::string& system_prompt, const std::strin
             };
             auto body_str = cpr::Body{body.dump()};
             
-            // Chunk buffer to handle split JSON lines
             std::string buffer;
             
-            auto r = cpr::PostCallback(
-                [&](std::string data, intptr_t userdata) -> bool {
-                    buffer += data;
-                    size_t pos = 0;
-                    while ((pos = buffer.find('\n')) != std::string::npos) {
-                        std::string line = buffer.substr(0, pos);
-                        buffer.erase(0, pos + 1);
-                        
-                        if (line.empty()) continue;
-                        if (line.find("data: ") == 0) {
-                            std::string json_str = line.substr(6);
-                            if (json_str == "[DONE]") return true;
-                            
-                            try {
-                                auto j = nlohmann::json::parse(json_str);
-                                if (j.contains("choices") && !j["choices"].empty()) {
-                                    auto& delta = j["choices"][0]["delta"];
-                                    if (delta.contains("content")) {
-                                        std::string content = delta["content"].get<std::string>();
-                                        callback(content);
+            auto r = cpr::Post(
+                url,
+                header,
+                body_str,
+                cpr::WriteCallback{
+                    [&](std::string_view data, intptr_t) -> bool {
+                        buffer.append(data.data(), data.size());
+                        size_t pos = 0;
+                        while ((pos = buffer.find('\n')) != std::string::npos) {
+                            std::string line = buffer.substr(0, pos);
+                            buffer.erase(0, pos + 1);
+
+                            if (!line.empty() && line.back() == '\r') line.pop_back();
+                            if (line.empty()) continue;
+
+                            if (line.rfind("data: ", 0) == 0) {
+                                std::string json_str = line.substr(6);
+                                if (json_str == "[DONE]") return true;
+
+                                try {
+                                    auto j = nlohmann::json::parse(json_str);
+                                    if (j.contains("choices") && !j["choices"].empty()) {
+                                        auto& delta = j["choices"][0]["delta"];
+                                        if (delta.contains("content")) {
+                                            callback(delta["content"].get<std::string>());
+                                        }
                                     }
+                                } catch (...) {
                                 }
-                            } catch (...) {
-                                // Ignore parse errors for incomplete chunks
                             }
                         }
+                        return true;
                     }
-                    return true;
                 },
-                url, header, body_str, cpr::Timeout{60000}
+                cpr::Timeout{60000}
             );
             
             if (r.status_code != 200) {
-                return fmt::format("[API Error] HTTP {}: {}", r.status_code, r.text.substr(0, 200));
+                return fmt::format(fmt::runtime("[API Error] HTTP {}: {}"), r.status_code, r.text.substr(0, 200));
             }
             return "";
         } else {
-            // Non-Streaming Request
             auto r = cpr::Post(
                 cpr::Url{cfg_.api_base + "/chat/completions"},
                 cpr::Header{
@@ -84,14 +87,14 @@ std::string AICoach::call_api(const std::string& system_prompt, const std::strin
             );
 
             if (r.status_code != 200) {
-                return fmt::format("[API Error] HTTP {}: {}", r.status_code, r.text.substr(0, 200));
+                return fmt::format(fmt::runtime("[API Error] HTTP {}: {}"), r.status_code, r.text.substr(0, 200));
             }
 
             auto resp = nlohmann::json::parse(r.text);
             return resp["choices"][0]["message"]["content"].get<std::string>();
         }
     } catch (const std::exception& e) {
-        return fmt::format("[Error] {}", e.what());
+        return fmt::format(fmt::runtime("[Error] {}"), e.what());
     }
 }
 
