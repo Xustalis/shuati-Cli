@@ -26,6 +26,20 @@ Thank you for your interest in contributing to Shuati CLI! We welcome contributi
 3.  Push to your fork and submit a Pull Request.
 4.  Ensure all tests pass (if applicable).
 
+## Conventional Commits
+
+Release automation relies on Conventional Commits:
+
+- `feat: ...` / `feat(scope): ...` for features
+- `fix: ...` / `fix(scope): ...` for bug fixes
+- Add `!` or a `BREAKING CHANGE:` footer for breaking changes
+
+Examples:
+
+- `feat(test): add boundary case generation`
+- `fix(list): prevent invalid utf8 crash`
+- `feat!: change config format`
+
 ## Reporting Issues
 
 If you find a bug or have a feature request, please open an [Issue](https://github.com/yhy/shuati-cli/issues).

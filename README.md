@@ -260,6 +260,60 @@ cmake --build build --config Debug
 .\build\Debug\shuati.exe --help
 ```
 
+## 自动化发布
+
+本项目提供一套自动化发布流水线：**合并到 main -> 自动计算下一个语义化版本 -> 更新版本号/CHANGELOG -> 打 tag -> 构建多平台产物 -> 发布到 GitHub Release**。
+
+### 触发条件
+
+- 合并/推送到 `main`：自动执行“准备发布”（计算版本并创建 tag）
+- `vX.Y.Z` tag 推送：自动执行“构建发布”（打包产物并创建/更新 GitHub Release）
+- 手动触发：在 Actions 中运行 `Prepare Release` / `Release` / `Rollback Release`
+
+### 版本号自动递增（SemVer）
+
+流水线会根据最近一次 `vX.Y.Z` tag 之后的提交记录（Conventional Commits）决定版本递增：
+
+- `feat:` 或 `feat(scope):` -> minor
+- `fix:` / `perf:` -> patch
+- `!` 或 `BREAKING CHANGE:` -> major
+
+示例：
+
+- `feat(test): add case generator`
+- `fix(list): handle invalid utf8`
+- `feat!: change config format`
+
+### 更新说明生成
+
+发布说明会从 Conventional Commits 自动生成，并写入 `CHANGELOG.md` 的新版本段落；Release 页面会读取对应版本段落作为 Release Notes。
+
+本地预览（不改动仓库文件）：
+
+```bash
+python tools/release/plan_release.py
+```
+
+自定义模板（可选）：在仓库添加 `.github/release-notes-template.md`，支持占位符：
+
+- `{{tag}}` / `{{version}}`
+- `{{previous_tag}}` / `{{compare_url}}`
+- `{{notes}}` / `{{contributors}}`
+
+### 权限、令牌与通知
+
+- GitHub Release / tag / 推送版本提交使用 `GITHUB_TOKEN`（Actions 内置），需要 `contents: write` 权限（已配置）
+- 可选通知：配置仓库 Secret `RELEASE_WEBHOOK_URL`（例如 Slack/飞书/自定义 Webhook），发布完成后会 POST 一条消息
+
+### 回滚机制
+
+如果误发版本，可在 Actions 中运行 `Rollback Release`：
+
+- 删除指定 tag 对应的 GitHub Release
+- 删除远端 tag 引用
+
+如需回滚代码版本，请在 `main` 上对发布提交执行 `git revert` 并合并回 `main`。
+
 ### 贡献
 
 - Issue/PR 模板在 `.github/`

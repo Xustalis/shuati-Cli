@@ -48,6 +48,21 @@ PY
             echo "Tag ($tag) does not match CMakeLists.txt version ($cmake_ver)"
             exit 1
           fi
+          vcpkg_ver=$(python - <<'PY'
+import json, pathlib
+p = pathlib.Path("vcpkg.json")
+obj = json.loads(p.read_text(encoding="utf-8", errors="ignore"))
+print(obj.get("version-string",""))
+PY
+          )
+          if [[ -z "$vcpkg_ver" ]]; then
+            echo "Failed to parse version-string from vcpkg.json"
+            exit 1
+          fi
+          if [[ "$vcpkg_ver" != "$cmake_ver" ]]; then
+            echo "vcpkg.json version ($vcpkg_ver) does not match CMakeLists.txt version ($cmake_ver)"
+            exit 1
+          fi
 
       - name: Install Linux Dependencies
         if: runner.os == 'Linux'
@@ -90,17 +105,33 @@ PY
         shell: bash
         run: cmake --build build --parallel
 
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Test (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ctest --test-dir build --output-on-failure
+
       - name: Verify Binary (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           & "build/Release/shuati.exe" --help
+          New-Item -ItemType Directory -Force -Path smoke | Out-Null
+          Push-Location smoke
+          & "..\build\Release\shuati.exe" init
+          Pop-Location
 
       - name: Verify Binary (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           ./build/shuati --help
+          mkdir -p smoke
+          (cd smoke && ../build/shuati init)
 
       - name: Stage (Windows)
         if: runner.os == 'Windows'
@@ -224,15 +255,68 @@ PY
         run: |
           cat *.sha256 > checksums.sha256
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          body_path: RELEASE_NOTES.md
-          files: |
-            shuati-windows-x64-${{ github.ref_name }}.zip
-            shuati-windows-x64-${{ github.ref_name }}.zip.sha256
-            shuati-Linux-x64-${{ github.ref_name }}.tar.gz
-            shuati-Linux-x64-${{ github.ref_name }}.tar.gz.sha256
-            shuati-macOS-x64-${{ github.ref_name }}.tar.gz
-            shuati-macOS-x64-${{ github.ref_name }}.tar.gz.sha256
-            checksums.sha256
+      - name: Create/Upload Release (with retry)
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          title="$tag"
+          files=(
+            "shuati-windows-x64-${tag}.zip"
+            "shuati-windows-x64-${tag}.zip.sha256"
+            "shuati-Linux-x64-${tag}.tar.gz"
+            "shuati-Linux-x64-${tag}.tar.gz.sha256"
+            "shuati-macOS-x64-${tag}.tar.gz"
+            "shuati-macOS-x64-${tag}.tar.gz.sha256"
+            "checksums.sha256"
+          )
+
+          for i in 1 2 3; do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "Release exists: $tag"
+            else
+              gh release create "$tag" --title "$title" --notes-file RELEASE_NOTES.md
+            fi
+
+            if gh release upload "$tag" "${files[@]}" --clobber; then
+              exit 0
+            fi
+            echo "Upload failed (attempt $i). Retrying..."
+            sleep $((i * 5))
+          done
+          exit 1
+
+      - name: Summary
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          repo="${GITHUB_REPOSITORY}"
+          {
+            echo "### Release $tag"
+            echo ""
+            echo "- https://github.com/${repo}/releases/tag/${tag}"
+            echo ""
+            echo "### Checksums"
+            echo ""
+            echo '```'
+            cat checksums.sha256
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Notify (optional)
+        if: ${{ secrets.RELEASE_WEBHOOK_URL != '' }}
+        shell: bash
+        env:
+          WEBHOOK: ${{ secrets.RELEASE_WEBHOOK_URL }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          repo="${GITHUB_REPOSITORY}"
+          payload=$(TAG="$tag" REPO="$repo" python - <<'PY'
+import json, os
+tag=os.environ["TAG"]
+repo=os.environ["REPO"]
+print(json.dumps({"text": f"✅ {repo} 发布完成: {tag}\\nhttps://github.com/{repo}/releases/tag/{tag}"}))
+PY
+          )
+          curl -sS -X POST -H "Content-Type: application/json" -d "$payload" "$WEBHOOK"
