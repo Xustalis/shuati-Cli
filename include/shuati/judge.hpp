@@ -35,6 +35,13 @@ class Judge {
 public:
     Judge() = default;
     
+    std::string prepare(const std::string& source_file, const std::string& language);
+    JudgeResult run_prepared(const std::string& executable,
+                             const TestCase& tc,
+                             int time_limit_ms = 1000,
+                             int memory_limit_kb = 256 * 1024);
+    void cleanup_prepared(const std::string& executable, const std::string& language);
+
     // Compile and run solution against test cases
     // returns results for each test case
     std::vector<JudgeResult> judge(const std::string& source_file, 

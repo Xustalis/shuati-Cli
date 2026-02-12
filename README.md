@@ -16,11 +16,11 @@
 [![C++20](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![Version](https://img.shields.io/badge/version-1.2.0-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
 
-**Shuati CLI** 是一个基于命令行的算法竞赛（ACM/OI）辅助工具，旨在通过自动化繁琐流程（拉题、样例生成、本地测试）并集成 AI 辅助，构建一个高效、闭环的本地练习环境。
+**Shuati CLI** 是一个基于命令行的算法练习工具：拉题、生成本地代码文件、运行本地测评、记录复习进度，并提供 AI 启发式提示。
 
 本项目适合习惯使用 CLI 和 Vim/VSCode 等本地编辑器，且希望脱离浏览器 Web IDE 低效调试环节的开发者。
 
-[安装](#-安装) • [工作流](#-核心工作流) • [配置](#-配置说明) • [判题机制](#-本地判题引擎) • [贡献](#-贡献与开发)
+[快速开始](#快速开始) • [安装指南](#安装指南) • [配置说明](#配置说明) • [故障排除](#故障排除) • [开发指南](#开发指南)
 
 </div>
 
@@ -54,119 +54,163 @@ graph TD
     AI -->|读取上下文| DB
 ```
 
-## 📦 快速安装 (Quick Start)
+## 快速开始
 
-### 1. 普通用户 (推荐)
+### 系统要求
 
-**适用人群**: 算法竞赛选手、刷题爱好者。无需懂 C++ 编译。
+- **Windows**: Windows 10/11（x64）
+- **Linux/macOS**: x64
+- **运行时**:
+  - C++ 题目本地测评：需要 `g++`（Windows 推荐 MinGW-w64/GCC 10+；Linux/macOS 使用系统 GCC/Clang）
+  - Python 题目本地测评：需要 `python`（3.x）
 
-**核心依赖**:
-1.  **Git**: 用于项目版本管理（本项目基于 git 目录结构）。
-2.  **编译器**:
-    *   **C++ 选手**: 需安装 `g++` (推荐 MinGW-w64) 并加入环境变量 `PATH`。
-    *   **Python 选手**: 需安装 `python` 并加入环境变量 `PATH`。
+### 方式 A：下载 Release（二进制）
 
-**安装步骤**:
-1.  **下载**: 前往 [Releases](https://github.com/Xustalis/shuati-Cli/releases) 下载最新版本的 `shuati.exe` (Windows) 或二进制文件 (Linux/macOS)。
-2.  **配置**: 将 `shuati.exe` 放入任意目录（如 `C:\Program Files\Shuati\`），并将该目录添加到系统 `PATH` 环境变量中。
-3.  **验证**:
-    ```bash
-    shuati --version
-    # 应输出: 1.2.0
-    ```
-
-### 2. 开发者 (源码构建)
-
-**适用人群**: 希望贡献代码或自行修改功能的开发者。
-
-**开发依赖**:
-*   **Git**: `git`
-*   **构建工具**: `CMake` 3.20+
-*   **编译器**: MSVC (Visual Studio 2022), GCC 10+, 或 Clang 12+
-*   **包管理**: `vcpkg` (强烈推荐，用于管理 CLI11, fmt, nlohmann-json 等库)
+1. 前往 [Releases](https://github.com/Xustalis/shuati-Cli/releases) 下载对应平台的压缩包
+2. 解压后将 `shuati`（或 `shuati.exe`）加入 `PATH`
+3. 验证：
 
 ```bash
-# Clone
-git clone https://github.com/Xustalis/shuati-Cli.git
-cd shuati-cli
-
-# Configure (以 Windows + vcpkg 为例)
-# 请替换 <VCPKG_ROOT> 为你的 vcpkg 安装路径
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=<VCPKG_ROOT>/scripts/buildsystems/vcpkg.cmake
-
-# Build
-cmake --build build --config Release
-
-# Run
-./build/Release/shuati
+shuati --help
 ```
 
-## � 核心工作流
+Windows 也可以在解压目录运行安装脚本（可选）：
+
+```powershell
+.\install.ps1
+```
+
+### 方式 B：源码构建（开发者）
+
+#### 依赖
+
+- Git
+- CMake 3.20+
+- 编译器：MSVC（VS2022）/ GCC 10+ / Clang 12+
+- vcpkg（本项目使用 `vcpkg.json` 管理依赖）
+
+```bash
+git clone https://github.com/Xustalis/shuati-Cli.git
+cd shuati-CLI
+
+git clone https://github.com/microsoft/vcpkg.git
+.\vcpkg\bootstrap-vcpkg.bat
+
+cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=.\vcpkg\scripts\buildsystems\vcpkg.cmake
+cmake --build build --config Release
+
+.\build\Release\shuati.exe --help
+```
+
+## 核心工作流
 
 Shuati CLI 的设计理念是 **"Pull -> Solve -> Test -> Debug"** 闭环。
 
 ### 1. 初始化项目
-在任意工作目录下初始化结构，生成 `shuati.db` 和配置文件。
+在任意工作目录下初始化结构，生成 `.shuati/`、SQLite 数据库和配置文件。
+
 ```bash
 shuati init
 ```
 
 ### 2. 拉取题目 (Pull)
 支持 LeetCode (CN/US), Luogu, Codeforces 等平台。
+
 ```bash
 shuati pull https://leetcode.cn/problems/two-sum/
 ```
-*   **自动行为**: 抓取题目描述、提取 Tags/难度、**下载所有测试样例**存入本地数据库。
 
 ### 3. 解题 (Solve)
-生成模板代码并自动打开编辑器。
+生成本地代码文件（最小骨架）
+
 ```bash
-shuati solve 1  # 使用 ID（由 pull 返回）
+shuati solve 1
 ```
-*   **代码生成**: 基于 `Config.template` 自动生成包含题目元信息的源文件 (e.g., `1.two_sum.cpp`)。
-*   **Editor**: 自动唤起配置的编辑器 (默认 `code`)。
 
 ### 4. 本地测试 (Test)
-利用本地判题引擎运行样例。
+运行样例，并自动生成边界/正常/组合测试点（可选生成预期输出）。
+
 ```bash
 shuati test 1
 ```
-*   **输出**: 实时显示每个 Test Case 的 Verdict (AC/WA/TLE/RE)。
-*   **WA 详情**: 自动展示 Input, Output, Expected 差异。
 
-### 5. AI 诊断 (Debug)
-当遇到难以理解的 WA 或 RE 时，请求 AI 介入。
+常用参数：
+
 ```bash
-shuati debug 1
+shuati test 1 --max 30 --oracle auto
+shuati test 1 --oracle none
+shuati test 1 --ui
 ```
-*   **Context**: 自动打包题目描述、你的代码、**Failing Case 的实际输出**以及报错信息。
-*   **Response**: AI 分析根本原因并给出修复思路。
 
-## ⚙ 配置说明
+### 5. 获取提示 (Hint)
+结合题目、样例与当前代码，输出启发式提示（不直接给完整解法）。
 
-配置文件位于 `~/.shuati/config.json` 或项目根目录 `config.json`。
+```bash
+shuati hint lg_P5728
+shuati hint lg_P5728 -f solution_lg_P5728.cpp
+```
+
+## 配置说明
+
+配置文件位于项目根目录：`.shuati/config.json`。
 
 ```json
 {
-  "user": {
-    "name": "Developer",
-    "language": "cpp"   // 默认语言: cpp / python
-  },
-  "editor": {
-    "command": "code"   // 指令: code / vim / nvim
-  },
-  "ai": {
-    "enabled": true,
-    "provider": "openai", 
-    "base_url": "https://api.openai.com/v1",
-    "api_key": "sk-your-key-here",
-    "model": "gpt-4"
-  },
-  "proxy": "" // 可选 HTTP 代理
+  "api_key": "",
+  "api_base": "https://api.deepseek.com/v1",
+  "model": "deepseek-chat",
+  "language": "cpp",
+  "max_tokens": 300,
+  "editor": "code",
+  "ai_enabled": true,
+  "template_enabled": true
 }
 ```
 
-## ⚖ 本地判题引擎
+常用配置命令：
+
+```bash
+shuati config --show
+shuati config --api-key <YOUR_KEY>
+shuati config --model deepseek-chat
+shuati config --language cpp
+```
+
+## 安装指南
+
+### Windows
+
+1. 下载 Release 压缩包并解压
+2. 将解压目录加入 `PATH`
+3. 验证：
+
+```powershell
+shuati --help
+```
+
+### Linux
+
+1. 下载 `.tar.gz` 解压（或源码构建）
+2. 放到 `~/.local/bin` 并确保在 `PATH` 中
+
+```bash
+mkdir -p ~/.local/bin
+tar -xzf shuati-Linux-x64-vX.Y.Z.tar.gz
+cp -f shuati ~/.local/bin/shuati
+chmod +x ~/.local/bin/shuati
+shuati --help
+```
+
+### macOS
+
+流程与 Linux 类似（或源码构建）：
+
+```bash
+chmod +x shuati
+./shuati --help
+```
+
+## 本地判题引擎
 
 本项目内置了一个轻量级 OJ 判题器 (`src/core/judge.cpp`)，实现标准 ACM 判题逻辑。
 
@@ -179,22 +223,50 @@ shuati debug 1
 | **RE** | Runtime Error | 进程退出码非 0 |
 | **CE** | Compile Error | 编译器 (g++) 返回非 0 |
 
-## 🤝 贡献与开发
+## 故障排除
+
+### 1) `-std=c++20` 不支持 / 编译器过旧
+
+- 升级 MinGW-w64 / GCC（推荐 GCC 10+）
+- 或在项目配置中使用更现代的编译器（MSVC/Clang）
+
+### 2) Windows 运行时报缺少 DLL
+
+- 使用 Release 压缩包自带的 DLL 一起部署
+- 或确保 `vcpkg_installed/.../bin` 里的依赖 DLL 与 `shuati.exe` 同目录
+
+### 3) `list` 输出 `invalid utf8`
+
+- 这通常是终端编码或抓取内容编码导致。项目已在 Windows 下对输出做了 UTF-8 兜底处理；
+- 若仍遇到，建议使用 Windows Terminal 并将编码设置为 UTF-8。
+
+### 4) `test` 没有测试用例/无法校验
+
+- 部分平台可能抓不到完整样例；可使用 `--oracle ai` 生成预期输出，或 `--oracle none` 仅做运行检查。
+
+## 开发指南
+
+### 本地构建
+
+```bash
+git clone https://github.com/Xustalis/shuati-Cli.git
+cd shuati-CLI
+
+git clone https://github.com/microsoft/vcpkg.git
+.\vcpkg\bootstrap-vcpkg.bat
+
+cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=.\vcpkg\scripts\buildsystems\vcpkg.cmake
+cmake --build build --config Debug
+.\build\Debug\shuati.exe --help
+```
+
+### 贡献
+
+- Issue/PR 模板在 `.github/`
+- 贡献指南见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md)
 
 我们非常欢迎社区贡献。为了保持代码质量，请遵循以下规范：
 
-*   **Bug 提交**: 请使用 [.github/ISSUE_TEMPLATE/bug_report.md](.github/ISSUE_TEMPLATE/bug_report.md) 模板。
-*   **功能建议**: 请提交 Issue 讨论设计。
-*   **代码提交**:
-    1.  阅读 [贡献指南 (.github/CONTRIBUTING.md)](.github/CONTRIBUTING.md)。
-    2.  确保通过 `ctest` 单元测试。
-    3.  代码风格遵循 Google C++ Style。
-
-### 主要目录说明
-*   `src/adapters/`: 包含各 OJ 的爬虫实现，新增 OJ 支持请在此扩展。
-*   `src/core/`: 核心逻辑，包括判题器 (`judge.cpp`) 和 题目管理 (`problem_manager.cpp`)。
-*   `src/cmd/`: CLI 交互逻辑。
-
----
-
-**License**: [MIT](LICENSE)
+- Bug 提交：优先用 Issue 模板
+- 功能建议：先提 Issue 再开 PR
+- 代码提交：确保 CI 通过

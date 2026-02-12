@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include "shuati/config.hpp"
 
 namespace shuati {
@@ -32,6 +33,8 @@ public:
 
     // Generate starter code with algorithm hints
     std::string generate_template(const std::string& title, const std::string& desc, const std::string& lang);
+
+    std::string chat_sync(const std::string& system_prompt, const std::string& user_prompt);
 
 private:
     Config cfg_;

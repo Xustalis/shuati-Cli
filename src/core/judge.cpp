@@ -56,6 +56,14 @@ std::string trim_right(const std::string& s) {
     return (end == std::string::npos) ? "" : s.substr(0, end + 1);
 }
 
+static std::string read_text_file(const std::string& path) {
+    std::ifstream in(path, std::ios::in | std::ios::binary);
+    if (!in) return "";
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
 std::string JudgeResult::verdict_str() const {
     switch (verdict) {
         case Verdict::AC: return "AC";
@@ -69,6 +77,23 @@ std::string JudgeResult::verdict_str() const {
     }
 }
 
+std::string Judge::prepare(const std::string& source_file, const std::string& language) {
+    return compile(source_file, language);
+}
+
+JudgeResult Judge::run_prepared(const std::string& executable,
+                                const TestCase& tc,
+                                int time_limit_ms,
+                                int memory_limit_kb) {
+    return run_case(executable, tc, time_limit_ms, memory_limit_kb);
+}
+
+void Judge::cleanup_prepared(const std::string& executable, const std::string& language) {
+    if (language == "cpp" || language == "c++") {
+        if (fs::exists(executable)) fs::remove(executable);
+    }
+}
+
 std::string Judge::compile(const std::string& source_file, const std::string& language) {
     if (language == "python" || language == "py") {
         return "python \"" + source_file + "\""; 
@@ -78,14 +103,59 @@ std::string Judge::compile(const std::string& source_file, const std::string& la
         fs::path src(source_file);
         std::string exe = src.replace_extension(".exe").string();
         
-        // Quote paths to prevent shell injection in simple system() calls
-        std::string cmd = fmt::format("g++ -O2 -std=c++20 \"{}\" -o \"{}\"", source_file, exe);
-        
-        int ret = std::system(cmd.c_str());
-        if (ret != 0) {
-            throw std::runtime_error("Compilation failed");
+#ifdef _WIN32
+        const char* null_dev = "nul";
+#else
+        const char* null_dev = "/dev/null";
+#endif
+
+        const std::vector<std::string> std_flags = {
+            "-std=c++20",
+            "-std=gnu++20",
+            "-std=c++2a",
+            "-std=gnu++2a",
+            "-std=c++17",
+            "-std=gnu++17",
+        };
+
+        std::string last_error;
+        for (const auto& std_flag : std_flags) {
+            TempFile err(".txt");
+            std::string cmd = fmt::format(
+                "g++ -O2 {} \"{}\" -o \"{}\" 1>{} 2>\"{}\"",
+                std_flag, source_file, exe, null_dev, err.path()
+            );
+
+            if (fs::exists(exe)) {
+                std::error_code ec;
+                fs::remove(exe, ec);
+            }
+
+            int ret = std::system(cmd.c_str());
+            if (ret == 0 && fs::exists(exe)) {
+                return exe;
+            }
+
+            std::string err_text = read_text_file(err.path());
+            if (err_text.empty()) {
+                last_error = "Compilation failed";
+                continue;
+            }
+
+            last_error = err_text;
+            if (err_text.find("unrecognized command line option") != std::string::npos &&
+                err_text.find(std_flag) != std::string::npos) {
+                continue;
+            }
+            if (err_text.find("invalid argument") != std::string::npos &&
+                err_text.find(std_flag) != std::string::npos) {
+                continue;
+            }
+
+            throw std::runtime_error(err_text);
         }
-        return exe;
+
+        throw std::runtime_error(last_error.empty() ? "Compilation failed" : last_error);
     }
 
     throw std::runtime_error("Unsupported language: " + language);
@@ -94,6 +164,7 @@ std::string Judge::compile(const std::string& source_file, const std::string& la
 Verdict Judge::check_output(const std::string& user_out, const std::string& expected_out) {
     std::string u = trim_right(user_out);
     std::string e = trim_right(expected_out);
+    if (e.empty()) return Verdict::AC;
     return (u == e) ? Verdict::AC : Verdict::WA;
 }
 
@@ -107,7 +178,7 @@ std::vector<JudgeResult> Judge::judge(const std::string& source_file,
     // 1. Compile
     std::string executable;
     try {
-        executable = compile(source_file, language);
+        executable = prepare(source_file, language);
     } catch (const std::exception& e) {
         JudgeResult r;
         r.verdict = Verdict::CE;
@@ -117,16 +188,12 @@ std::vector<JudgeResult> Judge::judge(const std::string& source_file,
 
     // 2. Run cases
     for (const auto& tc : test_cases) {
-        auto res = run_case(executable, tc, time_limit_ms, memory_limit_kb);
+        auto res = run_prepared(executable, tc, time_limit_ms, memory_limit_kb);
         results.push_back(res);
     }
 
     // Cleanup executable
-    if (language == "cpp") {
-        // Need to be careful about deleting checking if it exists
-        // But logic is fine-ish.
-        if (fs::exists(executable)) fs::remove(executable);
-    }
+    cleanup_prepared(executable, language);
 
     return results;
 }

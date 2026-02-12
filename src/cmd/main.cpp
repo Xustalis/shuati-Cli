@@ -2,11 +2,18 @@
 #include <string>
 #include <fstream>
 #include <filesystem>
+#include <chrono>
 #include <ctime>
 #include <algorithm>
 #include <vector>
 #include <sstream>
 #include <regex>
+#include <cstdlib>
+#include <cerrno>
+#include <optional>
+#include <random>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <CLI/CLI.hpp>
 #include <fmt/core.h>
@@ -15,6 +22,12 @@
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <replxx.hxx>
+#include <nlohmann/json.hpp>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <windows.h>
+#endif
 
 #include "shuati/config.hpp"
 #include "shuati/database.hpp"
@@ -44,6 +57,428 @@ static fs::path find_root_or_die() {
         throw std::runtime_error("Root not found");
     }
     return root;
+}
+
+#ifdef _WIN32
+static bool is_valid_utf8(const std::string& s) {
+    size_t i = 0;
+    while (i < s.size()) {
+        unsigned char c = static_cast<unsigned char>(s[i]);
+        if (c <= 0x7F) {
+            i++;
+            continue;
+        }
+
+        size_t need = 0;
+        if ((c & 0xE0) == 0xC0) need = 2;
+        else if ((c & 0xF0) == 0xE0) need = 3;
+        else if ((c & 0xF8) == 0xF0) need = 4;
+        else return false;
+
+        if (i + need > s.size()) return false;
+        for (size_t j = 1; j < need; j++) {
+            unsigned char cc = static_cast<unsigned char>(s[i + j]);
+            if ((cc & 0xC0) != 0x80) return false;
+        }
+        i += need;
+    }
+    return true;
+}
+
+static std::string ascii_fallback(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (unsigned char c : s) {
+        if (c >= 0x20 && c <= 0x7E) out.push_back(static_cast<char>(c));
+        else if (c == '\n' || c == '\r' || c == '\t') out.push_back(static_cast<char>(c));
+        else out.push_back('?');
+    }
+    return out;
+}
+
+static std::string acp_to_utf8(const std::string& s) {
+    if (s.empty()) return s;
+    int wlen = MultiByteToWideChar(CP_ACP, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
+    if (wlen <= 0) return ascii_fallback(s);
+    std::wstring w(static_cast<size_t>(wlen), L'\0');
+    MultiByteToWideChar(CP_ACP, 0, s.data(), static_cast<int>(s.size()), w.data(), wlen);
+
+    int u8len = WideCharToMultiByte(CP_UTF8, 0, w.data(), wlen, nullptr, 0, nullptr, nullptr);
+    if (u8len <= 0) return ascii_fallback(s);
+    std::string out(static_cast<size_t>(u8len), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.data(), wlen, out.data(), u8len, nullptr, nullptr);
+    return out;
+}
+
+static std::string ensure_utf8(const std::string& s) {
+    if (is_valid_utf8(s)) return s;
+    auto converted = acp_to_utf8(s);
+    if (is_valid_utf8(converted)) return converted;
+    return ascii_fallback(s);
+}
+#else
+static std::string ensure_utf8(const std::string& s) {
+    return s;
+}
+#endif
+
+enum class SimpleType { Int, Float, String };
+
+struct ParamSpec {
+    std::string name;
+    SimpleType type = SimpleType::String;
+    std::optional<long long> min_i;
+    std::optional<long long> max_i;
+    std::vector<std::string> normals;
+};
+
+struct InputSpec {
+    std::vector<ParamSpec> params;
+};
+
+struct PlannedCase {
+    TestCase tc;
+    std::string name;
+    std::string kind;
+    int priority = 0;
+    bool has_oracle = false;
+    std::vector<std::pair<std::string, std::string>> coverage_marks;
+};
+
+static std::vector<std::string> split_ws(const std::string& s) {
+    std::istringstream iss(s);
+    std::vector<std::string> out;
+    for (std::string tok; iss >> tok;) out.push_back(tok);
+    return out;
+}
+
+static bool parse_i64(const std::string& s, long long& out) {
+    if (s.empty()) return false;
+    char* end = nullptr;
+    errno = 0;
+    long long v = std::strtoll(s.c_str(), &end, 10);
+    if (errno != 0) return false;
+    if (end == s.c_str() || *end != '\0') return false;
+    out = v;
+    return true;
+}
+
+static std::string join_tokens(const std::vector<std::string>& tokens) {
+    std::string out;
+    for (size_t i = 0; i < tokens.size(); i++) {
+        if (i) out.push_back(' ');
+        out += tokens[i];
+    }
+    out.push_back('\n');
+    return out;
+}
+
+static std::string trim_copy(const std::string& s) {
+    size_t b = s.find_first_not_of(" \t\r\n");
+    if (b == std::string::npos) return "";
+    size_t e = s.find_last_not_of(" \t\r\n");
+    return s.substr(b, e - b + 1);
+}
+
+static std::string shorten_utf8_lossy(const std::string& s, size_t max_bytes) {
+    if (s.size() <= max_bytes) return ensure_utf8(s);
+    std::string cut = s.substr(0, max_bytes);
+    return ensure_utf8(cut) + "...";
+}
+
+static InputSpec infer_spec_from_db_cases(const std::vector<std::pair<std::string, std::string>>& db_cases) {
+    InputSpec spec;
+    if (db_cases.empty()) return spec;
+    auto tokens = split_ws(db_cases.front().first);
+    for (size_t i = 0; i < tokens.size(); i++) {
+        ParamSpec p;
+        p.name = fmt::format("p{}", i + 1);
+        long long v = 0;
+        if (parse_i64(tokens[i], v)) {
+            p.type = SimpleType::Int;
+            p.normals.push_back(tokens[i]);
+        } else {
+            p.type = SimpleType::String;
+            p.normals.push_back(tokens[i]);
+        }
+        spec.params.push_back(std::move(p));
+    }
+    return spec;
+}
+
+static InputSpec parse_spec_json_or_fallback(const std::string& raw, const InputSpec& fallback) {
+    auto l = raw.find('{');
+    auto r = raw.rfind('}');
+    if (l == std::string::npos || r == std::string::npos || r <= l) return fallback;
+    try {
+        auto j = nlohmann::json::parse(raw.substr(l, r - l + 1));
+        if (!j.contains("params") || !j["params"].is_array()) return fallback;
+
+        InputSpec spec;
+        for (auto& pj : j["params"]) {
+            if (!pj.is_object()) continue;
+            ParamSpec p;
+            if (pj.contains("name")) p.name = pj["name"].get<std::string>();
+            if (p.name.empty()) p.name = fmt::format("p{}", spec.params.size() + 1);
+
+            std::string t = pj.value("type", "string");
+            if (t == "int" || t == "integer" || t == "long") p.type = SimpleType::Int;
+            else if (t == "float" || t == "double" || t == "real") p.type = SimpleType::Float;
+            else p.type = SimpleType::String;
+
+            if (pj.contains("min") && pj["min"].is_number_integer()) p.min_i = pj["min"].get<long long>();
+            if (pj.contains("max") && pj["max"].is_number_integer()) p.max_i = pj["max"].get<long long>();
+            if (pj.contains("normals") && pj["normals"].is_array()) {
+                for (auto& v : pj["normals"]) {
+                    if (v.is_string()) p.normals.push_back(v.get<std::string>());
+                    else if (v.is_number_integer()) p.normals.push_back(std::to_string(v.get<long long>()));
+                    else if (v.is_number_float()) p.normals.push_back(fmt::format("{}", v.get<double>()));
+                }
+            }
+            spec.params.push_back(std::move(p));
+        }
+
+        if (spec.params.empty()) return fallback;
+        return spec;
+    } catch (...) {
+        return fallback;
+    }
+}
+
+static std::string build_problem_text(const Problem& prob) {
+    std::string desc;
+    desc += fmt::format("题目: {}\n", ensure_utf8(prob.title));
+    desc += fmt::format("ID: {}\n", prob.id);
+    desc += fmt::format("来源: {}\n", ensure_utf8(prob.source));
+    desc += fmt::format("难度: {}\n", ensure_utf8(prob.difficulty));
+    desc += fmt::format("URL: {}\n\n", ensure_utf8(prob.url));
+
+    if (!prob.content_path.empty() && fs::exists(prob.content_path)) {
+        std::ifstream f(prob.content_path, std::ios::in | std::ios::binary);
+        std::string body(std::istreambuf_iterator<char>(f), {});
+        if (!body.empty()) {
+            desc += body.substr(0, 9000);
+        }
+    }
+    return desc;
+}
+
+static InputSpec infer_spec_with_ai(AICoach* ai, const std::string& problem_text, const InputSpec& fallback) {
+    if (!ai) return fallback;
+    std::string sys =
+        "你是测试点生成器。请从题面中抽取输入参数列表，并给出每个参数的类型与取值范围。"
+        "只输出严格 JSON，不要输出解释或 Markdown。"
+        "JSON 格式：{\"params\":[{\"name\":\"...\",\"type\":\"int|float|string\",\"min\":1,\"max\":100,\"normals\":[\"...\"]}]}。"
+        "若范围未知，可省略 min/max，但必须提供 normals。";
+    std::string user = problem_text.substr(0, 12000);
+    auto raw = ai->chat_sync(sys, user);
+    return parse_spec_json_or_fallback(raw, fallback);
+}
+
+static std::vector<PlannedCase> build_planned_cases(const InputSpec& spec,
+                                                    const std::vector<std::pair<std::string, std::string>>& db_cases,
+                                                    int max_cases,
+                                                    unsigned int seed) {
+    std::vector<PlannedCase> out;
+
+    for (size_t i = 0; i < db_cases.size(); i++) {
+        PlannedCase pc;
+        pc.tc.input = db_cases[i].first;
+        pc.tc.output = db_cases[i].second;
+        pc.tc.is_sample = true;
+        pc.name = fmt::format("样例 {}", i + 1);
+        pc.kind = "sample";
+        pc.priority = 1000;
+        pc.has_oracle = !trim_copy(pc.tc.output).empty();
+        out.push_back(std::move(pc));
+    }
+
+    if (spec.params.empty()) return out;
+
+    std::mt19937 rng(seed ? seed : static_cast<unsigned int>(std::time(nullptr)));
+
+    std::vector<std::string> baseline;
+    baseline.reserve(spec.params.size());
+    for (const auto& p : spec.params) {
+        if (!p.normals.empty()) baseline.push_back(p.normals.front());
+        else if (p.type == SimpleType::Int) baseline.push_back("1");
+        else baseline.push_back("x");
+    }
+
+    auto add_case = [&](std::vector<std::string> tokens,
+                        std::string name,
+                        std::string kind,
+                        int priority,
+                        std::vector<std::pair<std::string, std::string>> marks) {
+        if ((int)out.size() >= max_cases) return;
+        PlannedCase pc;
+        pc.tc.input = join_tokens(tokens);
+        pc.tc.output = "";
+        pc.tc.is_sample = false;
+        pc.name = std::move(name);
+        pc.kind = std::move(kind);
+        pc.priority = priority;
+        pc.has_oracle = false;
+        pc.coverage_marks = std::move(marks);
+        out.push_back(std::move(pc));
+    };
+
+    auto make_int_values = [&](const ParamSpec& p, long long typical) {
+        long long mn = p.min_i.value_or(typical - 10);
+        long long mx = p.max_i.value_or(typical + 10);
+        if (mn > mx) std::swap(mn, mx);
+        long long critical = (mn == mx) ? mn : (mn + 1);
+        long long common = typical;
+        long long mid = (mn + mx) / 2;
+        return std::vector<std::pair<std::string, long long>>{
+            {"min", mn},
+            {"max", mx},
+            {"critical", critical},
+            {"typical", mid},
+            {"common", common},
+        };
+    };
+
+    for (size_t i = 0; i < spec.params.size(); i++) {
+        const auto& p = spec.params[i];
+        std::vector<std::string> tokens = baseline;
+        long long typical = 1;
+        parse_i64(tokens[i], typical);
+
+        if (p.type == SimpleType::Int) {
+            auto vals = make_int_values(p, typical);
+            std::unordered_set<long long> seen;
+            for (auto& kv : vals) {
+                if (!seen.insert(kv.second).second) continue;
+                tokens[i] = std::to_string(kv.second);
+                add_case(tokens,
+                         fmt::format("{}={}", p.name, kv.first),
+                         kv.first,
+                         kv.first == "min" || kv.first == "max" ? 900 : 800,
+                         {{p.name, kv.first}});
+            }
+        } else {
+            std::vector<std::string> candidates;
+            if (!p.normals.empty()) candidates.push_back(p.normals.front());
+            candidates.push_back("x");
+            candidates.push_back("abc");
+            std::unordered_set<std::string> seen;
+            for (const auto& v : candidates) {
+                if (!seen.insert(v).second) continue;
+                tokens[i] = v;
+                add_case(tokens,
+                         fmt::format("{}=str", p.name),
+                         "normal",
+                         700,
+                         {{p.name, "normal"}});
+            }
+        }
+    }
+
+    if ((int)out.size() < max_cases) {
+        std::vector<std::string> all_min = baseline;
+        std::vector<std::string> all_max = baseline;
+        std::vector<std::pair<std::string, std::string>> marks_min;
+        std::vector<std::pair<std::string, std::string>> marks_max;
+        for (size_t i = 0; i < spec.params.size(); i++) {
+            const auto& p = spec.params[i];
+            long long typical = 1;
+            parse_i64(baseline[i], typical);
+            if (p.type == SimpleType::Int) {
+                long long mn = p.min_i.value_or(typical - 10);
+                long long mx = p.max_i.value_or(typical + 10);
+                if (mn > mx) std::swap(mn, mx);
+                all_min[i] = std::to_string(mn);
+                all_max[i] = std::to_string(mx);
+                marks_min.push_back({p.name, "min"});
+                marks_max.push_back({p.name, "max"});
+            }
+        }
+        add_case(all_min, "组合: 全最小", "combo", 850, marks_min);
+        add_case(all_max, "组合: 全最大", "combo", 850, marks_max);
+    }
+
+    if ((int)out.size() < max_cases && spec.params.size() >= 2) {
+        std::uniform_int_distribution<int> pick(0, 1);
+        for (size_t a = 0; a < spec.params.size() && (int)out.size() < max_cases; a++) {
+            for (size_t b = a + 1; b < spec.params.size() && (int)out.size() < max_cases; b++) {
+                auto tokens = baseline;
+                std::vector<std::pair<std::string, std::string>> marks;
+                for (size_t i : {a, b}) {
+                    const auto& p = spec.params[i];
+                    long long typical = 1;
+                    parse_i64(baseline[i], typical);
+                    if (p.type != SimpleType::Int) continue;
+                    long long mn = p.min_i.value_or(typical - 10);
+                    long long mx = p.max_i.value_or(typical + 10);
+                    if (mn > mx) std::swap(mn, mx);
+                    bool use_min = pick(rng) == 0;
+                    tokens[i] = std::to_string(use_min ? mn : mx);
+                    marks.push_back({p.name, use_min ? "min" : "max"});
+                }
+                if (!marks.empty()) add_case(tokens, "组合: 两参边界", "combo", 820, marks);
+            }
+        }
+    }
+
+    std::unordered_set<std::string> uniq;
+    std::vector<PlannedCase> dedup;
+    dedup.reserve(out.size());
+    for (auto& c : out) {
+        std::string key = c.tc.input + "\n----\n" + c.tc.output;
+        if (!uniq.insert(key).second) continue;
+        dedup.push_back(std::move(c));
+    }
+    return dedup;
+}
+
+static bool fill_expected_with_ai(AICoach* ai,
+                                  const std::string& problem_text,
+                                  std::vector<PlannedCase>& cases) {
+    if (!ai) return false;
+    std::vector<size_t> idx;
+    for (size_t i = 0; i < cases.size(); i++) {
+        if (trim_copy(cases[i].tc.output).empty()) idx.push_back(i);
+    }
+    if (idx.empty()) return true;
+
+    size_t pos = 0;
+    while (pos < idx.size()) {
+        size_t end = std::min(idx.size(), pos + 8);
+        std::string sys =
+            "你是在线评测器。给定题面与若干输入，请输出每个输入对应的标准输出。"
+            "只输出严格 JSON 数组（字符串数组），数组长度必须等于输入个数，顺序必须一致。"
+            "不要输出任何解释，不要输出 Markdown。";
+
+        std::string user;
+        user += "题面：\n";
+        user += problem_text.substr(0, 9000);
+        user += "\n\n输入列表：\n";
+        for (size_t k = pos; k < end; k++) {
+            user += fmt::format("Input {}:\n```\n{}\n```\n", (k - pos) + 1, cases[idx[k]].tc.input);
+        }
+
+        auto raw = ai->chat_sync(sys, user);
+        auto l = raw.find('[');
+        auto r = raw.rfind(']');
+        if (l == std::string::npos || r == std::string::npos || r <= l) return false;
+        try {
+            auto j = nlohmann::json::parse(raw.substr(l, r - l + 1));
+            if (!j.is_array() || j.size() != (end - pos)) return false;
+            for (size_t k = pos; k < end; k++) {
+                auto& v = j[k - pos];
+                if (v.is_string()) cases[idx[k]].tc.output = v.get<std::string>();
+                else cases[idx[k]].tc.output = v.dump();
+                cases[idx[k]].has_oracle = true;
+            }
+        } catch (...) {
+            return false;
+        }
+
+        pos = end;
+    }
+
+    return true;
 }
 
 struct Services {
@@ -91,6 +526,9 @@ struct CommandContext {
     std::string hint_pid, hint_file;
     std::string cfg_key, cfg_model;
     bool cfg_show = false;
+    int test_max_cases = 30;
+    std::string test_oracle = "auto";
+    bool test_ui = false;
 };
 
 // ─── Command Setup ────────────────────────────────────
@@ -161,7 +599,7 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
                 using namespace ftxui;
                 std::vector<std::string> entries;
                 for (const auto& p : problems) {
-                    entries.push_back(fmt::format("{:<4} {:<20} {}", p.display_id, p.id.substr(0, 18), p.title));
+                    entries.push_back(fmt::format("{:<4} {:<20} {}", p.display_id, p.id.substr(0, 18), ensure_utf8(p.title)));
                 }
                 int selected = 0;
                 auto menu = Menu(&entries, &selected);
@@ -204,7 +642,7 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
                 return;
             }
 
-            fmt::print(fg(fmt::color::cyan), "=== 开始练习: {} ===\n", prob.title);
+            fmt::print(fg(fmt::color::cyan), "=== 开始练习: {} ===\n", ensure_utf8(prob.title));
             if (fs::exists(prob.content_path)) {
                 fmt::print("题目描述: {}\n", prob.content_path);
             }
@@ -212,30 +650,11 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
             std::string ext = svc.cfg.language == "python" ? ".py" : ".cpp";
             std::string filename = "solution_" + prob.id + ext;
             if (!fs::exists(filename)) {
-                std::ofstream out(filename);
-                
-                std::string content = "";
-                if (svc.cfg.ai_enabled && svc.ai->enabled()) {
-                    fmt::print("[*] 正在通过 AI 生成代码模板...\n");
-                    if (fs::exists(prob.content_path)) {
-                        std::ifstream t(prob.content_path);
-                        std::string full_desc((std::istreambuf_iterator<char>(t)), {});
-                        content = svc.ai->generate_template(prob.title, full_desc, svc.cfg.language);
-                        // Strip markdown fences
-                        std::regex code_re(R"(```\w*\n([\s\S]*?)```)");
-                        std::smatch m;
-                        if (std::regex_search(content, m, code_re)) content = m[1].str();
-                    }
-                }
-
-                if (content.empty() || content.find("[Error]") != std::string::npos) {
-                    if (svc.cfg.language == "python") {
-                        out << "import sys\n\n# Problem: " << prob.title << "\n# URL: " << prob.url << "\n\nif __name__ == '__main__':\n    pass\n";
-                    } else {
-                        out << "// Problem: " << prob.title << "\n// URL: " << prob.url << "\n\n#include <iostream>\n#include <vector>\nusing namespace std;\n\nint main() {\n    return 0;\n}\n";
-                    }
+                std::ofstream out(filename, std::ios::out | std::ios::binary);
+                if (svc.cfg.language == "python") {
+                    out << "import sys\n\n\ndef main():\n    pass\n\n\nif __name__ == \"__main__\":\n    main()\n";
                 } else {
-                    out << content;
+                    out << "#include <iostream>\n\nint main() {\n    std::ios::sync_with_stdio(false);\n    std::cin.tie(nullptr);\n\n    return 0;\n}\n";
                 }
                 fmt::print(fg(fmt::color::green), "[+] 代码文件已就绪: {}\n", filename);
             }
@@ -261,9 +680,14 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
             fmt::print("{:<4} {:<20} {:<30} {:<8} {}\n", "TID", "ID", "标题", "难度", "来源");
             fmt::print("{}\n", std::string(80, '-'));
             for (auto& p : problems) {
-                std::string title = p.title;
+                std::string title = ensure_utf8(p.title);
                 if (title.length() > 27) title = title.substr(0, 25) + "..";
-                fmt::print("{:<4} {:<20} {:<30} {:<8} {}\n", p.display_id, p.id.substr(0, 18), title, p.difficulty, p.source);
+                fmt::print("{:<4} {:<20} {:<30} {:<8} {}\n",
+                           p.display_id,
+                           ensure_utf8(p.id.substr(0, 18)),
+                           title,
+                           ensure_utf8(p.difficulty),
+                           ensure_utf8(p.source));
             }
         } catch (const std::exception& e) {
             fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
@@ -286,7 +710,7 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
                 using namespace ftxui;
                 std::vector<std::string> entries;
                 for (const auto& p : problems) {
-                    entries.push_back(fmt::format("{:<4} {:<20} {}", p.display_id, p.id.substr(0, 18), p.title));
+                    entries.push_back(fmt::format("{:<4} {:<20} {}", p.display_id, p.id.substr(0, 18), ensure_utf8(p.title)));
                 }
                 int selected = 0;
                 auto menu = Menu(&entries, &selected);
@@ -372,6 +796,10 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
     // ── test ──
     auto test_cmd = app.add_subcommand("test", "运行测试用例");
     test_cmd->add_option("id", ctx.solve_pid, "题目 ID")->required();
+    test_cmd->add_option("--max", ctx.test_max_cases, "最多生成测试点数 (含样例)");
+    test_cmd->add_option("--oracle", ctx.test_oracle, "预期输出生成方式: auto/ai/none")
+        ->check(CLI::IsMember({"auto", "ai", "none"}));
+    test_cmd->add_flag("--ui", ctx.test_ui, "交互查看每个测试点输入输出详情");
     test_cmd->callback([&]() {
         try {
             auto svc = Services::load(find_root_or_die());
@@ -383,34 +811,200 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
             if (!fs::exists(src_file)) { fmt::print(fg(fmt::color::red), "[!] 找不到代码文件: {}\n", src_file); return; }
             
             auto db_cases = svc.db->get_test_cases(prob.id);
-            std::vector<TestCase> cases;
-            for(auto& p : db_cases) cases.push_back({p.first, p.second});
-            
-            fmt::print("[*] 正在测评...\n");
-            auto results = svc.judge->judge(src_file, svc.cfg.language, cases);
-            int ac = 0;
-            for (size_t i = 0; i < results.size(); i++) {
-                auto& r = results[i];
-                fmt::print("Case {}: {} ({}ms, {}KB)\n", i+1, r.verdict_str(), r.time_ms, r.memory_kb);
-                
-                if (r.verdict == Verdict::CE) {
-                    fmt::print(fg(fmt::color::red), "   [Compile Error]\n{}\n", r.message);
-                    auto diag = CompilerDoctor::diagnose(r.message);
-                    fmt::print(fg(fmt::color::yellow) | fmt::emphasis::bold, "   [医生诊断] {}\n", diag.title);
-                    fmt::print(fg(fmt::color::yellow), "   {}\n   建议: {}\n", diag.description, diag.suggestion);
-                } else if (r.verdict == Verdict::AC) {
-                    ac++;
+
+            if (ctx.test_max_cases <= 0) ctx.test_max_cases = 30;
+            bool ai_available = svc.cfg.ai_enabled && svc.ai && svc.ai->enabled();
+            std::string problem_text = build_problem_text(prob);
+
+            InputSpec fallback_spec = infer_spec_from_db_cases(db_cases);
+            InputSpec spec = fallback_spec;
+            if (ai_available) spec = infer_spec_with_ai(svc.ai.get(), problem_text, fallback_spec);
+
+            auto planned = build_planned_cases(spec, db_cases, std::max(ctx.test_max_cases, (int)db_cases.size()), 0);
+            if (planned.empty()) { fmt::print(fg(fmt::color::red), "[!] 无可用测试点（缺少样例/无法推断输入格式）。\n"); return; }
+
+            bool want_ai_oracle = (ctx.test_oracle == "ai") || (ctx.test_oracle == "auto" && ai_available);
+            if (want_ai_oracle) {
+                if (!ai_available) {
+                    fmt::print(fg(fmt::color::yellow), "[!] AI 不可用，跳过预期输出生成。\n");
                 } else {
-                    fmt::print(fg(fmt::color::dim_gray), "   Expected: {}\n   Actual:   {}\n", r.expected.substr(0, 40), r.output.substr(0, 40));
-                    if (r.verdict == Verdict::RE) {
-                        auto diag = CompilerDoctor::diagnose(r.message); // Try to diagnose RE if message contains info
-                        if (diag.title != "未知错误") {
-                             fmt::print(fg(fmt::color::yellow), "   [医生诊断] {} - {}\n", diag.title, diag.suggestion);
-                        }
+                    fmt::print("[*] 正在生成预期输出...\n");
+                    if (!fill_expected_with_ai(svc.ai.get(), problem_text, planned)) {
+                        fmt::print(fg(fmt::color::yellow), "[!] 预期输出生成失败，将以“仅运行检查”模式继续。\n");
                     }
                 }
             }
-            fmt::print("\n结果: {}/{} 通过\n", ac, results.size());
+
+            std::sort(planned.begin(), planned.end(), [](const PlannedCase& a, const PlannedCase& b) {
+                if (a.priority != b.priority) return a.priority > b.priority;
+                return a.name < b.name;
+            });
+
+            std::unordered_map<std::string, std::unordered_set<std::string>> coverage;
+            for (const auto& c : planned) {
+                for (const auto& mk : c.coverage_marks) coverage[mk.first].insert(mk.second);
+            }
+
+            std::string user_code;
+            {
+                std::ifstream f(src_file, std::ios::in | std::ios::binary);
+                user_code.assign(std::istreambuf_iterator<char>(f), {});
+            }
+
+            fmt::print("[*] 正在编译...\n");
+            std::string executable;
+            try {
+                executable = svc.judge->prepare(src_file, svc.cfg.language);
+            } catch (const std::exception& e) {
+                fmt::print(fg(fmt::color::red), "[Compile Error]\n{}\n", e.what());
+                auto diag = CompilerDoctor::diagnose(e.what());
+                fmt::print(fg(fmt::color::yellow) | fmt::emphasis::bold, "[医生诊断] {}\n", diag.title);
+                fmt::print(fg(fmt::color::yellow), "{}\n建议: {}\n", diag.description, diag.suggestion);
+                return;
+            }
+
+            fmt::print("[*] 正在执行 {} 个测试点...\n", planned.size());
+            std::vector<JudgeResult> results;
+            results.reserve(planned.size());
+
+            auto total_start = std::chrono::steady_clock::now();
+            for (size_t i = 0; i < planned.size(); i++) {
+                auto& tc = planned[i].tc;
+                auto res = svc.judge->run_prepared(executable, tc);
+                results.push_back(res);
+
+                std::string oracle_tag = trim_copy(tc.output).empty() ? "[未校验]" : "";
+                fmt::print("Case {:<3} {:<3} {:<8} ({}ms, {}KB) {} {}\n",
+                           i + 1,
+                           res.verdict_str(),
+                           planned[i].kind,
+                           res.time_ms,
+                           res.memory_kb,
+                           oracle_tag,
+                           planned[i].name);
+            }
+            svc.judge->cleanup_prepared(executable, svc.cfg.language);
+            auto total_end = std::chrono::steady_clock::now();
+            int total_ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start).count();
+
+            int oracle_cnt = 0, oracle_ac = 0;
+            int executed_ok = 0;
+            int max_time = 0, max_mem = 0;
+            std::vector<size_t> failed;
+            for (size_t i = 0; i < results.size(); i++) {
+                max_time = std::max(max_time, results[i].time_ms);
+                max_mem = std::max(max_mem, results[i].memory_kb);
+                bool has_oracle = !trim_copy(planned[i].tc.output).empty();
+                if (has_oracle) {
+                    oracle_cnt++;
+                    if (results[i].verdict == Verdict::AC) oracle_ac++;
+                    else failed.push_back(i);
+                } else {
+                    if (results[i].verdict != Verdict::CE && results[i].verdict != Verdict::SE) executed_ok++;
+                }
+            }
+
+            int expected_marks = 0, covered_marks = 0;
+            for (const auto& p : spec.params) {
+                if (p.type == SimpleType::Int) {
+                    expected_marks += 5;
+                    static const std::vector<std::string> cats = {"min", "max", "critical", "typical", "common"};
+                    auto it = coverage.find(p.name);
+                    for (const auto& c : cats) {
+                        if (it != coverage.end() && it->second.count(c)) covered_marks++;
+                    }
+                }
+            }
+            double coverage_pct = expected_marks ? (100.0 * covered_marks / expected_marks) : 0.0;
+            double pass_pct = oracle_cnt ? (100.0 * oracle_ac / oracle_cnt) : 0.0;
+
+            fmt::print("\n");
+            fmt::print(fg(fmt::color::cyan) | fmt::emphasis::bold, "测试报告\n");
+            fmt::print("  总测试点: {}\n", planned.size());
+            fmt::print("  有预期输出: {}  通过: {}  通过率: {:.1f}%\n", oracle_cnt, oracle_ac, pass_pct);
+            fmt::print("  仅运行检查: {} (无预期输出)\n", (int)planned.size() - oracle_cnt);
+            fmt::print("  覆盖率(参数维度): {:.1f}%\n", coverage_pct);
+            fmt::print("  总耗时: {}ms  最大单测: {}ms  峰值内存: {}KB\n", total_ms, max_time, max_mem);
+
+            if (!failed.empty()) {
+                fmt::print(fg(fmt::color::red) | fmt::emphasis::bold, "\n未通过测试点:\n");
+                for (size_t i : failed) {
+                    auto& r = results[i];
+                    fmt::print("  Case {}: {} {}\n", i + 1, r.verdict_str(), planned[i].name);
+                    fmt::print(fg(fmt::color::dim_gray), "    Input: {}\n", shorten_utf8_lossy(planned[i].tc.input, 240));
+                    fmt::print(fg(fmt::color::dim_gray), "    Expected: {}\n", shorten_utf8_lossy(r.expected, 240));
+                    fmt::print(fg(fmt::color::dim_gray), "    Actual:   {}\n", shorten_utf8_lossy(r.output, 240));
+                    if (r.verdict == Verdict::CE) {
+                        auto diag = CompilerDoctor::diagnose(r.message);
+                        fmt::print(fg(fmt::color::yellow), "    [医生诊断] {} - {}\n", diag.title, diag.suggestion);
+                    } else if (r.verdict == Verdict::RE) {
+                        auto diag = CompilerDoctor::diagnose(r.message);
+                        if (diag.title != "未知错误") fmt::print(fg(fmt::color::yellow), "    [医生诊断] {} - {}\n", diag.title, diag.suggestion);
+                    }
+                }
+
+                if (ai_available) {
+                    auto i = failed.front();
+                    std::string failure_info;
+                    failure_info += "Input:\n";
+                    failure_info += planned[i].tc.input.substr(0, 1200);
+                    failure_info += "\nExpected:\n";
+                    failure_info += results[i].expected.substr(0, 1200);
+                    failure_info += "\nActual:\n";
+                    failure_info += results[i].output.substr(0, 1200);
+
+                    auto mistakes = svc.ma->get_mistakes(prob.id);
+                    std::string history;
+                    for (size_t k = 0; k < mistakes.size() && k < 10; k++) {
+                        history += fmt::format("- {}: {}\n", mistakes[k].type, mistakes[k].description);
+                    }
+
+                    auto diag = svc.ai->diagnose(problem_text, user_code, failure_info, history);
+                    if (!diag.empty()) {
+                        fmt::print(fg(fmt::color::yellow) | fmt::emphasis::bold, "\nAI 分析(首个失败点):\n");
+                        fmt::print("{}\n", diag);
+                    }
+                }
+            }
+
+            if (ctx.test_ui) {
+                using namespace ftxui;
+                int selected = 0;
+                std::vector<std::string> entries;
+                entries.reserve(planned.size());
+                for (size_t i = 0; i < planned.size(); i++) {
+                    std::string oracle_tag = trim_copy(planned[i].tc.output).empty() ? "未校验" : "已校验";
+                    entries.push_back(fmt::format("{:>3} {:<3} {:<6} {:>4}ms {:>6}KB {}", i + 1, results[i].verdict_str(), oracle_tag, results[i].time_ms, results[i].memory_kb, planned[i].name));
+                }
+
+                auto menu = Menu(&entries, &selected);
+                auto renderer = Renderer(menu, [&] {
+                    auto& r = results[(size_t)selected];
+                    auto& p = planned[(size_t)selected];
+                    auto detail = vbox({
+                        text(fmt::format("Case {}  {}  {}", selected + 1, r.verdict_str(), p.name)),
+                        text(fmt::format("Kind: {}", p.kind)),
+                        text(fmt::format("Time: {}ms  Mem: {}KB", r.time_ms, r.memory_kb)),
+                        separator(),
+                        text("Input:"),
+                        paragraph(ensure_utf8(r.input.substr(0, 6000))) | frame | vscroll_indicator | size(HEIGHT, LESS_THAN, 8),
+                        separator(),
+                        text("Expected:"),
+                        paragraph(ensure_utf8(r.expected.substr(0, 6000))) | frame | vscroll_indicator | size(HEIGHT, LESS_THAN, 8),
+                        separator(),
+                        text("Actual:"),
+                        paragraph(ensure_utf8(r.output.substr(0, 6000))) | frame | vscroll_indicator | size(HEIGHT, LESS_THAN, 8),
+                    }) | flex;
+                    return hbox({
+                        window(text("测试点列表 (Enter 查看, q 退出)"), menu->Render() | frame | vscroll_indicator | size(WIDTH, LESS_THAN, 60)) | border,
+                        separator(),
+                        window(text("详情"), detail) | border,
+                    });
+                });
+
+                auto screen = ScreenInteractive::TerminalOutput();
+                screen.Loop(renderer);
+            }
         } catch (const std::exception& e) {
             fmt::print(fg(fmt::color::red), "[!] 测评异常: {}\n", e.what());
         }
@@ -426,10 +1020,33 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
             auto prob = svc.pm->get_problem(ctx.hint_pid);
             if (prob.id.empty()) { fmt::print(fg(fmt::color::red), "[!] 题目不存在。\n"); return; }
             
-            std::string desc = "";
+            std::string desc;
+            desc += fmt::format("题目: {}\n", ensure_utf8(prob.title));
+            desc += fmt::format("ID: {}\n", prob.id);
+            desc += fmt::format("来源: {}\n", ensure_utf8(prob.source));
+            desc += fmt::format("难度: {}\n", ensure_utf8(prob.difficulty));
+            desc += fmt::format("URL: {}\n\n", ensure_utf8(prob.url));
+
             if (fs::exists(prob.content_path)) {
                 std::ifstream f(prob.content_path);
-                desc.assign(std::istreambuf_iterator<char>(f), {});
+                std::string body(std::istreambuf_iterator<char>(f), {});
+                if (!body.empty()) {
+                    desc += "题面/笔记文件内容:\n";
+                    desc += body.substr(0, 6000);
+                    desc += "\n\n";
+                }
+            }
+
+            auto cases = svc.db->get_test_cases(prob.id);
+            if (!cases.empty()) {
+                desc += "测试用例(最多展示 3 个):\n";
+                for (size_t i = 0; i < cases.size() && i < 3; i++) {
+                    desc += fmt::format("Case {} Input:\n{}\nCase {} Expected:\n{}\n\n",
+                                        i + 1,
+                                        cases[i].first.substr(0, 800),
+                                        i + 1,
+                                        cases[i].second.substr(0, 800));
+                }
             }
             
             if (ctx.hint_file.empty()) ctx.hint_file = "solution_" + prob.id + (svc.cfg.language == "python" ? ".py" : ".cpp");

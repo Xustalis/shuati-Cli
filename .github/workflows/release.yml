@@ -4,18 +4,56 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch: {}
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build Release Assets
-    runs-on: windows-latest
-    
+  build_assets:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 4
+
     steps:
       - uses: actions/checkout@v4
-      
+
+      - name: Validate Version Tag (vX.Y.Z matches CMakeLists)
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag must be vX.Y.Z, got: $tag"
+            exit 1
+          fi
+          cmake_ver=$(python - <<'PY'
+import re, pathlib
+txt = pathlib.Path("CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
+m = re.search(r'project\\(shuati-cli\\s+VERSION\\s+([0-9]+\\.[0-9]+\\.[0-9]+)', txt)
+print(m.group(1) if m else "")
+PY
+          )
+          if [[ -z "$cmake_ver" ]]; then
+            echo "Failed to parse version from CMakeLists.txt"
+            exit 1
+          fi
+          if [[ "v$cmake_ver" != "$tag" ]]; then
+            echo "Tag ($tag) does not match CMakeLists.txt version ($cmake_ver)"
+            exit 1
+          fi
+
+      - name: Install Linux Dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev libx11-dev libxt-dev libgl1-mesa-dev xorg-dev
+
       - name: Set up CMake
         uses: jwlawson/actions-setup-cmake@v2
 
@@ -24,7 +62,8 @@ jobs:
         with:
           vcpkgJsonGlob: 'vcpkg.json'
 
-      - name: Configure CMake
+      - name: Configure CMake (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: >
           cmake -B build -S .
@@ -32,10 +71,38 @@ jobs:
           -A x64
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
 
-      - name: Build
-        run: cmake --build build --config Release
+      - name: Configure CMake (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: >
+          cmake -B build -S .
+          -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake"
+          -DCMAKE_BUILD_TYPE=Release
 
-      - name: Stage
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmake --build build --config Release --parallel
+
+      - name: Build (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: cmake --build build --parallel
+
+      - name: Verify Binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "build/Release/shuati.exe" --help
+
+      - name: Verify Binary (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          ./build/shuati --help
+
+      - name: Stage (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $dist = "dist"
@@ -44,15 +111,123 @@ jobs:
           Copy-Item -Force "install.ps1" "$dist/"
           Copy-Item -Force -Recurse "build/vcpkg_installed/x64-windows/bin/*" "$dist/"
 
-      - name: Pack
+      - name: Pack (Windows .zip)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           cd dist
           7z a ../shuati-windows-x64-${{ github.ref_name }}.zip *
-          
+
+      - name: Stage (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp -f build/shuati dist/
+          cp -f install.ps1 dist/ || true
+
+      - name: Pack (Linux/macOS .tar.gz)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          tar -czf "shuati-${{ runner.os }}-x64-${{ github.ref_name }}.tar.gz" -C dist .
+
+      - name: Checksums
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            file="shuati-windows-x64-${{ github.ref_name }}.zip"
+          else
+            file="shuati-${{ runner.os }}-x64-${{ github.ref_name }}.tar.gz"
+          fi
+          python - <<PY
+import hashlib, pathlib
+p = pathlib.Path("${file}")
+h = hashlib.sha256(p.read_bytes()).hexdigest()
+pathlib.Path("${file}.sha256").write_text(f"{h}  {p.name}\n")
+print(h)
+PY
+
+      - name: Upload Assets (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: assets-Windows
+          path: |
+            shuati-windows-x64-${{ github.ref_name }}.zip
+            shuati-windows-x64-${{ github.ref_name }}.zip.sha256
+
+      - name: Upload Assets (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: assets-Linux
+          path: |
+            shuati-Linux-x64-${{ github.ref_name }}.tar.gz
+            shuati-Linux-x64-${{ github.ref_name }}.tar.gz.sha256
+
+      - name: Upload Assets (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: assets-macOS
+          path: |
+            shuati-macOS-x64-${{ github.ref_name }}.tar.gz
+            shuati-macOS-x64-${{ github.ref_name }}.tar.gz.sha256
+
+  release:
+    name: Create GitHub Release
+    needs: build_assets
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: assets-*
+          merge-multiple: true
+
+      - name: Build Release Notes
+        shell: bash
+        run: |
+          python - <<'PY'
+import re, pathlib, os
+ver = os.environ["VER"]
+if ver.startswith("v"):
+  ver = ver[1:]
+ch = pathlib.Path("CHANGELOG.md")
+out = pathlib.Path("RELEASE_NOTES.md")
+if not ch.exists():
+  out.write_text(f"## {ver}\n\n(CHANGELOG.md not found)\n")
+  raise SystemExit(0)
+txt = ch.read_text(encoding="utf-8", errors="ignore")
+m = re.search(rf"^## \\[{re.escape(ver)}\\].*?$([\\s\\S]*?)(^## \\[|\\Z)", txt, flags=re.M)
+if not m:
+  out.write_text(f"## {ver}\n\n(No changelog section found for this version.)\n")
+else:
+  body = m.group(1).strip()
+  out.write_text(f"## {ver}\n\n{body}\n")
+PY
+        env:
+          VER: ${{ github.ref_name }}
+
+      - name: Combine Checksums
+        shell: bash
+        run: |
+          cat *.sha256 > checksums.sha256
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: shuati-windows-x64-${{ github.ref_name }}.zip
-          generate_release_notes: true
+          body_path: RELEASE_NOTES.md
+          files: |
+            shuati-windows-x64-${{ github.ref_name }}.zip
+            shuati-windows-x64-${{ github.ref_name }}.zip.sha256
+            shuati-Linux-x64-${{ github.ref_name }}.tar.gz
+            shuati-Linux-x64-${{ github.ref_name }}.tar.gz.sha256
+            shuati-macOS-x64-${{ github.ref_name }}.tar.gz
+            shuati-macOS-x64-${{ github.ref_name }}.tar.gz.sha256
+            checksums.sha256

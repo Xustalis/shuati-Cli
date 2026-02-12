@@ -10,6 +10,15 @@ Diagnosis CompilerDoctor::diagnose(const std::string& error_output) {
     d.description = "无法识别的编译错误，请检查代码逻辑。";
     d.suggestion = "请尝试阅读上方的英文报错信息，或者使用 'hint' 命令询问 AI。";
 
+    // 0. Unsupported C++ standard flag
+    std::smatch std_m;
+    if (std::regex_search(error_output, std_m, std::regex(R"(unrecognized\s+command\s+line\s+option\s+'(-std=[^']+)')"))) {
+        d.title = "编译器过旧：不支持该标准";
+        d.description = fmt::format("当前 g++ 不支持参数 {}。", std_m[1].str());
+        d.suggestion = "建议升级 MinGW-w64 / GCC 版本，或切换到支持 C++20 的编译器。也可临时改用较低标准（如 C++17）。";
+        return d;
+    }
+
     // 1. Missing semicolon
     // error: expected initializer before '...'
     // error: expected ';' before '...'

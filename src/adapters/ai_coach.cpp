@@ -99,14 +99,21 @@ std::string AICoach::call_api(const std::string& system_prompt, const std::strin
 }
 
 std::string AICoach::analyze(const std::string& problem_desc, const std::string& user_code, std::function<void(std::string)> callback) {
-    std::string sys = "You are an algorithm coach. "
-                      "Analyze the user's code for logical errors or provide a hint if they are stuck. "
-                      "Do NOT give the full solution code. "
-                      "Guide them with hints. Use Markdown. Use Chinese.";
+    std::string sys =
+        "你是一位算法竞赛教练，目标是帮助用户独立做出题目。"
+        "你必须只给提示，不得给出完整解法代码，不得给出可直接提交的最终代码。"
+        "如果需要展示代码，只能给局部片段（单个片段不超过 6 行），用于说明某个点。"
+        "优先基于用户当前代码指出问题/缺口，并给出下一步可执行的检查点。"
+        "输出使用中文，Markdown 格式，结构固定为："
+        "1) 题意复述（1-2 句）"
+        "2) 关键观察/思路（不超过 4 条要点）"
+        "3) 分步提示（最多 5 条，从易到难）"
+        "4) 下一步你应该做什么（1-3 条清单）";
 
     std::string user = fmt::format(
-        "Problem Description:\n{}\n\nUser's Current Code:\n```\n{}\n```\n\nPlease provide a hint.",
-        problem_desc.substr(0, 1000), user_code.substr(0, 2000));
+        "题目与上下文：\n{}\n\n用户当前代码：\n```\n{}\n```",
+        problem_desc.substr(0, 8000),
+        user_code.substr(0, 6000));
 
     // For streaming, call_api returns error string if any, otherwise empty.
     std::string err = call_api(sys, user, true, callback);
@@ -136,6 +143,10 @@ std::string AICoach::generate_template(const std::string& title, const std::stri
     
     std::string user = fmt::format("Title: {}\nDescription:\n{}", title, desc.substr(0, 1000));
     return call_api(sys, user);
+}
+
+std::string AICoach::chat_sync(const std::string& system_prompt, const std::string& user_prompt) {
+    return call_api(system_prompt, user_prompt, false, nullptr);
 }
 
 std::string AICoach::diagnose(const std::string& problem_desc, 
