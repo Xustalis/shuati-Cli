@@ -14,7 +14,7 @@
 [![CI](https://github.com/Xustalis/shuati-Cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Xustalis/shuati-Cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![C++20](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
-[![Version](https://img.shields.io/badge/version-1.2.0-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
+[![Version](https://img.shields.io/badge/version-1.3.0-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
 
 **Shuati CLI** 是一个基于命令行的算法练习工具：拉题、生成本地代码文件、运行本地测评、记录复习进度，并提供 AI 启发式提示。
 
@@ -91,7 +91,7 @@ Windows 也可以在解压目录运行安装脚本（可选）：
 
 ```bash
 git clone https://github.com/Xustalis/shuati-Cli.git
-cd shuati-CLI
+cd shuati-Cli
 
 git clone https://github.com/microsoft/vcpkg.git
 .\vcpkg\bootstrap-vcpkg.bat
@@ -250,7 +250,7 @@ chmod +x shuati
 
 ```bash
 git clone https://github.com/Xustalis/shuati-Cli.git
-cd shuati-CLI
+cd shuati-Cli
 
 git clone https://github.com/microsoft/vcpkg.git
 .\vcpkg\bootstrap-vcpkg.bat

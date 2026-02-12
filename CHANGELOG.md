@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0] - 2026-02-12
+
+### Added
+- Enhanced `test`: auto-generated boundary/normal/combo test points with optional AI oracle.
+- Test report: pass rate, parameter coverage, and per-case resource stats.
+- Interactive test viewer (`test --ui`) for input/output details.
+
+### Changed
+- CI/CD: faster multi-environment builds, artifact verification, multi-OS release assets, and checksums.
+- `solve`: generate minimal code skeleton instead of bloated templates.
+
+### Fixed
+- `list`: invalid UTF-8 output crash on Windows terminals.
+- `test`: compile standard fallback for older g++ versions.
+
 ## [1.2.0] - 2024-02-11
 
 ### Added

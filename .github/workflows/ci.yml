@@ -18,23 +18,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Clang-Format (optional)
+      - name: Install clang-format
         shell: bash
         run: |
-          if [[ ! -f .clang-format ]]; then
-            echo "No .clang-format found, skipping."
-            exit 0
-          fi
-          if ! command -v clang-format >/dev/null 2>&1; then
-            echo "clang-format not found, skipping."
-            exit 0
-          fi
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+
+      - name: Clang-Format
+        continue-on-error: true
+        shell: bash
+        run: |
           files=$(git ls-files '*.cpp' '*.cc' '*.cxx' '*.hpp' '*.h')
           if [[ -z "$files" ]]; then
-            echo "No C/C++ files found, skipping."
+            echo "No C/C++ files found."
             exit 0
           fi
-          clang-format --dry-run --Werror $files
+          clang-format -style=Google --dry-run --Werror $files
 
       - name: Clang-Tidy (optional)
         shell: bash
@@ -61,6 +60,7 @@ jobs:
 
     env:
       CMAKE_BUILD_PARALLEL_LEVEL: 4
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
     steps:
       - uses: actions/checkout@v4
@@ -69,7 +69,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libcurl4-openssl-dev libx11-dev libxt-dev libgl1-mesa-dev xorg-dev
+          sudo apt-get install -y libcurl4-openssl-dev libx11-dev libxt-dev libgl1-mesa-dev xorg-dev clang-format
 
       - name: Set up CMake
         uses: jwlawson/actions-setup-cmake@v2
