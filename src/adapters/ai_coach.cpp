@@ -95,7 +95,7 @@ std::string AICoach::call_api(const std::string& system_prompt, const std::strin
     }
 }
 
-void AICoach::analyze(const std::string& problem_desc, const std::string& user_code, std::function<void(std::string)> callback) {
+std::string AICoach::analyze(const std::string& problem_desc, const std::string& user_code, std::function<void(std::string)> callback) {
     std::string sys = "You are an algorithm coach. "
                       "Analyze the user's code for logical errors or provide a hint if they are stuck. "
                       "Do NOT give the full solution code. "
@@ -105,7 +105,12 @@ void AICoach::analyze(const std::string& problem_desc, const std::string& user_c
         "Problem Description:\n{}\n\nUser's Current Code:\n```\n{}\n```\n\nPlease provide a hint.",
         problem_desc.substr(0, 1000), user_code.substr(0, 2000));
 
-    call_api(sys, user, true, callback);
+    // For streaming, call_api returns error string if any, otherwise empty.
+    std::string err = call_api(sys, user, true, callback);
+    if (!err.empty() && callback) {
+        callback(err);
+    }
+    return err;
 }
 
 std::string AICoach::analyze_sync(const std::string& problem_desc, const std::string& user_code) {

@@ -17,7 +17,7 @@ public:
 
     // Send code + error context to AI, get coaching hint (not full solution)
     // Stream hint to stdout or callback
-    void analyze(const std::string& problem_desc,
+    std::string analyze(const std::string& problem_desc,
                  const std::string& user_code,
                  std::function<void(std::string)> callback);
 
