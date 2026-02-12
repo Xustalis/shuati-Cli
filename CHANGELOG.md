@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.1] - 2026-02-12
+
+### Fixed
+- `list`: prevent SQLite malformed text from throwing `invalid utf8` and crashing.
+
 ## [1.3.0] - 2026-02-12
 
 ### Added

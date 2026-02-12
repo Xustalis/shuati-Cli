@@ -14,7 +14,7 @@
 [![CI](https://github.com/Xustalis/shuati-Cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Xustalis/shuati-Cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![C++20](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
-[![Version](https://img.shields.io/badge/version-1.3.0-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
+[![Version](https://img.shields.io/badge/version-1.3.1-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
 
 **Shuati CLI** 是一个基于命令行的算法练习工具：拉题、生成本地代码文件、运行本地测评、记录复习进度，并提供 AI 启发式提示。
 
@@ -237,7 +237,7 @@ chmod +x shuati
 
 ### 3) `list` 输出 `invalid utf8`
 
-- 这通常是终端编码或抓取内容编码导致。项目已在 Windows 下对输出做了 UTF-8 兜底处理；
+- 这通常是抓取内容/本地数据库中存在非 UTF-8 文本导致。升级到 v1.3.1+ 后会对 SQLite 读取做兜底转换；
 - 若仍遇到，建议使用 Windows Terminal 并将编码设置为 UTF-8。
 
 ### 4) `test` 没有测试用例/无法校验
