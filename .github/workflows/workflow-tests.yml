@@ -19,7 +19,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: rhysd/actionlint@v1
+      - name: Install actionlint
+        shell: bash
+        run: |
+          ver="1.7.10"
+          url="https://github.com/rhysd/actionlint/releases/download/v${ver}/actionlint_${ver}_linux_amd64.tar.gz"
+          curl -fsSL "$url" -o actionlint.tgz
+          tar -xzf actionlint.tgz actionlint
+          chmod +x ./actionlint
+      - name: Lint workflows
+        shell: bash
+        run: ./actionlint -no-color -shellcheck "" -pyflakes ""
 
   release_tools:
     runs-on: ubuntu-latest

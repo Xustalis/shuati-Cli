@@ -69,15 +69,73 @@ else {
 
     Install-FromDirectory -FromDir $extractDir -ToDir $InstallDir
 }
+# Environment Variable Update Logic
+try {
+    $reg = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Environment", $true)
+    $rawPath = $reg.GetValue("Path", "", [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    
+    # Normalize paths for comparison (remove trailing slashes, case insensitive)
+    $normInstallDir = $InstallDir.TrimEnd('\')
+    
+    $pathParts = $rawPath -split ';'
+    $alreadyExists = $false
+    foreach ($part in $pathParts) {
+        if ($part.Trim().TrimEnd('\') -eq $normInstallDir) {
+            $alreadyExists = $true
+            break
+        }
+    }
 
-$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($UserPath -notlike "*$InstallDir*") {
-    [Environment]::SetEnvironmentVariable("Path", "$UserPath;$InstallDir", "User")
-    Write-Host "[+] 已添加 $InstallDir 到用户 PATH 环境变量。" -ForegroundColor Green
-    Write-Host "    注意: 您需要重启终端 (Terminal) 才能生效。" -ForegroundColor Yellow
+    if (-not $alreadyExists) {
+        if ([string]::IsNullOrWhiteSpace($rawPath)) {
+            $newPath = $InstallDir
+        }
+        else {
+            $newPath = "$rawPath;$InstallDir"
+        }
+        
+        $reg.SetValue("Path", $newPath, [Microsoft.Win32.RegistryValueKind]::ExpandString)
+        $reg.Close()
+        
+        Write-Host "[+] Verified: Path updated in Registry." -ForegroundColor Green
+        
+        # Broadcast WM_SETTINGCHANGE
+        $code = @"
+using System;
+using System.Runtime.InteropServices;
+public class EnvUpdate {
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    public static extern IntPtr SendMessageTimeout(
+        IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam,
+        uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
 }
-else {
-    Write-Host "[=] PATH 环境变量已配置。" -ForegroundColor Green
+"@
+        try {
+            Add-Type -TypeDefinition $code -Name "EnvUpdate" -Namespace "ShuatiInstaller" -MemberDefinition "" -ErrorAction SilentlyContinue
+            $HWND_BROADCAST = [IntPtr]0xffff
+            $WM_SETTINGCHANGE = 0x001A
+            $SMTO_ABORTIFHUNG = 0x0002
+            $result = [UIntPtr]::Zero
+            
+            [ShuatiInstaller.EnvUpdate]::SendMessageTimeout(
+                $HWND_BROADCAST, $WM_SETTINGCHANGE, [UIntPtr]::Zero, "Environment",
+                $SMTO_ABORTIFHUNG, 5000, [ref]$result
+            ) | Out-Null
+            Write-Host "[+] Environment change broadcasted." -ForegroundColor Green
+        }
+        catch {
+            Write-Warning "Could not broadcast environment change. A restart fits best."
+        }
+        
+        Write-Host "    注意: 为了让更改在当前终端生效，您可能需要重启终端。" -ForegroundColor Yellow
+    }
+    else {
+        $reg.Close()
+        Write-Host "[=] PATH 环境变量已配置 (Verified in Registry)." -ForegroundColor Green
+    }
+}
+catch {
+    Write-Error "Failed to update PATH in Registry: $_"
 }
 
 Write-Host "`n正在初始化..." -ForegroundColor Cyan

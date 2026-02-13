@@ -45,13 +45,7 @@ jobs:
             echo "Tag must be vX.Y.Z, got: $tag"
             exit 1
           fi
-          cmake_ver=$(python - <<'PY'
-          import re, pathlib
-          txt = pathlib.Path("CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
-          m = re.search(r'project\(shuati-cli\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)', txt)
-          print(m.group(1) if m else "")
-          PY
-          )
+          cmake_ver="$(python -c "import re, pathlib; txt=pathlib.Path('CMakeLists.txt').read_text(encoding='utf-8', errors='ignore'); m=re.search(r'project\\(shuati-cli\\s+VERSION\\s+([0-9]+\\.[0-9]+\\.[0-9]+)', txt); print(m.group(1) if m else '')")"
           if [[ -z "$cmake_ver" ]]; then
             echo "Failed to parse version from CMakeLists.txt"
             exit 1
@@ -60,13 +54,7 @@ jobs:
             echo "Tag ($tag) does not match CMakeLists.txt version ($cmake_ver)"
             exit 1
           fi
-          vcpkg_ver=$(python - <<'PY'
-          import json, pathlib
-          p = pathlib.Path("vcpkg.json")
-          obj = json.loads(p.read_text(encoding="utf-8", errors="ignore"))
-          print(obj.get("version-string",""))
-          PY
-          )
+          vcpkg_ver="$(python -c "import json, pathlib; obj=json.loads(pathlib.Path('vcpkg.json').read_text(encoding='utf-8', errors='ignore')); print(obj.get('version-string',''))")"
           if [[ -z "$vcpkg_ver" ]]; then
             echo "Failed to parse version-string from vcpkg.json"
             exit 1
@@ -165,6 +153,18 @@ jobs:
           cd dist
           7z a ../shuati-windows-x64-${{ github.ref_name }}.zip *
 
+      - name: Pack (Windows Installer .exe)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $ver = "${{ github.ref_name }}".TrimStart("v")
+          $env:SHUATI_VERSION = $ver
+          $env:SHUATI_OUTPUT_NAME = "shuati-setup-x64-${{ github.ref_name }}"
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\\ISCC.exe"
+          if (!(Test-Path $iscc)) { throw "ISCC.exe not found: $iscc" }
+          & $iscc "installer\\shuati.iss"
+
       - name: Stage (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
@@ -184,18 +184,16 @@ jobs:
       - name: Checksums
         shell: bash
         run: |
+          sha_one () {
+            f="$1"
+            python -c "import hashlib, pathlib; p=pathlib.Path(r'''$f'''); h=hashlib.sha256(p.read_bytes()).hexdigest(); pathlib.Path(str(p)+'.sha256').write_text(f\"{h}  {p.name}\\n\"); print(h)"
+          }
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            file="shuati-windows-x64-${{ github.ref_name }}.zip"
+            sha_one "shuati-windows-x64-${{ github.ref_name }}.zip"
+            sha_one "shuati-setup-x64-${{ github.ref_name }}.exe"
           else
-            file="shuati-${{ runner.os }}-x64-${{ github.ref_name }}.tar.gz"
+            sha_one "shuati-${{ runner.os }}-x64-${{ github.ref_name }}.tar.gz"
           fi
-          python - <<PY
-          import hashlib, pathlib
-          p = pathlib.Path("${file}")
-          h = hashlib.sha256(p.read_bytes()).hexdigest()
-          pathlib.Path("${file}.sha256").write_text(f"{h}  {p.name}\n")
-          print(h)
-          PY
 
       - name: Upload Assets (Windows)
         if: runner.os == 'Windows'
@@ -205,6 +203,8 @@ jobs:
           path: |
             shuati-windows-x64-${{ github.ref_name }}.zip
             shuati-windows-x64-${{ github.ref_name }}.zip.sha256
+            shuati-setup-x64-${{ github.ref_name }}.exe
+            shuati-setup-x64-${{ github.ref_name }}.exe.sha256
 
       - name: Upload Assets (Linux)
         if: runner.os == 'Linux'
@@ -242,24 +242,20 @@ jobs:
       - name: Build Release Notes
         shell: bash
         run: |
-          python - <<'PY'
-          import re, pathlib, os
-          ver = os.environ["VER"]
-          if ver.startswith("v"):
-            ver = ver[1:]
-          ch = pathlib.Path("CHANGELOG.md")
-          out = pathlib.Path("RELEASE_NOTES.md")
-          if not ch.exists():
-            out.write_text(f"## {ver}\n\n(CHANGELOG.md not found)\n")
-            raise SystemExit(0)
-          txt = ch.read_text(encoding="utf-8", errors="ignore")
-          m = re.search(rf"^## \[{re.escape(ver)}\].*?^([\s\S]*?)(^## \[|\Z)", txt, flags=re.M)
-          if not m:
-            out.write_text(f"## {ver}\n\n(No changelog section found for this version.)\n")
-          else:
-            body = m.group(1).strip()
-            out.write_text(f"## {ver}\n\n{body}\n")
-          PY
+          ver="${VER#v}"
+          if [[ ! -f CHANGELOG.md ]]; then
+            printf "## %s\n\n(CHANGELOG.md not found)\n" "$ver" > RELEASE_NOTES.md
+            exit 0
+          fi
+          {
+            printf "## %s\n\n" "$ver"
+            awk -v ver="$ver" '
+              $0 ~ "^## \\[" ver "\\]" {found=1; next}
+              found && $0 ~ "^## \\[" {exit}
+              found {print}
+            ' CHANGELOG.md | sed -e 's/[[:space:]]*$//' | awk 'NF{p=1} p{print}'
+            echo ""
+          } > RELEASE_NOTES.md
         env:
           VER: ${{ github.ref_name }}
 
@@ -278,6 +274,8 @@ jobs:
           files=(
             "shuati-windows-x64-${tag}.zip"
             "shuati-windows-x64-${tag}.zip.sha256"
+            "shuati-setup-x64-${tag}.exe"
+            "shuati-setup-x64-${tag}.exe.sha256"
             "shuati-Linux-x64-${tag}.tar.gz"
             "shuati-Linux-x64-${tag}.tar.gz.sha256"
             "shuati-macOS-x64-${tag}.tar.gz"
@@ -328,11 +326,7 @@ jobs:
           fi
           tag="${GITHUB_REF_NAME}"
           repo="${GITHUB_REPOSITORY}"
-          payload=$(TAG="$tag" REPO="$repo" python - <<'PY'
-          import json, os
-          tag=os.environ["TAG"]
-          repo=os.environ["REPO"]
-          print(json.dumps({"text": f"✅ {repo} 发布完成: {tag}\\nhttps://github.com/{repo}/releases/tag/{tag}"}))
-          PY
-          )
+          export TAG="$tag"
+          export REPO="$repo"
+          payload="$(python -c "import json, os; tag=os.environ['TAG']; repo=os.environ['REPO']; print(json.dumps({'text': f'✅ {repo} 发布完成: {tag}\\\\nhttps://github.com/{repo}/releases/tag/{tag}'}))")"
           curl -sS -X POST -H "Content-Type: application/json" -d "$payload" "$WEBHOOK"
