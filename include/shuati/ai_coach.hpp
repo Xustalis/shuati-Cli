@@ -6,9 +6,11 @@
 
 namespace shuati {
 
+class MemoryManager;
+
 class AICoach {
 public:
-    explicit AICoach(const Config& cfg);
+    explicit AICoach(const Config& cfg, MemoryManager* mm = nullptr);
 
     // Check if AI is enabled (has key)
     bool enabled() const;
@@ -38,6 +40,7 @@ public:
 
 private:
     Config cfg_;
+    MemoryManager* mm_ = nullptr;
 
     // Call DeepSeek API
     std::string call_api(const std::string& system_prompt, const std::string& user_prompt, bool stream = false, std::function<void(std::string)> callback = nullptr);

@@ -14,7 +14,7 @@
 [![CI](https://github.com/Xustalis/shuati-Cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Xustalis/shuati-Cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![C++20](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
-[![Version](https://img.shields.io/badge/version-1.3.1-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
+[![Version](https://img.shields.io/badge/version-1.4.1-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
 
 **Shuati CLI** 是一个基于命令行的算法练习工具：拉题、生成本地代码文件、运行本地测评、记录复习进度，并提供 AI 启发式提示。
 
@@ -178,37 +178,37 @@ shuati config --language cpp
 
 ## 安装指南
 
-### Windows
+### 安装步骤
 
-1. 下载 Release 压缩包并解压
-2. 将解压目录加入 `PATH`
-3. 验证：
+1. 前往 [Releases](https://github.com/Xustalis/shuati-Cli/releases) 页面下载对应平台的压缩包。
+2. **Windows 用户**：
+   - 解压下载的 zip 文件。
+   - 右键点击 `install.ps1` 并选择 "使用 PowerShell 运行" (或在终端运行 `.\install.ps1`)，脚本会自动将 `shuati.exe` 添加到 PATH 并初始化。
+   - 或者手动将解压目录添加到 PATH 环境变量。
 
-```powershell
-shuati --help
-```
+3. **Linux/macOS 用户**：
+   - 下载对应二进制文件。
+   - 赋予可执行权限并移动到 PATH 路径下：
+     ```bash
+     chmod +x shuati
+     mv shuati /usr/local/bin/  # 或 ~/.local/bin
+     ```
 
-### Linux
+4. **验证文件完整性** (推荐)：
+   下载对应的 `.sha256` 文件并运行校验：
+   ```bash
+   # Windows (PowerShell)
+   Get-FileHash .\shuati.exe -Algorithm SHA256
+   # 对比输出的 Hash 与 .sha256 文件内容是否一致
 
-1. 下载 `.tar.gz` 解压（或源码构建）
-2. 放到 `~/.local/bin` 并确保在 `PATH` 中
-
-```bash
-mkdir -p ~/.local/bin
-tar -xzf shuati-Linux-x64-vX.Y.Z.tar.gz
-cp -f shuati ~/.local/bin/shuati
-chmod +x ~/.local/bin/shuati
-shuati --help
-```
-
-### macOS
-
-流程与 Linux 类似（或源码构建）：
-
-```bash
-chmod +x shuati
-./shuati --help
-```
+   # Linux/macOS
+   shasum -a 256 -c shuati-Linux.sha256
+   ```
+4. 将二进制文件所在目录加入系统 `PATH` 环境变量。
+5. 验证安装：
+   ```bash
+   shuati --help
+   ```
 
 ## 本地判题引擎
 
@@ -258,6 +258,22 @@ git clone https://github.com/microsoft/vcpkg.git
 cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=.\vcpkg\scripts\buildsystems\vcpkg.cmake
 cmake --build build --config Debug
 .\build\Debug\shuati.exe --help
+```
+
+### 运行内部测试
+
+项目包含一些内部测试的可执行文件，用于验证核心模块的功能：
+
+- `test_version`: 验证版本号解析逻辑
+- `test_judge_complex`: 验证判题引擎（需要 gcc 环境）
+- `test_memory`: 验证记忆管理模块
+
+运行方式（在 build 目录下）：
+
+```bash
+ctest --verbose
+# 或者直接运行
+.\build\Debug\test_judge_complex.exe
 ```
 
 ## 自动化发布

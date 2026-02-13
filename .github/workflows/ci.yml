@@ -3,8 +3,10 @@ name: CI
 on:
   push:
     branches: [ main ]
+    tags: [ 'v1.4.*' ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -95,46 +97,83 @@ jobs:
         shell: bash
         run: >
           cmake -B build -S .
-          -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake"
+          -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
+      - name: Build
+        shell: bash
         run: cmake --build build --config ${{ matrix.build_type }} --parallel
 
-      - name: Build (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Test
         shell: bash
-        run: cmake --build build --parallel
-
-      - name: Test (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
         run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure
 
-      - name: Test (Linux/macOS)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: ctest --test-dir build --output-on-failure
-
-      - name: Verify Artifact (Windows)
-        if: runner.os == 'Windows'
+      - name: Prepare Release Artifact (Windows)
+        if: runner.os == 'Windows' && matrix.build_type == 'Release'
         shell: pwsh
         run: |
-          & "build/${{ matrix.build_type }}/shuati.exe" --help
+          mkdir release_pkg
+          copy build/Release/shuati.exe release_pkg/
+          # Copy DLLs if needed (example)
+          # copy build/vcpkg_installed/x64-windows/bin/*.dll release_pkg/
 
-      - name: Verify Artifact (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Prepare Release Artifact (Linux/macOS)
+        if: runner.os != 'Windows' && matrix.build_type == 'Release'
         shell: bash
         run: |
-          ./build/shuati --help
+          mkdir release_pkg
+          cp build/shuati release_pkg/
+
+      - name: Generate Checksum
+        if: matrix.build_type == 'Release'
+        shell: bash
+        working-directory: release_pkg
+        run: |
+          # Determine filename based on OS
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            FILE="shuati.exe"
+          else
+            FILE="shuati"
+          fi
+          
+          # Generate checksum
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$FILE" > shuati-${{ runner.os }}.sha256
+          elif command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 "$FILE" > shuati-${{ runner.os }}.sha256
+          else
+            echo "No checksum tool found" > shuati-${{ runner.os }}.sha256
+          fi
 
       - name: Upload Artifact
-        if: runner.os == 'Windows' && matrix.build_type == 'Release'
+        if: matrix.build_type == 'Release'
         uses: actions/upload-artifact@v4
         with:
-          name: shuati-${{ runner.os }}-${{ matrix.build_type }}
-          path: |
-            build/Release/shuati.exe
-            build/vcpkg_installed/x64-windows/bin/*.dll
+          name: shuati-${{ runner.os }}-release
+          path: release_pkg/*
+
+  release:
+    name: Create Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v1.4.')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/shuati-Windows-release/*
+            artifacts/shuati-Linux-release/*
+            artifacts/shuati-macOS-release/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false

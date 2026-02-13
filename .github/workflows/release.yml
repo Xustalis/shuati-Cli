@@ -36,7 +36,7 @@ jobs:
           cmake_ver=$(python - <<'PY'
 import re, pathlib
 txt = pathlib.Path("CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
-m = re.search(r'project\\(shuati-cli\\s+VERSION\\s+([0-9]+\\.[0-9]+\\.[0-9]+)', txt)
+m = re.search(r'project\(shuati-cli\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)', txt)
 print(m.group(1) if m else "")
 PY
           )
@@ -240,7 +240,7 @@ if not ch.exists():
   out.write_text(f"## {ver}\n\n(CHANGELOG.md not found)\n")
   raise SystemExit(0)
 txt = ch.read_text(encoding="utf-8", errors="ignore")
-m = re.search(rf"^## \\[{re.escape(ver)}\\].*?$([\\s\\S]*?)(^## \\[|\\Z)", txt, flags=re.M)
+m = re.search(rf"^## \[{re.escape(ver)}\].*?^([\s\S]*?)(^## \[|\Z)", txt, flags=re.M)
 if not m:
   out.write_text(f"## {ver}\n\n(No changelog section found for this version.)\n")
 else:

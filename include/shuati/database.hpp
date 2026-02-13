@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <vector>
 #include <ctime>
+#include <optional>
 #include "shuati/types.hpp"
 
 namespace shuati {
@@ -38,6 +39,20 @@ public:
     // Test Cases
     void add_test_case(const std::string& problem_id, const std::string& input, const std::string& output, bool is_sample = true);
     std::vector<std::pair<std::string, std::string>> get_test_cases(const std::string& problem_id);
+
+    // Memory System (V3)
+    // Mistakes (Abstract Patterns)
+    void upsert_memory_mistake(const std::string& tags, const std::string& pattern, const std::string& example_id);
+    std::vector<MemoryMistake> get_all_memory_mistakes();
+    
+    // Mastery
+    void upsert_mastery(const std::string& skill, double confidence);
+    std::optional<Mastery> get_mastery(const std::string& skill);
+    std::vector<Mastery> get_all_mastery();
+
+    // User Profile
+    void update_user_profile(int elo, const std::string& preferences);
+    UserProfile get_user_profile();
 
 private:
     std::unique_ptr<SQLite::Database> db_;

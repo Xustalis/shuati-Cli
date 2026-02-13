@@ -1,4 +1,5 @@
 #include "shuati/ai_coach.hpp"
+#include "shuati/memory_manager.hpp"
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
 #include <fmt/core.h>
@@ -6,7 +7,7 @@
 
 namespace shuati {
 
-AICoach::AICoach(const Config& cfg) : cfg_(cfg) {}
+AICoach::AICoach(const Config& cfg, MemoryManager* mm) : cfg_(cfg), mm_(mm) {}
 
 std::string AICoach::call_api(const std::string& system_prompt, const std::string& user_prompt, bool stream, std::function<void(std::string)> callback) {
     if (cfg_.api_key.empty()) {
@@ -121,16 +122,31 @@ std::string AICoach::analyze(const std::string& problem_desc, const std::string&
         "{ \"new_mistake\": \"...\", \"mastery_reinforce\": \"...\" }\n"
         "-->";
 
+    if (mm_) {
+        // RAG-Lite: Inject memory context
+        std::string memory_context = mm_->get_relevant_context("");
+        if (!memory_context.empty()) {
+            sys += "\n\n" + memory_context;
+        }
+    }
+
     std::string user = fmt::format(
         "题目信息：\n{}\n\n用户代码：\n```cpp\n{}\n```",
         problem_desc.substr(0, 8000),
         user_code.substr(0, 6000));
 
-    // Rolling update: Ensure timeout is sufficient
-    // We modify call_api to use 120s timeout for stream=true inside call_api logic
-    // But call_api hardcodes 60s in the current impl. We need to update call_api first.
-    // Let's passed a customized timeout or update default in next step.
-    std::string err = call_api(sys, user, true, callback);
+    std::string full_response;
+    auto wrapped = [&](std::string chunk) {
+        full_response += chunk;
+        if (callback) callback(chunk);
+    };
+    
+    std::string err = call_api(sys, user, true, wrapped);
+    
+    if (err.empty() && mm_) {
+        mm_->update_memory_from_response(full_response);
+    }
+    
     if (!err.empty() && callback) {
         callback(err);
     }

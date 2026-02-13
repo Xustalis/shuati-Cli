@@ -35,11 +35,13 @@
 #include "shuati/problem_manager.hpp"
 #include "shuati/mistake_analyzer.hpp"
 #include "shuati/ai_coach.hpp"
+#include "shuati/memory_manager.hpp"
 #include "shuati/sm2_algorithm.hpp"
 #include "shuati/judge.hpp"
 #include "shuati/compiler_doctor.hpp"
 #include "shuati/version.hpp"
 #include "shuati/logger.hpp"
+#include "shuati/utils/encoding.hpp"
 
 // Header separation fixes ODR violations
 #include "shuati/adapters/leetcode_crawler.hpp"
@@ -50,6 +52,8 @@
 
 namespace fs = std::filesystem;
 using namespace shuati;
+using shuati::utils::ensure_utf8;
+using shuati::utils::shorten_utf8_lossy;
 
 // ─── Helpers ──────────────────────────────────────────
 
@@ -67,85 +71,15 @@ static fs::path find_root_or_die() {
 }
 
 #ifdef _WIN32
-static bool is_valid_utf8(const std::string& s) {
-    size_t i = 0;
-    while (i < s.size()) {
-        unsigned char c = static_cast<unsigned char>(s[i]);
-        if (c <= 0x7F) {
-            i++;
-            continue;
-        }
-
-        size_t need = 0;
-        if ((c & 0xE0) == 0xC0) need = 2;
-        else if ((c & 0xF0) == 0xE0) need = 3;
-        else if ((c & 0xF8) == 0xF0) need = 4;
-        else return false;
-
-        if (i + need > s.size()) return false;
-        for (size_t j = 1; j < need; j++) {
-            unsigned char cc = static_cast<unsigned char>(s[i + j]);
-            if ((cc & 0xC0) != 0x80) return false;
-        }
-        i += need;
-    }
-    return true;
-}
-
-static std::string ascii_fallback(const std::string& s) {
-    std::string out;
-    out.reserve(s.size());
-    for (unsigned char c : s) {
-        if (c >= 0x20 && c <= 0x7E) out.push_back(static_cast<char>(c));
-        else if (c == '\n' || c == '\r' || c == '\t') out.push_back(static_cast<char>(c));
-        else out.push_back('?');
-    }
-    return out;
-}
-
-static std::string acp_to_utf8(const std::string& s) {
-    if (s.empty()) return s;
-    int wlen = MultiByteToWideChar(CP_ACP, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-    if (wlen <= 0) return ascii_fallback(s);
-    std::wstring w(static_cast<size_t>(wlen), L'\0');
-    MultiByteToWideChar(CP_ACP, 0, s.data(), static_cast<int>(s.size()), w.data(), wlen);
-
-    int u8len = WideCharToMultiByte(CP_UTF8, 0, w.data(), wlen, nullptr, 0, nullptr, nullptr);
-    if (u8len <= 0) return ascii_fallback(s);
-    std::string out(static_cast<size_t>(u8len), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, w.data(), wlen, out.data(), u8len, nullptr, nullptr);
-    return out;
-}
-
-static std::string ensure_utf8(const std::string& s) {
-    if (is_valid_utf8(s)) return s;
-    auto converted = acp_to_utf8(s);
-    if (is_valid_utf8(converted)) return converted;
-    return ascii_fallback(s);
-}
-
-static std::string wide_to_utf8(const std::wstring& w) {
-    if (w.empty()) return {};
-    int u8len = WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), nullptr, 0, nullptr, nullptr);
-    if (u8len <= 0) return {};
-    std::string out((size_t)u8len, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), out.data(), u8len, nullptr, nullptr);
-    return out;
-}
-
 static std::string executable_path_utf8() {
     std::wstring wpath;
     wpath.resize(32768);
     DWORD n = GetModuleFileNameW(nullptr, wpath.data(), (DWORD)wpath.size());
     if (n == 0) return {};
     wpath.resize(n);
-    return wide_to_utf8(wpath);
+    return shuati::utils::wide_to_utf8(wpath);
 }
 #else
-static std::string ensure_utf8(const std::string& s) {
-    return s;
-}
-
 static std::string executable_path_utf8() {
     return {};
 }
@@ -209,23 +143,6 @@ static std::string trim_copy(const std::string& s) {
     return s.substr(b, e - b + 1);
 }
 
-static std::string shorten_utf8_lossy(const std::string& s, size_t max_bytes) {
-    if (s.size() <= max_bytes) return ensure_utf8(s);
-    size_t len = max_bytes;
-    while (len > 0) {
-        unsigned char c = static_cast<unsigned char>(s[len]);
-        // If c is a continuation byte (10xxxxxx), backtrack.
-        // If c is start byte (0xxxxxxx or 11xxxxxx), we can split BEFORE it? 
-        // No, if s[len] is the start of the NEXT char, then s[0...len] is valid? 
-        // s.substr(0, len) includes index 0 to len-1.
-        // So if s[len] is the start of a character, then indices 0..len-1 end at a character boundary.
-        if ((c & 0xC0) != 0x80) break; 
-        len--;
-    }
-    if (len == 0) return "...";
-    std::string cut = s.substr(0, len);
-    return ensure_utf8(cut) + "...";
-}
 
 static InputSpec infer_spec_from_db_cases(const std::vector<std::pair<std::string, std::string>>& db_cases) {
     InputSpec spec;
@@ -526,6 +443,7 @@ struct Services {
     std::shared_ptr<Database>       db;
     std::shared_ptr<ProblemManager> pm;
     std::shared_ptr<MistakeAnalyzer> ma;
+    std::unique_ptr<MemoryManager>  mm;
     std::unique_ptr<AICoach>        ai;
     std::unique_ptr<CompanionServer> companion;
     std::unique_ptr<Judge>          judge;
@@ -535,7 +453,20 @@ struct Services {
         Services s;
         try {
             s.cfg = Config::load(Config::config_path(root));
-            s.db  = std::make_shared<Database>(Config::db_path(root).string());
+            
+            // Simple caching for Database to avoid overhead in REPL
+            static std::weak_ptr<Database> db_cache;
+            static std::string db_cache_path;
+            
+            std::shared_ptr<Database> db = db_cache.lock();
+            std::string current_db_path = Config::db_path(root).string();
+            
+            if (!db || db_cache_path != current_db_path) {
+                db = std::make_shared<Database>(current_db_path);
+                db_cache = db;
+                db_cache_path = current_db_path;
+            }
+            s.db = db;
             s.pm  = std::make_shared<ProblemManager>(s.db);
             
             // Register crawlers
@@ -545,13 +476,26 @@ struct Services {
             s.pm->register_crawler(std::make_unique<LanqiaoCrawler>());
             
             s.ma  = std::make_shared<MistakeAnalyzer>(s.db);
-            s.ai  = std::make_unique<AICoach>(s.cfg);
+            s.mm  = std::make_unique<MemoryManager>(*s.db); // Database& constructor
+            s.ai  = std::make_unique<AICoach>(s.cfg, s.mm.get());
             s.companion = std::make_unique<CompanionServer>(*s.pm, *s.db);
             s.judge = std::make_unique<Judge>();
         } catch (const std::exception& e) {
             fmt::print(fg(fmt::color::red), "[!] 服务加载失败: {}\n", e.what());
             throw;
         }
+
+        
+        // Environment Check
+        std::vector<std::string> missing;
+        if (!CompilerDoctor::check_environment(missing)) {
+             fmt::print(fg(fmt::color::yellow), "[!] 警告: 未检测到以下环境工具，可能无法运行代码:\n");
+             for (const auto& t : missing) {
+                 fmt::print("    - {}\n", t);
+             }
+             fmt::print("\n");
+        }
+        
         return s;
     }
 };
@@ -1349,7 +1293,7 @@ int main(int argc, char** argv) {
         if (wargv) {
             std::vector<std::string> args;
             for (int i = 0; i < wargc; i++) {
-                args.push_back(wide_to_utf8(wargv[i]));
+                args.push_back(shuati::utils::wide_to_utf8(wargv[i]));
             }
             LocalFree(wargv);
             

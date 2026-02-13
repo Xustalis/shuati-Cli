@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.1] - 2026-02-13
+
+### Optimized
+- **MemoryManager**: Improved performance of mastery updates from O(N) to O(1) using database indexing.
+
+### Fixed
+- **CI/CD**: 
+  - Fixed `vcpkg` integration on Linux and macOS by correcting `VCPKG_ROOT` environment variable usage.
+  - Added automated SHA256 checksum generation for release artifacts.
+  - Enabled multi-platform binary releases (Windows, Linux, macOS).
+
+## [1.4.0] - 2026-02-13
+
+### Added
+- **User Memory System**: 
+  - Tracks recurring mistakes (`memory_mistakes`) and mastered skills (`memory_mastery`).
+  - `AICoach` actively injects relevant user history into the context (RAG-Lite).
+  - Auto-updates memory base from AI responses without user intervention.
+- **Environment Doctor**: `shuati info` now checks for missing `g++` or `python` and warns users.
+- **Fuzzy Judge**: `check_output` now ignores trailing whitespace and empty lines for more robust judging.
+
+### Fixed
+- **CI/CD**: Fixed build failures on Linux/macOS by conditional linking of `Psapi`.
+- **Judge**: Fixed potential TLE/deadlock on Windows by using threaded pipe reading.
+
 ## [1.3.1] - 2026-02-12
 
 ### Fixed

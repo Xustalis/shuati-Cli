@@ -1,4 +1,5 @@
 #include "shuati/database.hpp"
+#include "shuati/utils/encoding.hpp"
 #include <fmt/core.h>
 
 #ifdef _WIN32
@@ -7,58 +8,9 @@
 
 namespace shuati {
 
+using utils::ensure_utf8_lossy;
+
 namespace {
-#ifdef _WIN32
-static bool is_valid_utf8(const std::string& s) {
-    size_t i = 0;
-    while (i < s.size()) {
-        unsigned char c = static_cast<unsigned char>(s[i]);
-        if (c <= 0x7F) {
-            i++;
-            continue;
-        }
-
-        size_t need = 0;
-        if ((c & 0xE0) == 0xC0) need = 2;
-        else if ((c & 0xF0) == 0xE0) need = 3;
-        else if ((c & 0xF8) == 0xF0) need = 4;
-        else return false;
-
-        if (i + need > s.size()) return false;
-        for (size_t j = 1; j < need; j++) {
-            unsigned char cc = static_cast<unsigned char>(s[i + j]);
-            if ((cc & 0xC0) != 0x80) return false;
-        }
-        i += need;
-    }
-    return true;
-}
-
-static std::string acp_to_utf8(const std::string& s) {
-    if (s.empty()) return {};
-    int wlen = MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, s.data(), (int)s.size(), nullptr, 0);
-    if (wlen <= 0) return {};
-    std::wstring w((size_t)wlen, L'\0');
-    MultiByteToWideChar(CP_ACP, 0, s.data(), (int)s.size(), w.data(), wlen);
-    int ulen = WideCharToMultiByte(CP_UTF8, 0, w.data(), wlen, nullptr, 0, nullptr, nullptr);
-    if (ulen <= 0) return {};
-    std::string out((size_t)ulen, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, w.data(), wlen, out.data(), ulen, nullptr, nullptr);
-    return out;
-}
-
-static std::string ensure_utf8_lossy(const std::string& s) {
-    if (is_valid_utf8(s)) return s;
-    auto converted = acp_to_utf8(s);
-    if (is_valid_utf8(converted)) return converted;
-    std::string out;
-    out.reserve(s.size());
-    for (unsigned char c : s) out.push_back((c >= 0x20 && c <= 0x7E) ? (char)c : '?');
-    return out;
-}
-#else
-static std::string ensure_utf8_lossy(const std::string& s) { return s; }
-#endif
 
 static std::string safe_column_text(SQLite::Column col) {
     try {
@@ -127,6 +79,35 @@ void Database::init_schema() {
         "  is_sample INTEGER DEFAULT 1,"
         "  FOREIGN KEY(problem_id) REFERENCES problems(id)"
         ")");
+        
+    // V3 Memory System
+    db_->exec(
+        "CREATE TABLE IF NOT EXISTS memory_mistakes ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  tags TEXT,"
+        "  pattern TEXT,"
+        "  frequency INTEGER DEFAULT 1,"
+        "  last_seen INTEGER,"
+        "  example_id TEXT,"
+        "  UNIQUE(tags, pattern)" 
+        ")");
+
+    db_->exec(
+        "CREATE TABLE IF NOT EXISTS memory_mastery ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  skill TEXT UNIQUE,"
+        "  confidence REAL,"
+        "  last_verified INTEGER"
+        ")");
+        
+    db_->exec(
+        "CREATE TABLE IF NOT EXISTS user_profile ("
+        "  id INTEGER PRIMARY KEY CHECK (id = 1),"
+        "  elo_rating INTEGER DEFAULT 1200,"
+        "  preferences TEXT DEFAULT '{}'"
+        ")");
+    
+    db_->exec("INSERT OR IGNORE INTO user_profile (id, elo_rating, preferences) VALUES (1, 1200, '{}')");
 }
 
 // ---- Problem ----
@@ -333,6 +314,126 @@ std::vector<std::pair<std::string, std::string>> Database::get_test_cases(const 
         out.emplace_back(safe_column_text(q.getColumn(0)), safe_column_text(q.getColumn(1)));
     }
     return out;
+}
+
+// ---- Memory System (V3) ----
+
+// Mistakes
+void Database::upsert_memory_mistake(const std::string& tags, const std::string& pattern, const std::string& example_id) {
+    // Try to update existing first (increment frequency)
+    // Using tags + pattern as unique key logic
+    SQLite::Statement q_check(*db_, "SELECT id, frequency FROM memory_mistakes WHERE pattern=?");
+    q_check.bind(1, ensure_utf8_lossy(pattern));
+    
+    bool found = false;
+    int id = 0;
+    int freq = 0;
+    if (q_check.executeStep()) {
+        id = q_check.getColumn(0).getInt();
+        freq = q_check.getColumn(1).getInt();
+        found = true;
+    }
+    
+    if (found) {
+        SQLite::Statement q(*db_, "UPDATE memory_mistakes SET frequency=?, last_seen=?, example_id=? WHERE id=?");
+        q.bind(1, freq + 1);
+        q.bind(2, static_cast<int64_t>(std::time(nullptr)));
+        q.bind(3, ensure_utf8_lossy(example_id));
+        q.bind(4, id);
+        q.exec();
+    } else {
+        SQLite::Statement q(*db_, "INSERT INTO memory_mistakes (tags, pattern, frequency, last_seen, example_id) VALUES (?, ?, 1, ?, ?)");
+        q.bind(1, ensure_utf8_lossy(tags));
+        q.bind(2, ensure_utf8_lossy(pattern));
+        q.bind(3, static_cast<int64_t>(std::time(nullptr)));
+        q.bind(4, ensure_utf8_lossy(example_id));
+        q.exec();
+    }
+}
+
+std::vector<MemoryMistake> Database::get_all_memory_mistakes() {
+    std::vector<MemoryMistake> out;
+    SQLite::Statement q(*db_, "SELECT id, tags, pattern, frequency, last_seen, example_id FROM memory_mistakes ORDER BY frequency DESC, last_seen DESC");
+    while (q.executeStep()) {
+        MemoryMistake m;
+        m.id = q.getColumn(0).getInt();
+        m.tags = safe_column_text(q.getColumn(1));
+        m.pattern = safe_column_text(q.getColumn(2));
+        m.frequency = q.getColumn(3).getInt();
+        m.last_seen = q.getColumn(4).getInt64();
+        m.example_id = safe_column_text(q.getColumn(5));
+        out.push_back(m);
+    }
+    return out;
+}
+
+// Mastery
+void Database::upsert_mastery(const std::string& skill, double confidence) {
+    SQLite::Statement q(*db_, 
+        "INSERT INTO memory_mastery (skill, confidence, last_verified) VALUES (?, ?, ?) "
+        "ON CONFLICT(skill) DO UPDATE SET confidence=?, last_verified=?"
+    );
+    // Bind 1,2,3 for INSERT
+    q.bind(1, ensure_utf8_lossy(skill));
+    q.bind(2, confidence);
+    q.bind(3, static_cast<int64_t>(std::time(nullptr)));
+    
+    // Bind 4,5 for UPDATE
+    q.bind(4, confidence);
+    q.bind(5, static_cast<int64_t>(std::time(nullptr)));
+    q.exec();
+}
+
+std::optional<Mastery> Database::get_mastery(const std::string& skill) {
+    SQLite::Statement q(*db_, "SELECT id, skill, confidence, last_verified FROM memory_mastery WHERE skill=?");
+    q.bind(1, ensure_utf8_lossy(skill));
+    if (q.executeStep()) {
+        Mastery m;
+        m.id = q.getColumn(0).getInt();
+        m.skill = safe_column_text(q.getColumn(1));
+        m.confidence = q.getColumn(2).getDouble();
+        m.last_verified = q.getColumn(3).getInt64();
+        return m;
+    }
+    return std::nullopt;
+}
+
+std::vector<Mastery> Database::get_all_mastery() {
+    std::vector<Mastery> out;
+    SQLite::Statement q(*db_, "SELECT id, skill, confidence, last_verified FROM memory_mastery ORDER BY confidence DESC");
+    while (q.executeStep()) {
+        Mastery m;
+        m.id = q.getColumn(0).getInt();
+        m.skill = safe_column_text(q.getColumn(1));
+        m.confidence = q.getColumn(2).getDouble();
+        m.last_verified = q.getColumn(3).getInt64();
+        out.push_back(m);
+    }
+    return out;
+}
+
+// User Profile
+void Database::update_user_profile(int elo, const std::string& preferences) {
+    if (elo > 0) {
+        SQLite::Statement q(*db_, "UPDATE user_profile SET elo_rating=? WHERE id=1");
+        q.bind(1, elo);
+        q.exec();
+    }
+    if (!preferences.empty()) {
+        SQLite::Statement q(*db_, "UPDATE user_profile SET preferences=? WHERE id=1");
+        q.bind(1, ensure_utf8_lossy(preferences));
+        q.exec();
+    }
+}
+
+UserProfile Database::get_user_profile() {
+    UserProfile p;
+    SQLite::Statement q(*db_, "SELECT elo_rating, preferences FROM user_profile WHERE id=1");
+    if (q.executeStep()) {
+        p.elo_rating = q.getColumn(0).getInt();
+        p.preferences = safe_column_text(q.getColumn(1));
+    }
+    return p;
 }
 
 } // namespace shuati

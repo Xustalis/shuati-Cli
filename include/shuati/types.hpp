@@ -25,6 +25,27 @@ struct Mistake {
     long long timestamp = 0;
 };
 
+struct MemoryMistake {
+    int id = 0;
+    std::string tags;       // e.g. "dp,array"
+    std::string pattern;    // e.g. "Forget to init DP array"
+    int frequency = 0;
+    long long last_seen = 0;
+    std::string example_id; // Problem ID of a typical example
+};
+
+struct Mastery {
+    int id = 0;
+    std::string skill;          // e.g. "Binary Search"
+    double confidence = 0.0;    // 0.0 - 100.0
+    long long last_verified = 0;
+};
+
+struct UserProfile {
+    int elo_rating = 1200;
+    std::string preferences;    // JSON
+};
+
 struct ReviewItem {
     std::string problem_id;
     std::string title;
@@ -63,12 +84,7 @@ struct JudgeResult {
     std::string verdict_str() const;
 };
 
-// Moved verdict_str implementation here or inline? 
-// It was in judge.cpp context. 
-// I'll keep declaration here, but implementation in judge.cpp or types.cpp (if I create one).
-// For now, I'll inline it or keep it in judge.cpp but declare it here.
-// JudgeResult was in judge.hpp. I should probably move it to types.hpp too!
-// Yes, I moved Verdict and JudgeResult to types.hpp above.
+
 
 inline std::string JudgeResult::verdict_str() const {
     switch (verdict) {

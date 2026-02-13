@@ -14,6 +14,9 @@ class CompilerDoctor {
 public:
     // Analyze compiler output and return a friendly diagnosis
     static Diagnosis diagnose(const std::string& error_output);
+
+    // Check availability of external tools (g++, python)
+    static bool check_environment(std::vector<std::string>& missing_tools);
 };
 
 } // namespace shuati

@@ -19,6 +19,8 @@
 #include <fcntl.h>
 #endif
 
+#include <random>
+
 namespace shuati {
 
 namespace fs = std::filesystem;
@@ -28,9 +30,12 @@ class TempFile {
 public:
     TempFile(const std::string& extension = ".tmp") {
         auto tmp = fs::temp_directory_path();
-        // Simple random name generation
+        
+        static std::mt19937 rng(std::random_device{}());
+        std::uniform_int_distribution<long long> dist(0, 1000000000);
+        
         auto now = std::chrono::system_clock::now().time_since_epoch().count();
-        path_ = tmp / fmt::format("shuati_{}_{}{}", now, rand() % 10000, extension);
+        path_ = tmp / fmt::format("shuati_{}_{}{}", now, dist(rng), extension);
     }
     
     ~TempFile() {
@@ -89,6 +94,11 @@ std::string Judge::compile(const std::string& source_file, const std::string& la
     }
 
     if (language == "cpp" || language == "c++") {
+        // Security check: Ensure source_file contains only safe characters
+        if (source_file.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-/\\") != std::string::npos) {
+            throw std::runtime_error("Invalid source file path: " + source_file);
+        }
+
         fs::path src(source_file);
         std::string exe = src.replace_extension(".exe").string();
         
@@ -150,10 +160,24 @@ std::string Judge::compile(const std::string& source_file, const std::string& la
 }
 
 Verdict Judge::check_output(const std::string& user_out, const std::string& expected_out) {
-    std::string u = trim_right(user_out);
-    std::string e = trim_right(expected_out);
-    if (e.empty()) return Verdict::AC;
-    return (u == e) ? Verdict::AC : Verdict::WA;
+    // Fuzzy compare: Token-based
+    std::istringstream iss_u(user_out);
+    std::istringstream iss_e(expected_out);
+    
+    std::string tok_u, tok_e;
+    bool has_u = (bool)(iss_u >> tok_u);
+    bool has_e = (bool)(iss_e >> tok_e);
+    
+    while (has_u && has_e) {
+        if (tok_u != tok_e) return Verdict::WA;
+        has_u = (bool)(iss_u >> tok_u);
+        has_e = (bool)(iss_e >> tok_e);
+    }
+    
+    // Both must be exhausted (no extra tokens)
+    if (has_u || has_e) return Verdict::WA;
+    
+    return Verdict::AC;
 }
 
 std::vector<JudgeResult> Judge::judge(const std::string& source_file, 
@@ -187,6 +211,47 @@ std::vector<JudgeResult> Judge::judge(const std::string& source_file,
 }
 
 #ifdef _WIN32
+// RAII Wrapper for HANDLE
+class ScopedHandle {
+public:
+    ScopedHandle() : h_(NULL) {}
+    ScopedHandle(HANDLE h) : h_(h) {}
+    ~ScopedHandle() { close(); }
+
+    void close() {
+        if (h_ != NULL && h_ != INVALID_HANDLE_VALUE) {
+            CloseHandle(h_);
+            h_ = NULL;
+        }
+    }
+
+    void reset(HANDLE h) {
+        close();
+        h_ = h;
+    }
+
+    HANDLE get() const { return h_; }
+    HANDLE* receive() { return &h_; } // For output parameters
+
+    // Non-copyable
+    ScopedHandle(const ScopedHandle&) = delete;
+    ScopedHandle& operator=(const ScopedHandle&) = delete;
+
+    // Moveable
+    ScopedHandle(ScopedHandle&& other) noexcept : h_(other.h_) { other.h_ = NULL; }
+    ScopedHandle& operator=(ScopedHandle&& other) noexcept {
+        if (this != &other) {
+            close();
+            h_ = other.h_;
+            other.h_ = NULL;
+        }
+        return *this;
+    }
+
+private:
+    HANDLE h_;
+};
+
 JudgeResult Judge::run_case(const std::string& executable, 
                             const TestCase& tc, 
                             int time_limit_ms, 
@@ -203,28 +268,26 @@ JudgeResult Judge::run_case(const std::string& executable,
     }
 
     // Pipes
-    HANDLE hChildStd_IN_Rd = NULL;
-    HANDLE hChildStd_IN_Wr = NULL;
-    HANDLE hChildStd_OUT_Rd = NULL;
-    HANDLE hChildStd_OUT_Wr = NULL;
+    ScopedHandle hChildStd_IN_Rd, hChildStd_IN_Wr;
+    ScopedHandle hChildStd_OUT_Rd, hChildStd_OUT_Wr;
 
     SECURITY_ATTRIBUTES saAttr; 
     saAttr.nLength = sizeof(SECURITY_ATTRIBUTES); 
     saAttr.bInheritHandle = TRUE; 
     saAttr.lpSecurityDescriptor = NULL; 
 
-    if (!CreatePipe(&hChildStd_OUT_Rd, &hChildStd_OUT_Wr, &saAttr, 0)) return {Verdict::SE, 0, 0, "Pipe Error"};
-    if (!SetHandleInformation(hChildStd_OUT_Rd, HANDLE_FLAG_INHERIT, 0)) return {Verdict::SE, 0, 0, "Handle Error"};
-    if (!CreatePipe(&hChildStd_IN_Rd, &hChildStd_IN_Wr, &saAttr, 0)) return {Verdict::SE, 0, 0, "Pipe Error"};
-    if (!SetHandleInformation(hChildStd_IN_Wr, HANDLE_FLAG_INHERIT, 0)) return {Verdict::SE, 0, 0, "Handle Error"};
+    if (!CreatePipe(hChildStd_OUT_Rd.receive(), hChildStd_OUT_Wr.receive(), &saAttr, 0)) return {Verdict::SE, 0, 0, "Pipe Error"};
+    if (!SetHandleInformation(hChildStd_OUT_Rd.get(), HANDLE_FLAG_INHERIT, 0)) return {Verdict::SE, 0, 0, "Handle Error"};
+    if (!CreatePipe(hChildStd_IN_Rd.receive(), hChildStd_IN_Wr.receive(), &saAttr, 0)) return {Verdict::SE, 0, 0, "Pipe Error"};
+    if (!SetHandleInformation(hChildStd_IN_Wr.get(), HANDLE_FLAG_INHERIT, 0)) return {Verdict::SE, 0, 0, "Handle Error"};
 
     STARTUPINFOA si;
     PROCESS_INFORMATION pi;
     ZeroMemory(&si, sizeof(si));
     si.cb = sizeof(si);
-    si.hStdError = hChildStd_OUT_Wr;
-    si.hStdOutput = hChildStd_OUT_Wr;
-    si.hStdInput = hChildStd_IN_Rd;
+    si.hStdError = hChildStd_OUT_Wr.get();
+    si.hStdOutput = hChildStd_OUT_Wr.get();
+    si.hStdInput = hChildStd_IN_Rd.get();
     si.dwFlags |= STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
     si.wShowWindow = SW_HIDE;
 
@@ -232,19 +295,21 @@ JudgeResult Judge::run_case(const std::string& executable,
 
     // Write input
     DWORD dwWritten;
-    WriteFile(hChildStd_IN_Wr, tc.input.c_str(), tc.input.size(), &dwWritten, NULL);
-    CloseHandle(hChildStd_IN_Wr);
+    WriteFile(hChildStd_IN_Wr.get(), tc.input.c_str(), (DWORD)tc.input.size(), &dwWritten, NULL);
+    hChildStd_IN_Wr.close(); // Close write end so child sees EOF on stdin
 
     auto start_time = std::chrono::high_resolution_clock::now();
 
     if (!CreateProcessA(NULL, const_cast<char*>(cmd_line.c_str()), NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
-        CloseHandle(hChildStd_OUT_Rd);
-        CloseHandle(hChildStd_OUT_Wr);
         return {Verdict::RE, 0, 0, "CreateProcess failed"};
     }
+    
+    // Automatically close process handles when function returns
+    ScopedHandle hProcess(pi.hProcess);
+    ScopedHandle hThread(pi.hThread);
 
     // Close write end of output pipe so we don't block reading
-    CloseHandle(hChildStd_OUT_Wr);
+    hChildStd_OUT_Wr.close();
 
     std::string output;
     bool finished = false;
@@ -252,9 +317,9 @@ JudgeResult Judge::run_case(const std::string& executable,
     
     while (true) {
         // Check if process has exited
-        if (WaitForSingleObject(pi.hProcess, 0) == WAIT_OBJECT_0) {
+        if (WaitForSingleObject(hProcess.get(), 0) == WAIT_OBJECT_0) {
             finished = true;
-            GetExitCodeProcess(pi.hProcess, &exit_code);
+            GetExitCodeProcess(hProcess.get(), &exit_code);
             break;
         }
 
@@ -267,9 +332,9 @@ JudgeResult Judge::run_case(const std::string& executable,
 
         // Read available data
         DWORD dwRead, dwAvail;
-        if (PeekNamedPipe(hChildStd_OUT_Rd, NULL, 0, NULL, &dwAvail, NULL) && dwAvail > 0) {
+        if (PeekNamedPipe(hChildStd_OUT_Rd.get(), NULL, 0, NULL, &dwAvail, NULL) && dwAvail > 0) {
             char buffer[4096];
-            if (ReadFile(hChildStd_OUT_Rd, buffer, sizeof(buffer), &dwRead, NULL) && dwRead > 0) {
+            if (ReadFile(hChildStd_OUT_Rd.get(), buffer, sizeof(buffer), &dwRead, NULL) && dwRead > 0) {
                 output.append(buffer, dwRead);
             }
         } else {
@@ -283,17 +348,17 @@ JudgeResult Judge::run_case(const std::string& executable,
     // Read any remaining output after exit
     DWORD dwRead;
     char buffer[4096];
-    while (ReadFile(hChildStd_OUT_Rd, buffer, sizeof(buffer), &dwRead, NULL) && dwRead > 0) {
+    while (ReadFile(hChildStd_OUT_Rd.get(), buffer, sizeof(buffer), &dwRead, NULL) && dwRead > 0) {
         output.append(buffer, dwRead);
     }
 
     if (!finished) {
-        TerminateProcess(pi.hProcess, 1);
+        TerminateProcess(hProcess.get(), 1);
         res.verdict = Verdict::TLE;
     } else {
         // Check Memory
         PROCESS_MEMORY_COUNTERS pmc;
-        if (GetProcessMemoryInfo(pi.hProcess, &pmc, sizeof(pmc))) {
+        if (GetProcessMemoryInfo(hProcess.get(), &pmc, sizeof(pmc))) {
              res.memory_kb = pmc.PeakPagefileUsage / 1024;
              if (res.memory_kb > memory_limit_kb) res.verdict = Verdict::MLE;
         }
@@ -311,10 +376,8 @@ JudgeResult Judge::run_case(const std::string& executable,
         }
     }
     
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-    CloseHandle(hChildStd_OUT_Rd);
-    CloseHandle(hChildStd_IN_Rd); 
+    // ScopedHandles will close hProcess, hThread, hChildStd_OUT_Rd, hChildStd_IN_Rd
+    // hChildStd_IN_Wr and hChildStd_OUT_Wr were closed earlier
 
     return res;
 }

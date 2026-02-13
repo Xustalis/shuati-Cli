@@ -69,4 +69,33 @@ Diagnosis CompilerDoctor::diagnose(const std::string& error_output) {
     return d;
 }
 
+
+bool CompilerDoctor::check_environment(std::vector<std::string>& missing_tools) {
+    missing_tools.clear();
+    
+#ifdef _WIN32
+    const char* null_dev = "nul";
+#else
+    const char* null_dev = "/dev/null";
+#endif
+
+    // Check g++
+    std::string cmd_cpp = fmt::format("g++ --version > {} 2>&1", null_dev);
+    if (std::system(cmd_cpp.c_str()) != 0) {
+        missing_tools.push_back("g++ (MinGW/GCC)");
+    }
+    
+    // Check python
+    std::string cmd_py = fmt::format("python --version > {} 2>&1", null_dev);
+    if (std::system(cmd_py.c_str()) != 0) {
+        // Try python3
+        std::string cmd_py3 = fmt::format("python3 --version > {} 2>&1", null_dev);
+        if (std::system(cmd_py3.c_str()) != 0) {
+            missing_tools.push_back("python");
+        }
+    }
+    
+    return missing_tools.empty();
+}
+
 } // namespace shuati
