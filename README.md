@@ -12,6 +12,9 @@
 # Shuati CLI
 
 [![CI](https://github.com/Xustalis/shuati-Cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Xustalis/shuati-Cli/actions/workflows/ci.yml)
+[![Prepare Release](https://github.com/Xustalis/shuati-Cli/actions/workflows/prepare-release.yml/badge.svg)](https://github.com/Xustalis/shuati-Cli/actions/workflows/prepare-release.yml)
+[![Release](https://github.com/Xustalis/shuati-Cli/actions/workflows/release.yml/badge.svg)](https://github.com/Xustalis/shuati-Cli/actions/workflows/release.yml)
+[![Workflow Tests](https://github.com/Xustalis/shuati-Cli/actions/workflows/workflow-tests.yml/badge.svg)](https://github.com/Xustalis/shuati-Cli/actions/workflows/workflow-tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![C++20](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![Version](https://img.shields.io/badge/version-1.4.1-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
@@ -285,6 +288,12 @@ ctest --verbose
 - 合并/推送到 `main`：自动执行“准备发布”（计算版本并创建 tag）
 - `vX.Y.Z` tag 推送：自动执行“构建发布”（打包产物并创建/更新 GitHub Release）
 - 手动触发：在 Actions 中运行 `Prepare Release` / `Release` / `Rollback Release`
+
+### Actions 失败排查
+
+- `Prepare Release` 成功但未触发 `Release`：检查工作流权限是否包含 `actions: write`，并确认由 `Prepare Release` 使用 `gh workflow run release.yml --ref <tag>` 触发
+- Windows Job 失败且日志出现 `bash`/路径解析问题：确认对应步骤使用 `pwsh`（Windows）或 `bash`（Linux/macOS）
+- vcpkg 缓存报 403：Fork PR 场景下仅允许读缓存；主仓推送/Tag 构建才会写缓存
 
 ### 版本号自动递增（SemVer）
 

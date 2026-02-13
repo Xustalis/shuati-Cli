@@ -7,6 +7,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: write
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -61,7 +65,7 @@ jobs:
 
     env:
       CMAKE_BUILD_PARALLEL_LEVEL: 4
-      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      VCPKG_BINARY_SOURCES: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'clear;x-gha,read' || 'clear;x-gha,readwrite' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -99,11 +103,23 @@ jobs:
           -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
-      - name: Build
-        shell: bash
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: cmake --build build --config ${{ matrix.build_type }} --parallel
 
-      - name: Test
+      - name: Build (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: cmake --build build --parallel
+
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure
+
+      - name: Test (Linux/macOS)
+        if: runner.os != 'Windows'
         shell: bash
         run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure
 
@@ -150,4 +166,3 @@ jobs:
         with:
           name: shuati-${{ runner.os }}-release
           path: release_pkg/*
-

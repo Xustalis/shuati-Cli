@@ -4,10 +4,22 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Create/update GitHub Release and upload assets
+        type: boolean
+        required: false
+        default: true
+      dry_run:
+        description: Build artifacts only (skip release publish & notifications)
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   build_assets:
@@ -34,11 +46,11 @@ jobs:
             exit 1
           fi
           cmake_ver=$(python - <<'PY'
-import re, pathlib
-txt = pathlib.Path("CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
-m = re.search(r'project\(shuati-cli\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)', txt)
-print(m.group(1) if m else "")
-PY
+          import re, pathlib
+          txt = pathlib.Path("CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
+          m = re.search(r'project\(shuati-cli\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)', txt)
+          print(m.group(1) if m else "")
+          PY
           )
           if [[ -z "$cmake_ver" ]]; then
             echo "Failed to parse version from CMakeLists.txt"
@@ -49,11 +61,11 @@ PY
             exit 1
           fi
           vcpkg_ver=$(python - <<'PY'
-import json, pathlib
-p = pathlib.Path("vcpkg.json")
-obj = json.loads(p.read_text(encoding="utf-8", errors="ignore"))
-print(obj.get("version-string",""))
-PY
+          import json, pathlib
+          p = pathlib.Path("vcpkg.json")
+          obj = json.loads(p.read_text(encoding="utf-8", errors="ignore"))
+          print(obj.get("version-string",""))
+          PY
           )
           if [[ -z "$vcpkg_ver" ]]; then
             echo "Failed to parse version-string from vcpkg.json"
@@ -76,6 +88,7 @@ PY
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
+          vcpkgGitCommitId: 'f310de9dc9f16bd016e06d6c9a1decc07a918273'
           vcpkgJsonGlob: 'vcpkg.json'
 
       - name: Configure CMake (Windows)
@@ -177,12 +190,12 @@ PY
             file="shuati-${{ runner.os }}-x64-${{ github.ref_name }}.tar.gz"
           fi
           python - <<PY
-import hashlib, pathlib
-p = pathlib.Path("${file}")
-h = hashlib.sha256(p.read_bytes()).hexdigest()
-pathlib.Path("${file}.sha256").write_text(f"{h}  {p.name}\n")
-print(h)
-PY
+          import hashlib, pathlib
+          p = pathlib.Path("${file}")
+          h = hashlib.sha256(p.read_bytes()).hexdigest()
+          pathlib.Path("${file}.sha256").write_text(f"{h}  {p.name}\n")
+          print(h)
+          PY
 
       - name: Upload Assets (Windows)
         if: runner.os == 'Windows'
@@ -215,7 +228,7 @@ PY
     name: Create GitHub Release
     needs: build_assets
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') && (github.event_name != 'workflow_dispatch' || github.event.inputs.publish == 'true') && (github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true')
 
     steps:
       - uses: actions/checkout@v4
@@ -230,23 +243,23 @@ PY
         shell: bash
         run: |
           python - <<'PY'
-import re, pathlib, os
-ver = os.environ["VER"]
-if ver.startswith("v"):
-  ver = ver[1:]
-ch = pathlib.Path("CHANGELOG.md")
-out = pathlib.Path("RELEASE_NOTES.md")
-if not ch.exists():
-  out.write_text(f"## {ver}\n\n(CHANGELOG.md not found)\n")
-  raise SystemExit(0)
-txt = ch.read_text(encoding="utf-8", errors="ignore")
-m = re.search(rf"^## \[{re.escape(ver)}\].*?^([\s\S]*?)(^## \[|\Z)", txt, flags=re.M)
-if not m:
-  out.write_text(f"## {ver}\n\n(No changelog section found for this version.)\n")
-else:
-  body = m.group(1).strip()
-  out.write_text(f"## {ver}\n\n{body}\n")
-PY
+          import re, pathlib, os
+          ver = os.environ["VER"]
+          if ver.startswith("v"):
+            ver = ver[1:]
+          ch = pathlib.Path("CHANGELOG.md")
+          out = pathlib.Path("RELEASE_NOTES.md")
+          if not ch.exists():
+            out.write_text(f"## {ver}\n\n(CHANGELOG.md not found)\n")
+            raise SystemExit(0)
+          txt = ch.read_text(encoding="utf-8", errors="ignore")
+          m = re.search(rf"^## \[{re.escape(ver)}\].*?^([\s\S]*?)(^## \[|\Z)", txt, flags=re.M)
+          if not m:
+            out.write_text(f"## {ver}\n\n(No changelog section found for this version.)\n")
+          else:
+            body = m.group(1).strip()
+            out.write_text(f"## {ver}\n\n{body}\n")
+          PY
         env:
           VER: ${{ github.ref_name }}
 
@@ -306,18 +319,20 @@ PY
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Notify (optional)
-        if: ${{ secrets.RELEASE_WEBHOOK_URL != '' }}
         shell: bash
         env:
           WEBHOOK: ${{ secrets.RELEASE_WEBHOOK_URL }}
         run: |
+          if [[ -z "${WEBHOOK:-}" ]]; then
+            exit 0
+          fi
           tag="${GITHUB_REF_NAME}"
           repo="${GITHUB_REPOSITORY}"
           payload=$(TAG="$tag" REPO="$repo" python - <<'PY'
-import json, os
-tag=os.environ["TAG"]
-repo=os.environ["REPO"]
-print(json.dumps({"text": f"✅ {repo} 发布完成: {tag}\\nhttps://github.com/{repo}/releases/tag/{tag}"}))
-PY
+          import json, os
+          tag=os.environ["TAG"]
+          repo=os.environ["REPO"]
+          print(json.dumps({"text": f"✅ {repo} 发布完成: {tag}\\nhttps://github.com/{repo}/releases/tag/{tag}"}))
+          PY
           )
           curl -sS -X POST -H "Content-Type: application/json" -d "$payload" "$WEBHOOK"
