@@ -44,11 +44,7 @@ jobs:
         shell: bash
         run: |
           python tools/release/plan_release.py > release_plan.json
-          python - <<'PY'
-import json, pathlib
-p = json.loads(pathlib.Path("release_plan.json").read_text(encoding="utf-8"))
-pathlib.Path("RELEASE_NOTES.md").write_text(p.get("notes_markdown",""), encoding="utf-8")
-PY
+          python -c 'import json, pathlib; p = json.loads(pathlib.Path("release_plan.json").read_text(encoding="utf-8")); pathlib.Path("RELEASE_NOTES.md").write_text(p.get("notes_markdown",""), encoding="utf-8")'
 
       - name: Decide
         id: decide
@@ -83,3 +79,14 @@ PY
           git tag -a "${{ steps.plan.outputs.new_tag }}" -m "${{ steps.plan.outputs.new_tag }}"
           git push origin HEAD:main
           git push origin "${{ steps.plan.outputs.new_tag }}"
+
+      - name: Trigger Release Workflow
+        if: steps.decide.outputs.should_release == 'true'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ steps.plan.outputs.new_tag }}"
+          echo "Triggering release workflow for tag: $tag"
+          sleep 5  # Wait for tag to be available
+          gh workflow run release.yml --ref "$tag"
