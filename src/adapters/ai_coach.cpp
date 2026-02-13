@@ -68,7 +68,8 @@ std::string AICoach::call_api(const std::string& system_prompt, const std::strin
                         return true;
                     }
                 },
-                cpr::Timeout{60000}
+
+                cpr::Timeout{120000}
             );
             
             if (r.status_code != 200) {
@@ -99,23 +100,36 @@ std::string AICoach::call_api(const std::string& system_prompt, const std::strin
 }
 
 std::string AICoach::analyze(const std::string& problem_desc, const std::string& user_code, std::function<void(std::string)> callback) {
-    std::string sys =
-        "你是一位算法竞赛教练，目标是帮助用户独立做出题目。"
-        "你必须只给提示，不得给出完整解法代码，不得给出可直接提交的最终代码。"
-        "如果需要展示代码，只能给局部片段（单个片段不超过 6 行），用于说明某个点。"
-        "优先基于用户当前代码指出问题/缺口，并给出下一步可执行的检查点。"
-        "输出使用中文，Markdown 格式，结构固定为："
-        "1) 题意复述（1-2 句）"
-        "2) 关键观察/思路（不超过 4 条要点）"
-        "3) 分步提示（最多 5 条，从易到难）"
-        "4) 下一步你应该做什么（1-3 条清单）";
+    // For streaming, call_api returns error string if any, otherwise empty.
+    // Increase timeout for long Chain of Thought
+    std::string sys = 
+        "你是一位严厉但负责的算法竞赛教练。你的目标是培养用户独立解决问题的能力。\n"
+        "【重中之重】\n"
+        "1. **绝不** 直接给出完整代码，只提供关键思路或局部代码片段（<10行）。\n"
+        "2. **绝不** 复述用户已提供的正确代码，只指出问题。\n"
+        "3. **必须** 检查用户代码的边界条件、数据范围匹配度和时间复杂度。\n"
+        "4. **必须** 识别用户是否已掌握某个知识点，如果是，则跳过基础讲解。\n"
+        "\n"
+        "请按以下格式回复（支持 Markdown）：\n"
+        "## 💡 核心思路\n"
+        "(简要点拨，不超过3点)\n\n"
+        "## 🔍 问题诊断\n"
+        "(指出具体逻辑错误或潜在风险)\n\n"
+        "## 🛠️ 修改建议\n"
+        "(分步指导，包含代码片段)\n\n"
+        "<!-- SYSTEM_OP: UPDATE_MEMORY\n"
+        "{ \"new_mistake\": \"...\", \"mastery_reinforce\": \"...\" }\n"
+        "-->";
 
     std::string user = fmt::format(
-        "题目与上下文：\n{}\n\n用户当前代码：\n```\n{}\n```",
+        "题目信息：\n{}\n\n用户代码：\n```cpp\n{}\n```",
         problem_desc.substr(0, 8000),
         user_code.substr(0, 6000));
 
-    // For streaming, call_api returns error string if any, otherwise empty.
+    // Rolling update: Ensure timeout is sufficient
+    // We modify call_api to use 120s timeout for stream=true inside call_api logic
+    // But call_api hardcodes 60s in the current impl. We need to update call_api first.
+    // Let's passed a customized timeout or update default in next step.
     std::string err = call_api(sys, user, true, callback);
     if (!err.empty() && callback) {
         callback(err);

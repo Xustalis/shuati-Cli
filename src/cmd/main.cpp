@@ -27,6 +27,7 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #include <windows.h>
+#include <shellapi.h>
 #endif
 
 #include "shuati/config.hpp"
@@ -37,6 +38,8 @@
 #include "shuati/sm2_algorithm.hpp"
 #include "shuati/judge.hpp"
 #include "shuati/compiler_doctor.hpp"
+#include "shuati/version.hpp"
+#include "shuati/logger.hpp"
 
 // Header separation fixes ODR violations
 #include "shuati/adapters/leetcode_crawler.hpp"
@@ -49,6 +52,10 @@ namespace fs = std::filesystem;
 using namespace shuati;
 
 // ─── Helpers ──────────────────────────────────────────
+
+#ifndef SHUATI_VERSION
+#define SHUATI_VERSION "dev"
+#endif
 
 static fs::path find_root_or_die() {
     auto root = Config::find_root();
@@ -116,9 +123,31 @@ static std::string ensure_utf8(const std::string& s) {
     if (is_valid_utf8(converted)) return converted;
     return ascii_fallback(s);
 }
+
+static std::string wide_to_utf8(const std::wstring& w) {
+    if (w.empty()) return {};
+    int u8len = WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+    if (u8len <= 0) return {};
+    std::string out((size_t)u8len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), out.data(), u8len, nullptr, nullptr);
+    return out;
+}
+
+static std::string executable_path_utf8() {
+    std::wstring wpath;
+    wpath.resize(32768);
+    DWORD n = GetModuleFileNameW(nullptr, wpath.data(), (DWORD)wpath.size());
+    if (n == 0) return {};
+    wpath.resize(n);
+    return wide_to_utf8(wpath);
+}
 #else
 static std::string ensure_utf8(const std::string& s) {
     return s;
+}
+
+static std::string executable_path_utf8() {
+    return {};
 }
 #endif
 
@@ -182,7 +211,19 @@ static std::string trim_copy(const std::string& s) {
 
 static std::string shorten_utf8_lossy(const std::string& s, size_t max_bytes) {
     if (s.size() <= max_bytes) return ensure_utf8(s);
-    std::string cut = s.substr(0, max_bytes);
+    size_t len = max_bytes;
+    while (len > 0) {
+        unsigned char c = static_cast<unsigned char>(s[len]);
+        // If c is a continuation byte (10xxxxxx), backtrack.
+        // If c is start byte (0xxxxxxx or 11xxxxxx), we can split BEFORE it? 
+        // No, if s[len] is the start of the NEXT char, then s[0...len] is valid? 
+        // s.substr(0, len) includes index 0 to len-1.
+        // So if s[len] is the start of a character, then indices 0..len-1 end at a character boundary.
+        if ((c & 0xC0) != 0x80) break; 
+        len--;
+    }
+    if (len == 0) return "...";
+    std::string cut = s.substr(0, len);
     return ensure_utf8(cut) + "...";
 }
 
@@ -556,6 +597,30 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
         fmt::print("    请设置 API Key: config --api-key <YOUR_KEY>\n");
     });
 
+    // ── info ──
+    app.set_version_flag("-v,--version", fmt::format("shuati version {}", current_version().to_string()), "显示版本信息");
+
+    app.add_subcommand("info", "显示可执行文件与项目环境信息")->callback([]() {
+        try {
+            std::string exe = executable_path_utf8();
+            if (exe.empty()) exe = fs::absolute(fs::path("shuati")).string();
+            fmt::print("Version: {}\n", current_version().to_string());
+            fmt::print("Exe:     {}\n", ensure_utf8(exe));
+            fmt::print("CWD:     {}\n", ensure_utf8(fs::current_path().string()));
+
+            auto root = Config::find_root();
+            if (root.empty()) {
+                fmt::print("Root:    (not found)\n");
+                return;
+            }
+            fmt::print("Root:    {}\n", ensure_utf8(root.string()));
+            fmt::print("Config:  {}\n", ensure_utf8(Config::config_path(root).string()));
+            fmt::print("DB:      {}\n", ensure_utf8(Config::db_path(root).string()));
+        } catch (const std::exception& e) {
+            fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
+        }
+    });
+
     // ── pull ──
     auto pull_cmd = app.add_subcommand("pull", "从 URL 拉取题目");
     pull_cmd->add_option("url", ctx.pull_url, "题目链接")->required();
@@ -680,8 +745,7 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
             fmt::print("{:<4} {:<20} {:<30} {:<8} {}\n", "TID", "ID", "标题", "难度", "来源");
             fmt::print("{}\n", std::string(80, '-'));
             for (auto& p : problems) {
-                std::string title = ensure_utf8(p.title);
-                if (title.length() > 27) title = title.substr(0, 25) + "..";
+                std::string title = shorten_utf8_lossy(p.title, 25);
                 fmt::print("{:<4} {:<20} {:<30} {:<8} {}\n",
                            p.display_id,
                            ensure_utf8(p.id.substr(0, 18)),
@@ -1157,7 +1221,7 @@ void run_repl() {
     // Set up completion
     rx.set_completion_callback([&](std::string const& input, int& contextLen) {
         std::vector<Replxx::Completion> completions;
-        std::vector<std::string> cmds = {"init", "pull", "new", "solve", "list", "delete", "submit", "test", "hint", "config", "exit"};
+        std::vector<std::string> cmds = {"init", "info", "pull", "new", "solve", "list", "delete", "submit", "test", "hint", "config", "exit"};
         
         // Command completion
         size_t last_space = input.rfind(' ');
@@ -1218,6 +1282,7 @@ void run_repl() {
              fmt::print(fg(fmt::color::white) | fmt::emphasis::bold, "{:<10} {:<35} {}\n", "命令", "说明", "用法");
              fmt::print("{}\n", std::string(80, '-'));
              fmt::print("{:<10} {:<35} {}\n", "init", "初始化项目结构", "init");
+             fmt::print("{:<10} {:<35} {}\n", "info", "显示可执行文件与环境信息", "info");
              fmt::print("{:<10} {:<35} {}\n", "pull", "从 URL 拉取题目", "pull <url>");
              fmt::print("{:<10} {:<35} {}\n", "new", "创建本地题目", "new <title>");
              fmt::print("{:<10} {:<35} {}\n", "solve", "开始做题 (支持交互选择)", "solve [id]");
@@ -1256,8 +1321,20 @@ void run_repl() {
 
 int main(int argc, char** argv) {
 #ifdef _WIN32
-    std::system("chcp 65001 > nul");
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
 #endif
+
+    // Initialize Logger
+    auto root = Config::find_root();
+    if (!root.empty()) {
+        Logger::instance().init((Config::data_dir(root) / "logs" / "shuati.log").string());
+    } else {
+        // Fallback or dry run, maybe init in current dir if .shuati exists?
+        // For now, only log if project is initialized to avoid cluttering random dirs.
+    }
+    
+    Logger::instance().info("Session started. Version: {}", current_version().to_string());
 
     if (argc == 1) {
         run_repl();
@@ -1265,7 +1342,33 @@ int main(int argc, char** argv) {
         CLI::App app{"shuati CLI"};
         CommandContext ctx;
         setup_commands(app, ctx);
+
+#ifdef _WIN32
+        int wargc;
+        LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
+        if (wargv) {
+            std::vector<std::string> args;
+            for (int i = 0; i < wargc; i++) {
+                args.push_back(wide_to_utf8(wargv[i]));
+            }
+            LocalFree(wargv);
+            
+            std::vector<const char*> c_args;
+            for (const auto& arg : args) {
+                c_args.push_back(arg.c_str());
+            }
+
+            try {
+                app.parse(c_args.size(), const_cast<char**>(c_args.data()));
+            } catch (const CLI::ParseError& e) {
+                return app.exit(e);
+            }
+        } else {
+            CLI11_PARSE(app, argc, argv);
+        }
+#else
         CLI11_PARSE(app, argc, argv);
+#endif
     }
     return 0;
 }

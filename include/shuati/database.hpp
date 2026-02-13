@@ -6,37 +6,9 @@
 #include <filesystem>
 #include <vector>
 #include <ctime>
+#include "shuati/types.hpp"
 
 namespace shuati {
-
-struct Problem {
-    int display_id = 0;   // 1-based numeric ID (TID)
-    std::string id;       // UUID or original string ID
-    std::string source;   // "web", "local"
-    std::string title;
-    std::string url;
-    std::string content_path;
-    std::string tags;      // comma-separated
-    std::string difficulty; // "easy", "medium", "hard"
-    long long created_at = 0;
-};
-
-struct Mistake {
-    int id = 0;
-    std::string problem_id;
-    std::string type;        // "Logic", "Boundary", "Greedy", "DP", "TLE"
-    std::string description;
-    long long timestamp = 0;
-};
-
-struct ReviewItem {
-    std::string problem_id;
-    std::string title;
-    long long next_review = 0;
-    int interval = 1;       // days
-    double ease_factor = 2.5;
-    int repetitions = 0;
-};
 
 class Database {
 public:

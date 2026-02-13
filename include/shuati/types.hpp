@@ -1,0 +1,86 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+namespace shuati {
+
+struct Problem {
+    int display_id = 0;   // 1-based numeric ID (TID)
+    std::string id;       // UUID or original string ID
+    std::string source;   // "web", "local"
+    std::string title;
+    std::string url;
+    std::string content_path;
+    std::string tags;      // comma-separated
+    std::string difficulty; // "easy", "medium", "hard"
+    long long created_at = 0;
+};
+
+struct Mistake {
+    int id = 0;
+    std::string problem_id;
+    std::string type;        // "Logic", "Boundary", "Greedy", "DP", "TLE"
+    std::string description;
+    long long timestamp = 0;
+};
+
+struct ReviewItem {
+    std::string problem_id;
+    std::string title;
+    long long next_review = 0;
+    int interval = 1;       // days
+    double ease_factor = 2.5;
+    int repetitions = 0;
+};
+
+struct TestCase {
+    std::string input;
+    std::string output;
+    bool is_sample = true;  // Sample cases vs. full test cases
+};
+
+enum class Verdict {
+    AC,  // Accepted
+    WA,  // Wrong Answer
+    TLE, // Time Limit Exceeded
+    MLE, // Memory Limit Exceeded
+    RE,  // Runtime Error
+    CE,  // Compilation Error
+    SE   // System Error
+};
+
+struct JudgeResult {
+    Verdict verdict;
+    int time_ms;
+    int memory_kb;
+    std::string message;
+    std::string error_output;
+    std::string input;
+    std::string output;
+    std::string expected;
+    
+    std::string verdict_str() const;
+};
+
+// Moved verdict_str implementation here or inline? 
+// It was in judge.cpp context. 
+// I'll keep declaration here, but implementation in judge.cpp or types.cpp (if I create one).
+// For now, I'll inline it or keep it in judge.cpp but declare it here.
+// JudgeResult was in judge.hpp. I should probably move it to types.hpp too!
+// Yes, I moved Verdict and JudgeResult to types.hpp above.
+
+inline std::string JudgeResult::verdict_str() const {
+    switch (verdict) {
+        case Verdict::AC: return "AC";
+        case Verdict::WA: return "WA";
+        case Verdict::TLE: return "TLE";
+        case Verdict::MLE: return "MLE";
+        case Verdict::RE: return "RE";
+        case Verdict::CE: return "CE";
+        case Verdict::SE: return "SE";
+        default: return "UNKNOWN";
+    }
+}
+
+} // namespace shuati

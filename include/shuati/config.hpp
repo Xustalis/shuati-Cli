@@ -15,7 +15,7 @@ struct Config {
     std::string api_base = "https://api.deepseek.com/v1";
     std::string model = "deepseek-chat";
     std::string language = "cpp";     // default solution language
-    int max_tokens = 300;
+    int max_tokens = 4096;
     std::string editor;               // Editor command (e.g., "code", "vim")
     bool ai_enabled = true;           // Enable AI features
     bool template_enabled = true;     // Enable template generation

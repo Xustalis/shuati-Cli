@@ -7,6 +7,7 @@
 #include <thread>
 #include <sstream>
 #include <iostream>
+#include <system_error>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -34,8 +35,7 @@ public:
     
     ~TempFile() {
         if (fs::exists(path_)) {
-            std::error_code ec;
-            fs::remove(path_, ec);
+            try { fs::remove(path_); } catch(...) {}
         }
     }
 
@@ -64,18 +64,7 @@ static std::string read_text_file(const std::string& path) {
     return ss.str();
 }
 
-std::string JudgeResult::verdict_str() const {
-    switch (verdict) {
-        case Verdict::AC: return "AC";
-        case Verdict::WA: return "WA";
-        case Verdict::TLE: return "TLE";
-        case Verdict::MLE: return "MLE";
-        case Verdict::RE: return "RE";
-        case Verdict::CE: return "CE";
-        case Verdict::SE: return "SE";
-        default: return "UNKNOWN";
-    }
-}
+
 
 std::string Judge::prepare(const std::string& source_file, const std::string& language) {
     return compile(source_file, language);
@@ -127,8 +116,7 @@ std::string Judge::compile(const std::string& source_file, const std::string& la
             );
 
             if (fs::exists(exe)) {
-                std::error_code ec;
-                fs::remove(exe, ec);
+                try { fs::remove(exe); } catch(...) {}
             }
 
             int ret = std::system(cmd.c_str());
@@ -255,21 +243,54 @@ JudgeResult Judge::run_case(const std::string& executable,
         return {Verdict::RE, 0, 0, "CreateProcess failed"};
     }
 
-    // Close write end of output pipe
+    // Close write end of output pipe so we don't block reading
     CloseHandle(hChildStd_OUT_Wr);
 
-    // Wait
-    DWORD wait_res = WaitForSingleObject(pi.hProcess, time_limit_ms);
+    std::string output;
+    bool finished = false;
+    DWORD exit_code = 0;
+    
+    while (true) {
+        // Check if process has exited
+        if (WaitForSingleObject(pi.hProcess, 0) == WAIT_OBJECT_0) {
+            finished = true;
+            GetExitCodeProcess(pi.hProcess, &exit_code);
+            break;
+        }
+
+        // Check timeout
+        auto now = std::chrono::high_resolution_clock::now();
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count() > time_limit_ms) {
+            finished = false; // TLE
+            break;
+        }
+
+        // Read available data
+        DWORD dwRead, dwAvail;
+        if (PeekNamedPipe(hChildStd_OUT_Rd, NULL, 0, NULL, &dwAvail, NULL) && dwAvail > 0) {
+            char buffer[4096];
+            if (ReadFile(hChildStd_OUT_Rd, buffer, sizeof(buffer), &dwRead, NULL) && dwRead > 0) {
+                output.append(buffer, dwRead);
+            }
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+
     auto end_time = std::chrono::high_resolution_clock::now();
     res.time_ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
 
-    if (wait_res == WAIT_TIMEOUT) {
+    // Read any remaining output after exit
+    DWORD dwRead;
+    char buffer[4096];
+    while (ReadFile(hChildStd_OUT_Rd, buffer, sizeof(buffer), &dwRead, NULL) && dwRead > 0) {
+        output.append(buffer, dwRead);
+    }
+
+    if (!finished) {
         TerminateProcess(pi.hProcess, 1);
         res.verdict = Verdict::TLE;
     } else {
-        DWORD exit_code = 0;
-        GetExitCodeProcess(pi.hProcess, &exit_code);
-
         // Check Memory
         PROCESS_MEMORY_COUNTERS pmc;
         if (GetProcessMemoryInfo(pi.hProcess, &pmc, sizeof(pmc))) {
@@ -277,29 +298,22 @@ JudgeResult Judge::run_case(const std::string& executable,
              if (res.memory_kb > memory_limit_kb) res.verdict = Verdict::MLE;
         }
 
-        if (exit_code != 0) {
-            res.verdict = Verdict::RE;
-            res.message = fmt::format("Exit code: {}", exit_code);
-        } else if (res.verdict != Verdict::MLE) {
-            std::string output;
-            DWORD dwRead;
-            CHAR chBuf[4096];
-            BOOL bSuccess = FALSE;
-            while(true) {
-                bSuccess = ReadFile(hChildStd_OUT_Rd, chBuf, 4096, &dwRead, NULL);
-                if (!bSuccess || dwRead == 0) break;
-                output.append(chBuf, dwRead);
+        if (res.verdict != Verdict::MLE) {
+             if (exit_code != 0) {
+                res.verdict = Verdict::RE;
+                res.message = fmt::format("Exit code: {}", exit_code);
+            } else {
+                res.verdict = Verdict::AC;
+                res.output = output; 
+                // Only now check output
+                res.verdict = check_output(output, tc.output);
             }
-            res.output = output;
-            res.verdict = check_output(output, tc.output);
         }
     }
-
+    
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
     CloseHandle(hChildStd_OUT_Rd);
-    // hChildStd_IN_Rd was passed to child, need to be closed? 
-    // Actually yes, clean up handles
     CloseHandle(hChildStd_IN_Rd); 
 
     return res;

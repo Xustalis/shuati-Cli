@@ -2,15 +2,9 @@
 
 #include <string>
 #include <vector>
-#include "shuati/database.hpp"
+#include "shuati/types.hpp"
 
 namespace shuati {
-
-struct TestCase {
-    std::string input;
-    std::string output;
-    bool is_sample = true;  // Sample cases vs. full test cases
-};
 
 // Strategy pattern interface for different OJ platforms
 class ICrawler {

@@ -3,33 +3,9 @@
 #include <string>
 #include <vector>
 #include <optional>
-#include "shuati/database.hpp"
-#include "shuati/crawler.hpp"
+#include "shuati/types.hpp"
 
 namespace shuati {
-
-enum class Verdict {
-    AC,  // Accepted
-    WA,  // Wrong Answer
-    TLE, // Time Limit Exceeded
-    MLE, // Memory Limit Exceeded
-    RE,  // Runtime Error
-    CE,  // Compilation Error
-    SE   // System Error
-};
-
-struct JudgeResult {
-    Verdict verdict;
-    int time_ms;
-    int memory_kb;
-    std::string message;
-    std::string error_output;
-    std::string input;
-    std::string output;
-    std::string expected;
-    
-    std::string verdict_str() const;
-};
 
 class Judge {
 public:

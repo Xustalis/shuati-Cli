@@ -275,6 +275,7 @@ PY
           for i in 1 2 3; do
             if gh release view "$tag" >/dev/null 2>&1; then
               echo "Release exists: $tag"
+              gh release edit "$tag" --notes-file RELEASE_NOTES.md
             else
               gh release create "$tag" --title "$title" --notes-file RELEASE_NOTES.md
             fi

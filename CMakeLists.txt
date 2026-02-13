@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(shuati-cli VERSION 1.3.1 LANGUAGES CXX)
+project(shuati-cli VERSION 1.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -46,6 +46,8 @@ add_executable(shuati
     src/adapters/companion_server.cpp
     src/adapters/luogu_crawler.cpp
     src/adapters/lanqiao_crawler.cpp
+    src/core/version.cpp
+    src/infra/logger.cpp
 )
 
 # Link libraries
@@ -63,6 +65,32 @@ target_link_libraries(shuati PRIVATE
     Threads::Threads
 )
 
+target_compile_definitions(shuati PRIVATE SHUATI_VERSION="${PROJECT_VERSION}")
+
+
 if(WIN32)
-    target_link_libraries(shuati PRIVATE Psapi)
+    target_link_libraries(shuati PRIVATE Psapi Shell32)
 endif()
+
+# Test executable
+add_executable(test_version
+    src/tests/test_version_logic.cpp
+    src/core/version.cpp
+)
+target_link_libraries(test_version PRIVATE fmt::fmt)
+target_include_directories(test_version PRIVATE include)
+
+# Complex Judge Test
+add_executable(test_judge_complex
+    src/tests/test_judge_complex.cpp
+    src/core/judge.cpp
+)
+target_link_libraries(test_judge_complex PRIVATE 
+    fmt::fmt 
+    Psapi 
+    SQLiteCpp 
+    cpr::cpr 
+    nlohmann_json::nlohmann_json
+)
+target_include_directories(test_judge_complex PRIVATE include)
+
