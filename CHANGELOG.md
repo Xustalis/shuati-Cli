@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.2] - 2026-02-13
+
+### 修复
+- explicitly trigger release workflow from prepare-release (3990e28)
+- remove redundant release job to avoid conflicts with release.yml (2330c64)
+
+**对比**: https://github.com/Xustalis/shuati-Cli/compare/v1.4.1...v1.4.2
+
+**贡献者**: Xustalis
+
 ## [1.4.1] - 2026-02-13
 
 ### Optimized
