@@ -6,6 +6,7 @@
 #include <ctime>
 #include "shuati/config.hpp"
 #include <fmt/color.h>
+#include <algorithm>
 #include "shuati/crawler.hpp"
 
 namespace shuati {
@@ -56,6 +57,19 @@ void ProblemManager::pull_problem(const std::string& url) {
             return;
         }
     }
+
+    // Sanitize ID to prevent path traversal
+    std::string safe_id = p.id;
+    auto invalid_chars = {'/', '\\', ':', '*', '?', '"', '<', '>', '|'};
+    for (char c : invalid_chars) {
+        std::replace(safe_id.begin(), safe_id.end(), c, '_');
+    }
+    // Remove ".." for safety
+    size_t pos;
+    while ((pos = safe_id.find("..")) != std::string::npos) {
+        safe_id.replace(pos, 2, "__");
+    }
+    p.id = safe_id;
 
     std::string problems_dir = Config::DIR_NAME + std::string("/problems/");
     if (!std::filesystem::exists(problems_dir)) std::filesystem::create_directories(problems_dir);

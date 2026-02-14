@@ -42,6 +42,7 @@
 #include "shuati/version.hpp"
 #include "shuati/logger.hpp"
 #include "shuati/utils/encoding.hpp"
+#include "shuati/boot_guard.hpp"
 
 // Header separation fixes ODR violations
 #include "shuati/adapters/leetcode_crawler.hpp"
@@ -1222,9 +1223,99 @@ void run_repl() {
 
         if (args.size() == 1) continue;
         if (args[1] == "exit" || args[1] == "quit") break;
+        
+        // ─── Shell Command Emulation ───
+        if (args[1] == "ls" || args[1] == "dir") {
+            try {
+                auto cwd = fs::current_path();
+                fmt::print(fg(fmt::color::cyan) | fmt::emphasis::bold, "目录: {}\n\n", cwd.string());
+                
+                std::vector<fs::directory_entry> entries;
+                for (const auto& entry : fs::directory_iterator(cwd)) {
+                    entries.push_back(entry);
+                }
+                
+                std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+                    if (a.is_directory() != b.is_directory()) return a.is_directory();
+                    return a.path().filename().string() < b.path().filename().string();
+                });
+                
+                for (const auto& entry : entries) {
+                    std::string name = entry.path().filename().string();
+                    if (entry.is_directory()) {
+                        fmt::print(fg(fmt::color::blue) | fmt::emphasis::bold, "  [DIR]  {}/\n", ensure_utf8(name));
+                    } else {
+                        auto size = entry.file_size();
+                        std::string size_str;
+                        if (size < 1024) size_str = fmt::format("{} B", size);
+                        else if (size < 1024 * 1024) size_str = fmt::format("{:.1f} KB", size / 1024.0);
+                        else size_str = fmt::format("{:.1f} MB", size / (1024.0 * 1024.0));
+                        fmt::print("  [FILE] {:<40} {}\n", ensure_utf8(name), size_str);
+                    }
+                }
+                fmt::print("\n");
+            } catch (const std::exception& e) {
+                fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
+            }
+            continue;
+        }
+        
+        if (args[1] == "cd") {
+            if (args.size() < 3) {
+                fmt::print(fg(fmt::color::yellow), "用法: cd <目录>\n");
+                continue;
+            }
+            try {
+                fs::path target = args[2];
+                if (fs::exists(target) && fs::is_directory(target)) {
+                    fs::current_path(target);
+                    fmt::print(fg(fmt::color::green), "[+] 已切换到: {}\n", fs::current_path().string());
+                    BootGuard::record_history(target.string());
+                    
+                    // Reload services if we're in a valid project directory
+                    auto new_root = Config::find_root();
+                    if (!new_root.empty() && global_svc) {
+                        try {
+                            *global_svc = Services::load(new_root);
+                            fmt::print(fg(fmt::color::cyan), "[*] 已重新加载项目上下文\n");
+                        } catch (...) {}
+                    }
+                } else {
+                    fmt::print(fg(fmt::color::red), "[!] 目录不存在: {}\n", target.string());
+                }
+            } catch (const std::exception& e) {
+                fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
+            }
+            continue;
+        }
+        
+        if (args[1] == "pwd") {
+            fmt::print("{}\n", fs::current_path().string());
+            continue;
+        }
+        
+        if (args[1] == "cls" || args[1] == "clear") {
+#ifdef _WIN32
+            std::system("cls");
+#else
+            std::system("clear");
+#endif
+            continue;
+        }
+        
         if (args[1] == "help") { 
              fmt::print(fg(fmt::color::white) | fmt::emphasis::bold, "{:<10} {:<35} {}\n", "命令", "说明", "用法");
              fmt::print("{}\n", std::string(80, '-'));
+             
+             // Shell commands
+             fmt::print(fg(fmt::color::yellow) | fmt::emphasis::bold, "Shell 命令:\n");
+             fmt::print("{:<10} {:<35} {}\n", "ls/dir", "列出当前目录文件", "ls");
+             fmt::print("{:<10} {:<35} {}\n", "cd", "切换目录 (自动重载项目)", "cd <目录>");
+             fmt::print("{:<10} {:<35} {}\n", "pwd", "显示当前目录", "pwd");
+             fmt::print("{:<10} {:<35} {}\n", "cls/clear", "清屏", "cls");
+             fmt::print("\n");
+             // Shuati commands
+             fmt::print(fg(fmt::color::cyan) | fmt::emphasis::bold, "Shuati 命令:\n");
              fmt::print("{:<10} {:<35} {}\n", "init", "初始化项目结构", "init");
              fmt::print("{:<10} {:<35} {}\n", "info", "显示可执行文件与环境信息", "info");
              fmt::print("{:<10} {:<35} {}\n", "pull", "从 URL 拉取题目", "pull <url>");
@@ -1279,6 +1370,11 @@ int main(int argc, char** argv) {
     }
     
     Logger::instance().info("Session started. Version: {}", current_version().to_string());
+
+    // ─── Boot Guard: Smart Startup Check ───
+    if (argc == 1) {
+        if (!BootGuard::check()) return 0;
+    }
 
     if (argc == 1) {
         run_repl();

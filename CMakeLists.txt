@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(shuati-cli VERSION 1.5.1 LANGUAGES CXX)
+project(shuati-cli VERSION 1.5.2 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -38,6 +38,7 @@ add_executable(shuati
     src/core/sm2_algorithm.cpp
     src/core/judge.cpp
     src/core/compiler_doctor.cpp
+    src/core/boot_guard.cpp
     src/core/memory_manager.cpp
     src/infra/database.cpp
     src/adapters/ai_coach.cpp
@@ -67,6 +68,12 @@ target_link_libraries(shuati PRIVATE
 )
 
 target_compile_definitions(shuati PRIVATE SHUATI_VERSION="${PROJECT_VERSION}")
+
+# Copy resources to build directory
+add_custom_command(TARGET shuati POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/resources $<TARGET_FILE_DIR:shuati>/resources
+)
 
 
 if(WIN32)

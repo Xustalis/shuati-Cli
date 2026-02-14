@@ -1,0 +1,66 @@
+[
+    {
+        "id": "unsupported_std",
+        "regex": "unrecognized\\s+command\\s+line\\s+option\\s+'(-std=[^']+)'",
+        "severity": "error",
+        "title": "编译器过旧：不支持该标准",
+        "description": "当前 g++ 不支持参数 {1}。",
+        "suggestion": "建议升级 MinGW-w64 / GCC 版本，或切换到支持 C++20 的编译器。也可临时改用较低标准（如 C++17）。"
+    },
+    {
+        "id": "missing_semicolon",
+        "regex": "expected\\s*['\"]?[:;]['\"]?\\s*before",
+        "severity": "error",
+        "title": "语法错误：缺少分号",
+        "description": "代码中某行末尾可能遗漏了分号 ';'",
+        "suggestion": "请检查报错行及其上一行的末尾，确保每条语句都以分号结束。"
+    },
+    {
+        "id": "chinese_characters",
+        "regex": "stray\\s*['\\\\]\\d+",
+        "severity": "error",
+        "title": "字符错误：非法字符",
+        "description": "代码中检测到非法的 ASCII 字符，通常是使用了中文标点符号。",
+        "suggestion": "请检查分号、括号、引号是否误用了中文输入法。"
+    },
+    {
+        "id": "undeclared_variable",
+        "regex": "'([^']+)'\\s+was\\s+not\\s+declared",
+        "severity": "error",
+        "title": "变量未定义",
+        "description": "变量 '{1}' 未定义或未声明。",
+        "suggestion": "1. 检查拼写是否正确。\n2. 确保在使用该变量前已定义它。\n3. 检查是否遗漏了头文件或 using namespace。"
+    },
+    {
+        "id": "array_out_of_bounds",
+        "regex": "index\\s+\\d+\\s+out\\s+of\\s+bounds",
+        "severity": "runtime",
+        "title": "运行时错误：数组越界",
+        "description": "访问了不存在的数组索引。",
+        "suggestion": "请检查循环边界，确保索引在 [0, size-1] 范围内。"
+    },
+    {
+        "id": "missing_main",
+        "regex": "(undefined reference to `main'|LNK2019.*main)",
+        "severity": "linker",
+        "title": "链接错误：找不到入口点",
+        "description": "未找到 main 函数。",
+        "suggestion": "请确保代码中包含 'int main() { ... }'。"
+    },
+    {
+        "id": "no_match_for_operator",
+        "regex": "no match for 'operator([^']+)'",
+        "severity": "error",
+        "title": "运算符重载错误",
+        "description": "没有匹配的 'operator{1}' 重载。",
+        "suggestion": "请检查操作数类型是否正确，或是否需要定义运算符重载。"
+    },
+    {
+        "id": "conversion_error",
+        "regex": "cannot convert.*from.*to",
+        "severity": "error",
+        "title": "类型转换错误",
+        "description": "无法进行隐式类型转换。",
+        "suggestion": "请显式转换类型，或修改变量类型以匹配。"
+    }
+]

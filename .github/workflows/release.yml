@@ -182,6 +182,10 @@ jobs:
           Copy-Item -Force "README.md" "$dist/"
           Copy-Item -Force "CHANGELOG.md" "$dist/"
           Copy-Item -Force -Recurse "build/vcpkg_installed/x64-windows/bin/*" "$dist/"
+          # Copy resources folder for JSON rules
+          if (Test-Path "resources") {
+            Copy-Item -Force -Recurse "resources" "$dist/"
+          }
 
       - name: Pack (Windows .zip)
         if: runner.os == 'Windows'
@@ -211,6 +215,10 @@ jobs:
           cp -f install.ps1 dist/ || true
           cp -f README.md dist/ || true
           cp -f CHANGELOG.md dist/ || true
+          # Copy resources folder for JSON rules
+          if [ -d "resources" ]; then
+            cp -rf resources dist/
+          fi
 
       - name: Pack (Linux/macOS .tar.gz)
         if: runner.os != 'Windows'

@@ -1,8 +1,64 @@
 #include "shuati/compiler_doctor.hpp"
 #include <regex>
+#include <fstream>
 #include <fmt/core.h>
+#include <nlohmann/json.hpp>
 
 namespace shuati {
+
+// Static members
+std::vector<DiagnosticRule> CompilerDoctor::rules_;
+bool CompilerDoctor::rules_loaded_ = false;
+
+bool CompilerDoctor::load_rules(const std::string& json_path) {
+    try {
+        std::ifstream f(json_path);
+        if (!f.is_open()) {
+            return false;
+        }
+        
+        nlohmann::json j = nlohmann::json::parse(f);
+        rules_.clear();
+        
+        for (const auto& rule_json : j) {
+            DiagnosticRule rule;
+            rule.id = rule_json.value("id", "");
+            rule.regex_pattern = rule_json.value("regex", "");
+            rule.severity = rule_json.value("severity", "error");
+            rule.title = rule_json.value("title", "未知错误");
+            rule.description = rule_json.value("description", "");
+            rule.suggestion = rule_json.value("suggestion", "");
+            
+            if (!rule.regex_pattern.empty()) {
+                rules_.push_back(rule);
+            }
+        }
+        
+        rules_loaded_ = true;
+        return true;
+    } catch (const std::exception& e) {
+        fmt::print("[!] 加载诊断规则失败: {}\n", e.what());
+        return false;
+    }
+}
+
+std::string CompilerDoctor::replace_placeholders(const std::string& template_str, const std::smatch& matches) {
+    std::string result = template_str;
+    
+    // Replace {1}, {2}, etc. with captured groups
+    for (size_t i = 1; i < matches.size(); i++) {
+        std::string placeholder = fmt::format("{{{}}}", i);
+        std::string replacement = matches[i].str();
+        
+        size_t pos = 0;
+        while ((pos = result.find(placeholder, pos)) != std::string::npos) {
+            result.replace(pos, placeholder.length(), replacement);
+            pos += replacement.length();
+        }
+    }
+    
+    return result;
+}
 
 Diagnosis CompilerDoctor::diagnose(const std::string& error_output) {
     Diagnosis d;
@@ -10,60 +66,38 @@ Diagnosis CompilerDoctor::diagnose(const std::string& error_output) {
     d.description = "无法识别的编译错误，请检查代码逻辑。";
     d.suggestion = "请尝试阅读上方的英文报错信息，或者使用 'hint' 命令询问 AI。";
 
-    // 0. Unsupported C++ standard flag
-    std::smatch std_m;
-    if (std::regex_search(error_output, std_m, std::regex(R"(unrecognized\s+command\s+line\s+option\s+'(-std=[^']+)')"))) {
-        d.title = "编译器过旧：不支持该标准";
-        d.description = fmt::format("当前 g++ 不支持参数 {}。", std_m[1].str());
-        d.suggestion = "建议升级 MinGW-w64 / GCC 版本，或切换到支持 C++20 的编译器。也可临时改用较低标准（如 C++17）。";
-        return d;
+    // Load rules on first use if not already loaded
+    if (!rules_loaded_) {
+        // Try to load from multiple possible locations
+        std::vector<std::string> possible_paths = {
+            "resources/rules/compiler_errors.json",
+            "../resources/rules/compiler_errors.json",
+            "../../resources/rules/compiler_errors.json"
+        };
+        
+        for (const auto& path : possible_paths) {
+            if (load_rules(path)) {
+                break;
+            }
+        }
     }
 
-    // 1. Missing semicolon
-    // error: expected initializer before '...'
-    // error: expected ';' before '...'
-    if (std::regex_search(error_output, std::regex(R"(expected\s*['"]?[:;]['"]?\s*before)"))) {
-        d.title = "语法错误：缺少分号";
-        d.description = "代码中某行末尾可能遗漏了分号 ';'";
-        d.suggestion = "请检查报错行及其上一行的末尾，确保每条语句都以分号结束。";
-        return d;
-    }
-
-    // 2. Chinese characters
-    // error: stray '\357' in program
-    if (std::regex_search(error_output, std::regex(R"(stray\s*['\\]\d+)"))) {
-        d.title = "字符错误：非法字符";
-        d.description = "代码中检测到非法的 ASCII 字符，通常是使用了中文标点符号。";
-        d.suggestion = "请检查分号、括号、引号是否误用了中文输入法。";
-        return d;
-    }
-
-    // 3. Undeclared variable
-    // error: '...' was not declared in this scope
-    std::smatch m;
-    if (std::regex_search(error_output, m, std::regex(R"('([^']+)'\s+was\s+not\s+declared)"))) {
-        d.title = "变量未定义";
-        d.description = fmt::format("变量 '{}' 未定义或未声明。", m[1].str());
-        d.suggestion = "1. 检查拼写是否正确。\n2. 确保在使用该变量前已定义它。\n3. 检查是否遗漏了头文件或 using namespace。";
-        return d;
-    }
-
-    // 4. Index out of bounds (Runtime)
-    // index ... out of bounds
-    if (std::regex_search(error_output, std::regex(R"(index\s+\d+\s+out\s+of\s+bounds)", std::regex::icase))) {
-        d.title = "运行时错误：数组越界";
-        d.description = "访问了不存在的数组索引。";
-        d.suggestion = "请检查循环边界，确保索引在 [0, size-1] 范围内。";
-        return d;
-    }
-    
-    // 5. Linker error (missing main or duplicate symbol)
-    if (error_output.find("undefined reference to `main'") != std::string::npos ||
-        error_output.find("LNK2019") != std::string::npos && error_output.find("main") != std::string::npos) {
-        d.title = "链接错误：找不到入口点";
-        d.description = "未找到 main 函数。";
-        d.suggestion = "请确保代码中包含 'int main() { ... }'。";
-        return d;
+    // Try to match against loaded rules
+    for (const auto& rule : rules_) {
+        try {
+            std::regex pattern(rule.regex_pattern, std::regex::icase);
+            std::smatch matches;
+            
+            if (std::regex_search(error_output, matches, pattern)) {
+                d.title = replace_placeholders(rule.title, matches);
+                d.description = replace_placeholders(rule.description, matches);
+                d.suggestion = replace_placeholders(rule.suggestion, matches);
+                return d;
+            }
+        } catch (const std::regex_error&) {
+            // Skip invalid regex patterns
+            continue;
+        }
     }
 
     return d;

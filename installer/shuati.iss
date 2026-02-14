@@ -34,6 +34,7 @@ WizardStyle=modern
 
 [Tasks]
 Name: addtopath; Description: Add shuati-cli to PATH
+Name: contextmenu; Description: "Add 'Open Shuati CLI Here' to context menu"; Flags: unchecked
 
 [Files]
 Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -45,8 +46,14 @@ Name: "{autoprograms}\Shuati CLI"; Filename: "{app}\shuati.exe"
 Filename: "{cmd}"; Parameters: "/k ""{app}\shuati.exe"" --help"; Flags: postinstall nowait skipifsilent
 
 [Registry]
-; Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{code:GetPath}"; Tasks: addtopath; Flags: preservestringtype
-; Removed [Registry] entry to prevent Inno Setup from restoring the old PATH on uninstall, 
+Root: HKCU; Subkey: "Software\Classes\Directory\Background\shell\Shuati CLI"; ValueType: string; ValueName: ""; ValueData: "Open Shuati CLI Here"; Tasks: contextmenu; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Directory\Background\shell\Shuati CLI\icon"; ValueType: string; ValueName: ""; ValueData: "{app}\shuati.exe"; Tasks: contextmenu; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Directory\Background\shell\Shuati CLI\command"; ValueType: string; ValueName: ""; ValueData: "cmd.exe /k ""{app}\shuati.exe"""; Tasks: contextmenu; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\Shuati CLI"; ValueType: string; ValueName: ""; ValueData: "Open Shuati CLI Here"; Tasks: contextmenu; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\Shuati CLI\icon"; ValueType: string; ValueName: ""; ValueData: "{app}\shuati.exe"; Tasks: contextmenu; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\Shuati CLI\command"; ValueType: string; ValueName: ""; ValueData: "cmd.exe /k ""pushd ""%V"" && ""{app}\shuati.exe"""""; Tasks: contextmenu; Flags: uninsdeletekey
+
+; Removed [Registry] entry for PATH to prevent Inno Setup from restoring the old PATH on uninstall, 
 ; which would wipe out changes made by other installers in the meantime. 
 ; Path management is now handled entirely in [Code].
 
