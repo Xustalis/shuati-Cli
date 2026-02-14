@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.1] - 2026-02-14
+
+### 修复
+- resolve Inno Setup syntax error in ContainsPath function (05b60c0)
+
+**对比**: https://github.com/Xustalis/shuati-Cli/compare/v1.5.0...v1.5.1
+
+**贡献者**: Xustalis
+
 ## [1.5.0] - 2026-02-14
 
 ### 新功能
