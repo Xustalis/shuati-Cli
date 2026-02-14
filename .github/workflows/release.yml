@@ -45,20 +45,48 @@ jobs:
             echo "Tag must be vX.Y.Z, got: $tag"
             exit 1
           fi
-          cmake_ver="$(python -c "import re, pathlib; txt=pathlib.Path('CMakeLists.txt').read_text(encoding='utf-8', errors='ignore'); m=re.search(r'project\\(shuati-cli\\s+VERSION\\s+([0-9]+\\.[0-9]+\\.[0-9]+)', txt); print(m.group(1) if m else '')")"
+          
+          # Extract version from CMakeLists.txt using a robust python script
+          cmake_ver=$(python3 -c "
+          import re, pathlib, sys
+          try:
+              txt = pathlib.Path('CMakeLists.txt').read_text(encoding='utf-8', errors='ignore')
+              # Match: project(shuati-cli VERSION 1.4.2 ...)
+              m = re.search(r'project\(shuati-cli\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)', txt)
+              if m:
+                  print(m.group(1))
+              else:
+                  print('')
+          except Exception:
+              print('')
+          ")
+
           if [[ -z "$cmake_ver" ]]; then
             echo "Failed to parse version from CMakeLists.txt"
             exit 1
           fi
+          
           if [[ "v$cmake_ver" != "$tag" ]]; then
             echo "Tag ($tag) does not match CMakeLists.txt version ($cmake_ver)"
             exit 1
           fi
-          vcpkg_ver="$(python -c "import json, pathlib; obj=json.loads(pathlib.Path('vcpkg.json').read_text(encoding='utf-8', errors='ignore')); print(obj.get('version-string',''))")"
+          
+          # Extract version from vcpkg.json
+          vcpkg_ver=$(python3 -c "
+          import json, pathlib, sys
+          try:
+              content = pathlib.Path('vcpkg.json').read_text(encoding='utf-8', errors='ignore')
+              obj = json.loads(content)
+              print(obj.get('version-string', ''))
+          except Exception:
+              print('')
+          ")
+
           if [[ -z "$vcpkg_ver" ]]; then
             echo "Failed to parse version-string from vcpkg.json"
             exit 1
           fi
+          
           if [[ "$vcpkg_ver" != "$cmake_ver" ]]; then
             echo "vcpkg.json version ($vcpkg_ver) does not match CMakeLists.txt version ($cmake_ver)"
             exit 1
