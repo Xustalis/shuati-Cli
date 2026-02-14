@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def _read(p: Path) -> str:
-    return p.read_text(encoding="utf-8", errors="strict")
+    return p.read_text(encoding="utf-8", errors="strict").replace("\r\n", "\n")
 
 
 def _write(p: Path, s: str) -> None:

@@ -198,9 +198,9 @@ jobs:
           $ver = "${{ github.ref_name }}".TrimStart("v")
           $env:SHUATI_VERSION = $ver
           $env:SHUATI_OUTPUT_NAME = "shuati-setup-x64-${{ github.ref_name }}"
-          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\\ISCC.exe"
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
           if (!(Test-Path $iscc)) { throw "ISCC.exe not found: $iscc" }
-          & $iscc "installer\\shuati.iss"
+          & $iscc "installer\shuati.iss"
 
       - name: Stage (Linux/macOS)
         if: runner.os != 'Windows'
