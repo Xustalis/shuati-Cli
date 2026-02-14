@@ -47,7 +47,7 @@ graph TD
     end
     
     subgraph Execution["执行环境"]
-        Judge -->|编译| Compiler[编译器 (g++/python)]
+        Judge -->|编译| Compiler["编译器 (g++/python)"]
         Judge -->|运行| Sandbox[子进程沙箱]
         Sandbox -->|I/O 重定向| FS[文件系统]
     end

@@ -40,6 +40,7 @@ jobs:
       - name: Validate Version Tag (vX.Y.Z matches CMakeLists)
         shell: bash
         run: |
+          if command -v python3 &>/dev/null; then py=python3; else py=python; fi
           tag="${GITHUB_REF_NAME}"
           if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Tag must be vX.Y.Z, got: $tag"
@@ -47,7 +48,7 @@ jobs:
           fi
           
           # Extract version from CMakeLists.txt using a robust python script
-          cmake_ver=$(python3 -c "
+          cmake_ver="$($py -c "
           import re, pathlib, sys
           try:
               txt = pathlib.Path('CMakeLists.txt').read_text(encoding='utf-8', errors='ignore')
@@ -59,7 +60,7 @@ jobs:
                   print('')
           except Exception:
               print('')
-          ")
+          " | tr -d '\r')"
 
           if [[ -z "$cmake_ver" ]]; then
             echo "Failed to parse version from CMakeLists.txt"
@@ -72,7 +73,7 @@ jobs:
           fi
           
           # Extract version from vcpkg.json
-          vcpkg_ver=$(python3 -c "
+          vcpkg_ver="$($py -c "
           import json, pathlib, sys
           try:
               content = pathlib.Path('vcpkg.json').read_text(encoding='utf-8', errors='ignore')
@@ -80,7 +81,7 @@ jobs:
               print(obj.get('version-string', ''))
           except Exception:
               print('')
-          ")
+          " | tr -d '\r')"
 
           if [[ -z "$vcpkg_ver" ]]; then
             echo "Failed to parse version-string from vcpkg.json"
@@ -149,9 +150,14 @@ jobs:
         shell: pwsh
         run: |
           # Add vcpkg DLLs to PATH so the executable can run
-          $env:PATH = "$PWD/build/vcpkg_installed/x64-windows/bin;$env:PATH"
+          $vcpkgBin = Resolve-Path "build/vcpkg_installed/*/bin" | Select-Object -First 1 -ExpandProperty Path
+          if ($vcpkgBin) {
+            Write-Host "Adding vcpkg bin to PATH: $vcpkgBin"
+            $env:PATH = "$vcpkgBin;$env:PATH"
+          }
           
           & "build/Release/shuati.exe" --help
+          
           New-Item -ItemType Directory -Force -Path smoke | Out-Null
           Push-Location smoke
           & "..\build\Release\shuati.exe" init
@@ -217,7 +223,8 @@ jobs:
         run: |
           sha_one () {
             f="$1"
-            python -c "import hashlib, pathlib; p=pathlib.Path(r'''$f'''); h=hashlib.sha256(p.read_bytes()).hexdigest(); pathlib.Path(str(p)+'.sha256').write_text(f\"{h}  {p.name}\\n\"); print(h)"
+            if command -v python3 &>/dev/null; then py=python3; else py=python; fi
+            $py -c "import hashlib, pathlib; p=pathlib.Path(r'''$f'''); h=hashlib.sha256(p.read_bytes()).hexdigest(); pathlib.Path(str(p)+'.sha256').write_text(f\"{h}  {p.name}\\n\"); print(h)"
           }
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             sha_one "shuati-windows-x64-${{ github.ref_name }}.zip"
@@ -359,5 +366,5 @@ jobs:
           repo="${GITHUB_REPOSITORY}"
           export TAG="$tag"
           export REPO="$repo"
-          payload="$(python -c "import json, os; tag=os.environ['TAG']; repo=os.environ['REPO']; print(json.dumps({'text': f'✅ {repo} 发布完成: {tag}\\\\nhttps://github.com/{repo}/releases/tag/{tag}'}))")"
+          payload="$(python3 -c "import json, os; tag=os.environ['TAG']; repo=os.environ['REPO']; print(json.dumps({'text': f'✅ {repo} 发布完成: {tag}\\\\nhttps://github.com/{repo}/releases/tag/{tag}'}))")"
           curl -sS -X POST -H "Content-Type: application/json" -d "$payload" "$WEBHOOK"
