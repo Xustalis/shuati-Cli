@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.4] - 2026-02-14
+
+### 修复
+- add vcpkg DLLs to PATH for Windows verification (e48d9fd)
+
+**对比**: https://github.com/Xustalis/shuati-Cli/compare/v1.4.3...v1.4.4
+
+**贡献者**: Xustalis
+
 ## [1.4.3] - 2026-02-14
 
 ### 修复
