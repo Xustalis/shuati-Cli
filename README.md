@@ -16,7 +16,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![C++20](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 
-**Shuati CLI** 是一个专为算法竞赛选手和求职者打造的命令行算法练习工具。它将"拉题 -> 编码 -> 测试 -> 调试"的完整工作流搬到了本地终端，让你告别浏览器 Web IDE 的低效调试，专注于算法本身。
+**Shuati CLI** 是一个专为oier and coder 打造的命令行算法练习工具。它将"拉题 -> 编码 -> 测试 -> 调试"的完整工作流搬到了本地终端，让你告别浏览器 Web IDE 的低效调试，专注于算法本身。
 
 [安装指南](#安装指南) • [快速开始](#快速开始) • [功能详解](#功能详解) • [配置说明](#配置说明) • [故障排除](#故障排除)
 
@@ -25,10 +25,6 @@
 ---
 
 ## 1. 项目概述
-
-### 核心痛点与解决方案
-- **痛点**：Web IDE 调试困难，无法使用本地熟悉的编辑器（Vim/VSCode），测试用例需要手动复制粘贴。
-- **解决**：Shuati CLI 自动拉取题目和测试用例，在本地通过沙箱环境运行代码，并提供 AI 辅助诊断和启发式提示。
 
 ### 技术栈
 - **语言**：C++20
