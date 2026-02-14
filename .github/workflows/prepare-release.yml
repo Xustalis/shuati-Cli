@@ -1,9 +1,8 @@
 name: Prepare Release
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
+
     inputs:
       force:
         description: Force a release even when no semver bump is detected
