@@ -23,6 +23,12 @@ def _replace_one(text: str, pattern: str, repl: str) -> str:
     return new
 
 
+def _replace_optional(text: str, pattern: str, repl: str) -> str:
+    """Like _replace_one but silently returns unchanged text when pattern is not found."""
+    new, n = re.subn(pattern, repl, text, count=1, flags=re.M)
+    return new
+
+
 def bump_cmake(version: str) -> None:
     p = ROOT / "CMakeLists.txt"
     txt = _read(p)
@@ -47,8 +53,10 @@ def bump_vcpkg(version: str) -> None:
 
 def bump_readme_badge(version: str) -> None:
     p = ROOT / "README.md"
-    txt = p.read_text(encoding="utf-8", errors="ignore")
-    txt = _replace_one(
+    if not p.exists():
+        return
+    txt = _read(p)
+    txt = _replace_optional(
         txt,
         r"^\[!\[Version\]\(https://img\.shields\.io/badge/version-[0-9]+\.[0-9]+\.[0-9]+-green\.svg\)\]\(https://github\.com/Xustalis/shuati-Cli/releases\)\s*$",
         f"[![Version](https://img.shields.io/badge/version-{version}-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)",
@@ -58,14 +66,18 @@ def bump_readme_badge(version: str) -> None:
 
 def bump_installer(version: str) -> None:
     p = ROOT / "install.ps1"
-    txt = p.read_text(encoding="utf-8", errors="ignore")
-    txt = _replace_one(txt, r"^# Shuati CLI Installer v[0-9]+\.[0-9]+\.[0-9]+\s*$", f"# Shuati CLI Installer v{version}")
+    if not p.exists():
+        return
+    txt = _read(p)
+    txt = _replace_optional(txt, r"^# Shuati CLI Installer v[0-9]+\.[0-9]+\.[0-9]+\s*$", f"# Shuati CLI Installer v{version}")
     _write(p, txt)
 
 
 def prepend_changelog(version: str, notes_markdown: str) -> None:
     p = ROOT / "CHANGELOG.md"
-    txt = p.read_text(encoding="utf-8", errors="ignore")
+    if not p.exists():
+        return
+    txt = _read(p)
     today = _dt.date.today().isoformat()
     header = f"## [{version}] - {today}\n\n"
     body = notes_markdown.strip() + "\n\n" if notes_markdown.strip() else "### Changed\n- (No notable changes)\n\n"
