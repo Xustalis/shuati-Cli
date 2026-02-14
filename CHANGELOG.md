@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.0] - 2026-02-14
+
+### 新功能
+- Add GitHub Actions workflow for automated multi-platform builds and releases. (34e6791)
+
+### 修复
+- make bump_readme_badge graceful when badge missing, use CRLF-safe _read() everywhere (6f44e72)
+- fix InnoSetup paths, output dir mismatch, and CRLF regex issue (c940c8e)
+
+### 其他
+- update README (3a08811)
+- rewrite README with comprehensive documentation (3ab9d5c)
+
+**对比**: https://github.com/Xustalis/shuati-Cli/compare/v1.4.4...v1.5.0
+
+**贡献者**: Xustalis
+
 ## [1.4.4] - 2026-02-14
 
 ### 修复
