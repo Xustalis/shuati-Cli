@@ -219,6 +219,7 @@ jobs:
           if [ -d "resources" ]; then
             cp -rf resources dist/
           fi
+          cp -f install.sh dist/ || true
 
       - name: Pack (Linux/macOS .tar.gz)
         if: runner.os != 'Windows'

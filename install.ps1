@@ -8,7 +8,12 @@ if (!(Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null 
 }
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+if ($MyInvocation.MyCommand.Path) {
+    $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+}
+else {
+    $ScriptDir = $PWD
+}
 
 function Get-LatestWindowsAssetUrls([string]$Repo) {
     $headers = @{
