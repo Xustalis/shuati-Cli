@@ -148,6 +148,9 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          # Add vcpkg DLLs to PATH so the executable can run
+          $env:PATH = "$PWD/build/vcpkg_installed/x64-windows/bin;$env:PATH"
+          
           & "build/Release/shuati.exe" --help
           New-Item -ItemType Directory -Force -Path smoke | Out-Null
           Push-Location smoke
