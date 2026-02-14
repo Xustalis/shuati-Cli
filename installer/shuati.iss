@@ -67,7 +67,6 @@ function ContainsPath(const PathList: string; const Candidate: string): Boolean;
 var
   P: string;
   C: string;
-end;
 begin
   P := ';' + Lowercase(NormalizePath(PathList)) + ';';
   C := ';' + Lowercase(NormalizePath(Candidate)) + ';';
