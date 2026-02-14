@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.3] - 2026-02-14
+
+### 修复
+- fix indentation and robustify version extraction script (9bc0363)
+
+### 其他
+- Establish GitHub Actions for continuous integration, multi-platform builds, and automated releases. (6eb704b)
+- Fix installer environment variable handling and update workflow tools (dfc00dc)
+- feat-installer-autodownload (de9cca6)
+- Merge branch 'main' of https://github.com/Xustalis/shuati-Cli (f5b79fb)
+
+**对比**: https://github.com/Xustalis/shuati-Cli/compare/v1.4.2...v1.4.3
+
+**贡献者**: Xustalis
+
 ## [1.4.2] - 2026-02-13
 
 ### 修复

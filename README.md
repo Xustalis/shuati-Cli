@@ -17,7 +17,7 @@
 [![Workflow Tests](https://github.com/Xustalis/shuati-Cli/actions/workflows/workflow-tests.yml/badge.svg)](https://github.com/Xustalis/shuati-Cli/actions/workflows/workflow-tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![C++20](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
-[![Version](https://img.shields.io/badge/version-1.4.2-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
+[![Version](https://img.shields.io/badge/version-1.4.3-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
 **Shuati CLI** 是一个基于命令行的算法练习工具：拉题、生成本地代码文件、运行本地测评、记录复习进度，并提供 AI 启发式提示。
 
 本项目适合习惯使用 CLI 和 Vim/VSCode 等本地编辑器，且希望脱离浏览器 Web IDE 低效调试环节的开发者。
