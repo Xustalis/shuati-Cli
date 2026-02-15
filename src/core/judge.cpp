@@ -531,9 +531,14 @@ JudgeResult Judge::run_process_redirect(const std::string& cmd,
                                         const std::string& output_file, 
                                         int time_limit_ms, 
                                         int memory_limit_kb) {
-    // Construct command: cmd < "input" > "output"
-    // Quote files to handle spaces
-    std::string full_cmd = fmt::format("{} < \"{}\" > \"{}\"", cmd, input_file, output_file);
+    // Construct command: cmd [ < "input" ] [ > "output" ]
+    std::string full_cmd = cmd;
+    if (!input_file.empty()) {
+        full_cmd += fmt::format(" < \"{}\"", input_file);
+    }
+    if (!output_file.empty()) {
+        full_cmd += fmt::format(" > \"{}\"", output_file);
+    }
     
     auto start = std::chrono::steady_clock::now();
     int ret = std::system(full_cmd.c_str());

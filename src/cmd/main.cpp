@@ -686,11 +686,14 @@ void cmd_test(CommandContext& ctx) {
             fs::path cur_exp = prob_dir / "temp" / "cur.exp";
             fs::path cur_out = prob_dir / "temp" / "cur.out";
 
+            bool error_found = false;
             for (int i = 1; i <= rounds; i++) {
                  // 1. Gen
                  auto r_gen = svc.judge->run_process_redirect("python \"" + gen_py.string() + "\"", "", cur_in.string(), 5000, 512*1024);
                  if (r_gen.verdict != Verdict::AC) {
                      fmt::print(fg(fmt::color::red), "[!] 生成器错误 (Case {})\n", i);
+                     if (!r_gen.message.empty()) fmt::print("    Details: {}\n", r_gen.message);
+                     error_found = true;
                      break;
                  }
 
@@ -698,6 +701,7 @@ void cmd_test(CommandContext& ctx) {
                  auto r_sol = svc.judge->run_process_redirect("python \"" + sol_py.string() + "\"", cur_in.string(), cur_exp.string(), 5000, 512*1024);
                  if (r_sol.verdict != Verdict::AC) {
                      fmt::print(fg(fmt::color::red), "[!] 标程错误 (Case {})\n", i);
+                     error_found = true;
                      break; 
                  }
 
@@ -707,11 +711,13 @@ void cmd_test(CommandContext& ctx) {
                  if (r_user.verdict == Verdict::RE) {
                      fmt::print(fg(fmt::color::red), "[RE] Case {}\n", i);
                      fs::copy_file(cur_in, prob_dir / "debug" / "fail.in", fs::copy_options::overwrite_existing);
+                     error_found = true;
                      break;
                  } 
                  if (r_user.verdict == Verdict::TLE) {
                      fmt::print(fg(fmt::color::red), "[TLE] Case {}\n", i);
                      fs::copy_file(cur_in, prob_dir / "debug" / "fail.in", fs::copy_options::overwrite_existing);
+                     error_found = true;
                      break;
                  }
 
@@ -745,7 +751,9 @@ void cmd_test(CommandContext& ctx) {
 
                  fmt::print("[AC] Case {} ({}ms, {}KB)\n", i, r_user.time_ms, r_user.memory_kb);
             }
-            fmt::print(fg(fmt::color::green), "\n[+] 对拍完成，未发现错误。\n");
+            if (!error_found) {
+                fmt::print(fg(fmt::color::green), "\n[+] 对拍完成，未发现错误。\n");
+            }
         }
         
         svc.judge->cleanup_prepared(user_exe, svc.cfg.language);
