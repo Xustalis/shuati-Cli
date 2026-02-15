@@ -107,7 +107,7 @@ void ProblemManager::pull_problem(const std::string& url) {
     fmt::print("    使用 shuati solve {} 开始练习\n", p.id);
 }
 
-void ProblemManager::create_local(const std::string& title, const std::string& tags, const std::string& difficulty) {
+std::string ProblemManager::create_local(const std::string& title, const std::string& tags, const std::string& difficulty) {
     Problem p;
     p.id = "local_" + std::to_string(std::time(nullptr));
     p.source = "local";
@@ -138,6 +138,7 @@ void ProblemManager::create_local(const std::string& title, const std::string& t
     db_->upsert_review(r);
 
     fmt::print(fg(fmt::color::green), "[+] 本地题目 '{}' 已创建: {}\n", title, filename);
+    return p.id;
 }
 
 

@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 #include <fmt/core.h>
 #include <string_view>
+#include <regex>
 
 namespace shuati {
 
@@ -195,6 +196,79 @@ std::string AICoach::diagnose(const std::string& problem_desc,
         problem_desc.substr(0, 500), user_code.substr(0, 1000), failure_info, user_history);
 
     return call_api(sys, user);
+}
+
+std::pair<std::string, std::string> AICoach::generate_test_scripts(const std::string& problem_desc) {
+    // Heuristic: Extract Input/Output/Constraints to reduce token usage
+    // This is a simple substring extraction, can be improved with regex
+    std::string limited_desc = problem_desc;
+    if (problem_desc.length() > 2000) {
+        // Try to find key sections
+        std::vector<std::string> keys = {"Input", "Output", "Constraints", "输入", "输出", "数据范围"};
+        std::string extracted;
+        for (const auto& key : keys) {
+            size_t pos = problem_desc.find(key);
+            if (pos != std::string::npos) {
+                // Take 500 chars after key
+                extracted += problem_desc.substr(pos, 500) + "\n...\n";
+            }
+        }
+        if (!extracted.empty()) limited_desc = extracted;
+        else limited_desc = problem_desc.substr(0, 1500); // Fallback truncate
+    }
+
+    std::string sys = 
+        "You are an algorithm testing expert. "
+        "Generate two Python scripts based on the problem description.\n"
+        "1. `gen.py`: Prints a random valid test case to STDOUT. MUST use `random`. NO INPUT reading. \n"
+        "2. `sol.py`: Reads test case from STDIN, prints correct answer to STDOUT.\n"
+        "Output ONLY the code blocks, wrapped in ```python ... ```. \n"
+        "Mark them clearly as `gen.py` and `sol.py`.\n"
+        "Constraint: Read the description CAREFULLY. If problem says 'two integers', generate exactly two.\n"
+        "Do NOT assume the first line is N unless the problem explicitly says so.\n"
+        "Robustness: `sol.py` must handle large input efficiently.";
+
+    std::string user = "Problem:\n" + limited_desc;
+
+    std::string raw = call_api(sys, user);
+    
+    // Parse response
+    std::pair<std::string, std::string> result;
+    
+    auto extract_code = [&](const std::string& text, const std::string& marker) -> std::string {
+        // Find marker (gen.py or sol.py), then find next ```python block
+        size_t p_mark = text.find(marker);
+        if (p_mark == std::string::npos) return "";
+        size_t p_start = text.find("```", p_mark);
+        if (p_start == std::string::npos) return "";
+        size_t p_code_start = text.find('\n', p_start);
+        if (p_code_start == std::string::npos) return "";
+        size_t p_end = text.find("```", p_code_start);
+        if (p_end == std::string::npos) return "";
+        return text.substr(p_code_start + 1, p_end - p_code_start - 1);
+    };
+
+    // If models don't follow "gen.py" marker strictly, try just finding two blocks
+    // But let's try strict first
+    result.first = extract_code(raw, "gen.py");
+    result.second = extract_code(raw, "sol.py");
+
+    // Fallback: Just grab first two blocks if named extraction fails
+    if (result.first.empty() || result.second.empty()) {
+        std::regex re("```(?:python)?\\s*([\\s\\S]*?)```");
+        std::sregex_iterator next(raw.begin(), raw.end(), re);
+        std::sregex_iterator end;
+        if (next != end) {
+            result.first = next->str(1);
+            next++;
+            if (next != end) {
+                result.second = next->str(1);
+            }
+        }
+    }
+
+    return result;
+
 }
 
 } // namespace shuati

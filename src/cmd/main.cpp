@@ -586,7 +586,22 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
     new_cmd->callback([&]() {
         try {
             auto svc = Services::load(find_root_or_die());
-            svc.pm->create_local(ctx.new_title, ctx.new_tags, ctx.new_diff);
+            std::string pid = svc.pm->create_local(ctx.new_title, ctx.new_tags, ctx.new_diff);
+            
+            // Create directory structure
+            fs::path prob_dir = fs::path(".shuati") / "problems" / pid;
+            fs::create_directories(prob_dir / "data");
+            fs::create_directories(prob_dir / "validator");
+            fs::create_directories(prob_dir / "debug");
+            fs::create_directories(prob_dir / "temp");
+
+            // Create initial files
+            std::ofstream(prob_dir / "problem.md") << "# " << ctx.new_title << "\n\nDescription here.\n";
+            
+            fmt::print(fg(fmt::color::green), "[+] 本地题目创建成功: {} ({})\n", ctx.new_title, pid);
+            fmt::print("    目录: {}\n", prob_dir.string());
+            fmt::print("    请在 data/ 放入测试用例，或在 validator/ 放入 gen.py/sol.py\n");
+            
         } catch (const std::exception& e) {
             fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
         }
@@ -812,210 +827,242 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
     test_cmd->callback([&]() {
         try {
             auto svc = Services::load(find_root_or_die());
-            auto prob = svc.pm->get_problem(ctx.solve_pid);
+            // 1. Resolve Problem
+            Problem prob = svc.pm->get_problem(ctx.solve_pid);
             if (prob.id.empty()) { fmt::print(fg(fmt::color::red), "[!] 题目不存在。\n"); return; }
             
+            // 2. Prepare Environment
+            fs::path prob_dir = fs::path(".shuati") / "problems" / prob.id;
+            fs::create_directories(prob_dir / "data");
+            fs::create_directories(prob_dir / "validator");
+            fs::create_directories(prob_dir / "debug");
+            fs::create_directories(prob_dir / "temp");
+
             std::string ext = svc.cfg.language == "python" ? ".py" : ".cpp";
-            std::string src_file = "solution_" + prob.id + ext;
+            std::string src_file = "solution_" + prob.id + ext; // User solution in root
             if (!fs::exists(src_file)) { fmt::print(fg(fmt::color::red), "[!] 找不到代码文件: {}\n", src_file); return; }
-            
-            auto db_cases = svc.db->get_test_cases(prob.id);
 
-            if (ctx.test_max_cases <= 0) ctx.test_max_cases = 30;
-            bool ai_available = svc.cfg.ai_enabled && svc.ai && svc.ai->enabled();
-            std::string problem_text = build_problem_text(prob);
-
-            InputSpec fallback_spec = infer_spec_from_db_cases(db_cases);
-            InputSpec spec = fallback_spec;
-            if (ai_available) spec = infer_spec_with_ai(svc.ai.get(), problem_text, fallback_spec);
-
-            auto planned = build_planned_cases(spec, db_cases, std::max(ctx.test_max_cases, (int)db_cases.size()), 0);
-            if (planned.empty()) { fmt::print(fg(fmt::color::red), "[!] 无可用测试点（缺少样例/无法推断输入格式）。\n"); return; }
-
-            bool want_ai_oracle = (ctx.test_oracle == "ai") || (ctx.test_oracle == "auto" && ai_available);
-            if (want_ai_oracle) {
-                if (!ai_available) {
-                    fmt::print(fg(fmt::color::yellow), "[!] AI 不可用，跳过预期输出生成。\n");
-                } else {
-                    fmt::print("[*] 正在生成预期输出...\n");
-                    if (!fill_expected_with_ai(svc.ai.get(), problem_text, planned)) {
-                        fmt::print(fg(fmt::color::yellow), "[!] 预期输出生成失败，将以“仅运行检查”模式继续。\n");
-                    }
-                }
-            }
-
-            std::sort(planned.begin(), planned.end(), [](const PlannedCase& a, const PlannedCase& b) {
-                if (a.priority != b.priority) return a.priority > b.priority;
-                return a.name < b.name;
-            });
-
-            std::unordered_map<std::string, std::unordered_set<std::string>> coverage;
-            for (const auto& c : planned) {
-                for (const auto& mk : c.coverage_marks) coverage[mk.first].insert(mk.second);
-            }
-
-            std::string user_code;
-            {
-                std::ifstream f(src_file, std::ios::in | std::ios::binary);
-                user_code.assign(std::istreambuf_iterator<char>(f), {});
-            }
-
-            fmt::print("[*] 正在编译...\n");
-            std::string executable;
+            // Compile User Solution
+            fmt::print("[*] 正在编译用户代码...\n");
+            std::string user_exe;
             try {
-                executable = svc.judge->prepare(src_file, svc.cfg.language);
+                user_exe = svc.judge->prepare(src_file, svc.cfg.language);
             } catch (const std::exception& e) {
                 fmt::print(fg(fmt::color::red), "[Compile Error]\n{}\n", e.what());
-                auto diag = CompilerDoctor::diagnose(e.what());
-                fmt::print(fg(fmt::color::yellow) | fmt::emphasis::bold, "[医生诊断] {}\n", diag.title);
-                fmt::print(fg(fmt::color::yellow), "{}\n建议: {}\n", diag.description, diag.suggestion);
                 return;
             }
 
-            fmt::print("[*] 正在执行 {} 个测试点...\n", planned.size());
-            std::vector<JudgeResult> results;
-            results.reserve(planned.size());
-
-            auto total_start = std::chrono::steady_clock::now();
-            for (size_t i = 0; i < planned.size(); i++) {
-                auto& tc = planned[i].tc;
-                auto res = svc.judge->run_prepared(executable, tc);
-                results.push_back(res);
-
-                std::string oracle_tag = trim_copy(tc.output).empty() ? "[未校验]" : "";
-                fmt::print("Case {:<3} {:<3} {:<8} ({}ms, {}KB) {} {}\n",
-                           i + 1,
-                           res.verdict_str(),
-                           planned[i].kind,
-                           res.time_ms,
-                           res.memory_kb,
-                           oracle_tag,
-                           planned[i].name);
+            // 3. Mode Decision
+            // Check for static cases in .shuati/problems/<id>/data/*.in
+            std::vector<fs::path> static_inputs;
+            if (fs::exists(prob_dir / "data")) {
+                for (const auto& entry : fs::directory_iterator(prob_dir / "data")) {
+                    if (entry.path().extension() == ".in") {
+                        static_inputs.push_back(entry.path());
+                    }
+                }
             }
-            svc.judge->cleanup_prepared(executable, svc.cfg.language);
-            auto total_end = std::chrono::steady_clock::now();
-            int total_ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start).count();
+            std::sort(static_inputs.begin(), static_inputs.end());
 
-            int oracle_cnt = 0, oracle_ac = 0;
-            int executed_ok = 0;
-            int max_time = 0, max_mem = 0;
-            std::vector<size_t> failed;
-            for (size_t i = 0; i < results.size(); i++) {
-                max_time = std::max(max_time, results[i].time_ms);
-                max_mem = std::max(max_mem, results[i].memory_kb);
-                bool has_oracle = !trim_copy(planned[i].tc.output).empty();
-                if (has_oracle) {
-                    oracle_cnt++;
-                    if (results[i].verdict == Verdict::AC) oracle_ac++;
-                    else failed.push_back(i);
+            if (!static_inputs.empty() && ctx.test_oracle != "ai") {
+                // === Static Mode ===
+                fmt::print(fg(fmt::color::cyan), "=== 静态测试模式 ({} cases) ===\n", static_inputs.size());
+                int ac_cnt = 0;
+                for (const auto& in_path : static_inputs) {
+                    fs::path out_path = in_path;
+                    out_path.replace_extension(".out");
+                    fs::path my_out = prob_dir / "temp" / in_path.filename().replace_extension(".my.out");
+                    
+                    auto start = std::chrono::steady_clock::now();
+                    auto res = svc.judge->run_process_redirect(user_exe, in_path.string(), my_out.string(), 2000, 256*1024);
+                    
+                    std::string verdict;
+                    bool pass = false;
+                    if (res.exit_code != 0) verdict = "RE";
+                    else if (res.tle) verdict = "TLE";
+                    else if (res.mle) verdict = "MLE";
+                    else {
+                        if (fs::exists(out_path)) {
+                            if (svc.judge->stream_file_diff(out_path.string(), my_out.string())) {
+                                verdict = "AC"; pass = true;
+                            } else verdict = "WA";
+                        } else {
+                            verdict = "OK"; // No output to compare
+                            pass = true;
+                        }
+                    }
+                    
+                    if (pass) ac_cnt++;
+                    fmt::print("[{}] {} ({}ms, {}KB)\n", verdict, in_path.filename().string(), res.time_ms, res.memory_kb);
+                    if (!pass && verdict == "WA") {
+                         fmt::print(fg(fmt::color::yellow), "    Diff failed. See {}\n", my_out.string());
+                    }
+                }
+                fmt::print("\nResult: {} / {}\n", ac_cnt, static_inputs.size());
+            } else {
+                // === Dynamic Stress Mode ===
+                fmt::print(fg(fmt::color::magenta), "=== 动态对拍模式 (Stress Testing) ===\n");
+                
+                // A. Check Scripts
+                fs::path gen_py = prob_dir / "validator" / "gen.py";
+                fs::path sol_py = prob_dir / "validator" / "sol.py";
+                
+                if (!fs::exists(gen_py) || !fs::exists(sol_py)) {
+                    if (!svc.cfg.ai_enabled || !svc.ai || !svc.ai->enabled()) {
+                        fmt::print(fg(fmt::color::red), "[!] 缺少对拍脚本且 AI 未启用。请手动配置 validator/gen.py 和 validator/sol.py\n");
+                        return;
+                    }
+                    fmt::print("[*] 正在生成对拍脚本 (gen.py, sol.py)...\n");
+                    std::string desc = build_problem_text(prob);
+                    auto scripts = svc.ai->generate_test_scripts(desc);
+                    
+                    if (scripts.first.empty() || scripts.second.empty()) {
+                        fmt::print(fg(fmt::color::red), "[!] AI 生成脚本失败。\n");
+                        return;
+                    }
+
+                    { std::ofstream fgen(gen_py); fgen << scripts.first; }
+                    { std::ofstream fsol(sol_py); fsol << scripts.second; }
+                    fmt::print(fg(fmt::color::green), "[+] 脚本已保存至 validator/\n");
+                }
+
+                // B. Verify Oracle (Strict Check)
+                // Try to find a sample case from DB or description to verify sol.py
+                auto db_cases = svc.db->get_test_cases(prob.id);
+                std::string sample_in_content, sample_out_answer;
+                bool has_sample = false;
+
+                if (!db_cases.empty()) {
+                    sample_in_content = db_cases[0].first;
+                    sample_out_answer = db_cases[0].second;
+                    has_sample = true;
+                } else if (!static_inputs.empty()) {
+                    // Fallback to local static file
+                    try {
+                        std::ifstream in(static_inputs[0], std::ios::in | std::ios::binary);
+                        sample_in_content.assign(std::istreambuf_iterator<char>(in), {});
+                        
+                        fs::path exp_path = static_inputs[0];
+                        exp_path.replace_extension(".out");
+                        if (fs::exists(exp_path)) {
+                            std::ifstream out(exp_path, std::ios::in | std::ios::binary);
+                            sample_out_answer.assign(std::istreambuf_iterator<char>(out), {});
+                            has_sample = true;
+                        }
+                    } catch (...) {}
+                }
+
+                if (has_sample) {
+                    fmt::print("[*] 正在验算 AI 标程...\n");
+                    fs::path sample_in = prob_dir / "temp" / "sample_verify.in";
+                    fs::path sample_std = prob_dir / "temp" / "sample_verify.std";
+                    fs::path sample_actual = prob_dir / "temp" / "sample_verify.out";
+                    
+                    // Write sample input
+                    { std::ofstream out(sample_in); out << sample_in_content; }
+                    // Write expected sample output (if any)
+                    if (!sample_out_answer.empty()) {
+                         std::ofstream out(sample_std); out << sample_out_answer;
+                    }
+
+                    // Run sol.py
+                    auto res = svc.judge->run_process_redirect("python \"" + sol_py.string() + "\"", sample_in.string(), sample_actual.string(), 5000, 512*1024);
+                    if (res.exit_code != 0 || res.tle) {
+                         fmt::print(fg(fmt::color::red), "[!] AI 标程运行样例失败 (RE/TLE)。请检查 validator/sol.py\n");
+                         return;
+                    }
+
+                    // Diff if sample output exists
+                    if (!sample_out_answer.empty()) {
+                        if (!svc.judge->stream_file_diff(sample_std.string(), sample_actual.string())) {
+                             fmt::print(fg(fmt::color::red) | fmt::emphasis::bold, "[CRITICAL] AI 标程输出与样例不符！拒绝执行对拍。\n");
+                             fmt::print("Input: {}\n", sample_in.string());
+                             fmt::print("Expected: {}\n", sample_std.string());
+                             fmt::print("Actual: {}\n", sample_actual.string());
+                             return; 
+                        }
+                    }
+                    fmt::print(fg(fmt::color::green), "[Pass] AI 标程通过样例验算。\n");
                 } else {
-                    if (results[i].verdict != Verdict::CE && results[i].verdict != Verdict::SE) executed_ok++;
+                    fmt::print(fg(fmt::color::yellow), "[Warn] 无样例可供验算，风险自负。\n");
                 }
+
+                // C. Stress Loop
+                int rounds = ctx.test_max_cases > 0 ? ctx.test_max_cases : 100;
+                fmt::print("[*] 开始 {} 轮对拍...\n", rounds);
+
+                fs::path cur_in = prob_dir / "temp" / "cur.in";
+                fs::path cur_exp = prob_dir / "temp" / "cur.exp";
+                fs::path cur_out = prob_dir / "temp" / "cur.out";
+
+                for (int i = 1; i <= rounds; i++) {
+                     // 1. Gen
+                     auto r_gen = svc.judge->run_process_redirect("python \"" + gen_py.string() + "\"", "", cur_in.string(), 5000, 512*1024);
+                     if (r_gen.exit_code != 0) {
+                         fmt::print(fg(fmt::color::red), "[!] 生成器错误 (Case {})\n", i);
+                         break;
+                     }
+
+                     // 2. Oracle
+                     auto r_sol = svc.judge->run_process_redirect("python \"" + sol_py.string() + "\"", cur_in.string(), cur_exp.string(), 5000, 512*1024);
+                     if (r_sol.exit_code != 0) {
+                         fmt::print(fg(fmt::color::red), "[!] 标程错误 (Case {})\n", i);
+                         break; 
+                     }
+
+                     // 3. User
+                     auto r_user = svc.judge->run_process_redirect(user_exe, cur_in.string(), cur_out.string(), 2000, 256*1024);
+                     
+                     if (r_user.exit_code != 0) {
+                         fmt::print(fg(fmt::color::red), "[RE] Case {}\n", i);
+                         fs::copy_file(cur_in, prob_dir / "debug" / "fail.in", fs::copy_options::overwrite_existing);
+                         break;
+                     } 
+                     if (r_user.tle) {
+                         fmt::print(fg(fmt::color::red), "[TLE] Case {}\n", i);
+                         fs::copy_file(cur_in, prob_dir / "debug" / "fail.in", fs::copy_options::overwrite_existing);
+                         break;
+                     }
+
+                     // 4. Diff
+                     if (!svc.judge->stream_file_diff(cur_exp.string(), cur_out.string())) {
+                         fmt::print(fg(fmt::color::red) | fmt::emphasis::bold, "[WA] Case {}\n", i);
+                         fmt::print("    Data saved to .shuati/problems/{}/debug/\n", prob.id);
+                         fs::copy_file(cur_in, prob_dir / "debug" / "fail.in", fs::copy_options::overwrite_existing);
+                         fs::copy_file(cur_exp, prob_dir / "debug" / "fail.exp", fs::copy_options::overwrite_existing);
+                         fs::copy_file(cur_out, prob_dir / "debug" / "fail.out", fs::copy_options::overwrite_existing);
+                         
+                         if (svc.cfg.ai_enabled && svc.ai && svc.ai->enabled()) {
+                             fmt::print("[*] 正在请求 AI 诊断...\n");
+                             std::string in_txt, exp_txt, out_txt;
+                             { std::ifstream f(cur_in); in_txt.assign(std::istreambuf_iterator<char>(f), {}); }
+                             { std::ifstream f(cur_exp); exp_txt.assign(std::istreambuf_iterator<char>(f), {}); }
+                             { std::ifstream f(cur_out); out_txt.assign(std::istreambuf_iterator<char>(f), {}); }
+                             
+                             std::string fail_log = "Input:\n" + in_txt.substr(0, 1000) + "\nExpected:\n" + exp_txt.substr(0, 1000) + "\nActual:\n" + out_txt.substr(0, 1000);
+                             std::string user_code;
+                             { std::ifstream f(src_file); user_code.assign(std::istreambuf_iterator<char>(f), {}); }
+                             
+                             auto mistakes = svc.ma->get_mistakes(prob.id);
+                             std::string history; // ...
+                             
+                             auto diag = svc.ai->diagnose(build_problem_text(prob), user_code, fail_log, history);
+                             fmt::print(fg(fmt::color::yellow), "{}\n", diag);
+                         }
+                         return; // Stop on first error
+                     }
+
+                     if (i % 10 == 0) fmt::print(".");
+                     if (i % 50 == 0) fmt::print(" {}\n", i);
+                     std::cout.flush();
+                }
+                fmt::print(fg(fmt::color::green), "\n[+] 对拍完成，未发现错误。\n");
             }
+            
+            svc.judge->cleanup_prepared(user_exe, svc.cfg.language);
 
-            int expected_marks = 0, covered_marks = 0;
-            for (const auto& p : spec.params) {
-                if (p.type == SimpleType::Int) {
-                    expected_marks += 5;
-                    static const std::vector<std::string> cats = {"min", "max", "critical", "typical", "common"};
-                    auto it = coverage.find(p.name);
-                    for (const auto& c : cats) {
-                        if (it != coverage.end() && it->second.count(c)) covered_marks++;
-                    }
-                }
-            }
-            double coverage_pct = expected_marks ? (100.0 * covered_marks / expected_marks) : 0.0;
-            double pass_pct = oracle_cnt ? (100.0 * oracle_ac / oracle_cnt) : 0.0;
-
-            fmt::print("\n");
-            fmt::print(fg(fmt::color::cyan) | fmt::emphasis::bold, "测试报告\n");
-            fmt::print("  总测试点: {}\n", planned.size());
-            fmt::print("  有预期输出: {}  通过: {}  通过率: {:.1f}%\n", oracle_cnt, oracle_ac, pass_pct);
-            fmt::print("  仅运行检查: {} (无预期输出)\n", (int)planned.size() - oracle_cnt);
-            fmt::print("  覆盖率(参数维度): {:.1f}%\n", coverage_pct);
-            fmt::print("  总耗时: {}ms  最大单测: {}ms  峰值内存: {}KB\n", total_ms, max_time, max_mem);
-
-            if (!failed.empty()) {
-                fmt::print(fg(fmt::color::red) | fmt::emphasis::bold, "\n未通过测试点:\n");
-                for (size_t i : failed) {
-                    auto& r = results[i];
-                    fmt::print("  Case {}: {} {}\n", i + 1, r.verdict_str(), planned[i].name);
-                    fmt::print(fg(fmt::color::dim_gray), "    Input: {}\n", shorten_utf8_lossy(planned[i].tc.input, 240));
-                    fmt::print(fg(fmt::color::dim_gray), "    Expected: {}\n", shorten_utf8_lossy(r.expected, 240));
-                    fmt::print(fg(fmt::color::dim_gray), "    Actual:   {}\n", shorten_utf8_lossy(r.output, 240));
-                    if (r.verdict == Verdict::CE) {
-                        auto diag = CompilerDoctor::diagnose(r.message);
-                        fmt::print(fg(fmt::color::yellow), "    [医生诊断] {} - {}\n", diag.title, diag.suggestion);
-                    } else if (r.verdict == Verdict::RE) {
-                        auto diag = CompilerDoctor::diagnose(r.message);
-                        if (diag.title != "未知错误") fmt::print(fg(fmt::color::yellow), "    [医生诊断] {} - {}\n", diag.title, diag.suggestion);
-                    }
-                }
-
-                if (ai_available) {
-                    auto i = failed.front();
-                    std::string failure_info;
-                    failure_info += "Input:\n";
-                    failure_info += planned[i].tc.input.substr(0, 1200);
-                    failure_info += "\nExpected:\n";
-                    failure_info += results[i].expected.substr(0, 1200);
-                    failure_info += "\nActual:\n";
-                    failure_info += results[i].output.substr(0, 1200);
-
-                    auto mistakes = svc.ma->get_mistakes(prob.id);
-                    std::string history;
-                    for (size_t k = 0; k < mistakes.size() && k < 10; k++) {
-                        history += fmt::format("- {}: {}\n", mistakes[k].type, mistakes[k].description);
-                    }
-
-                    auto diag = svc.ai->diagnose(problem_text, user_code, failure_info, history);
-                    if (!diag.empty()) {
-                        fmt::print(fg(fmt::color::yellow) | fmt::emphasis::bold, "\nAI 分析(首个失败点):\n");
-                        fmt::print("{}\n", diag);
-                    }
-                }
-            }
-
-            if (ctx.test_ui) {
-                using namespace ftxui;
-                int selected = 0;
-                std::vector<std::string> entries;
-                entries.reserve(planned.size());
-                for (size_t i = 0; i < planned.size(); i++) {
-                    std::string oracle_tag = trim_copy(planned[i].tc.output).empty() ? "未校验" : "已校验";
-                    entries.push_back(fmt::format("{:>3} {:<3} {:<6} {:>4}ms {:>6}KB {}", i + 1, results[i].verdict_str(), oracle_tag, results[i].time_ms, results[i].memory_kb, planned[i].name));
-                }
-
-                auto menu = Menu(&entries, &selected);
-                auto renderer = Renderer(menu, [&] {
-                    auto& r = results[(size_t)selected];
-                    auto& p = planned[(size_t)selected];
-                    auto detail = vbox({
-                        text(fmt::format("Case {}  {}  {}", selected + 1, r.verdict_str(), p.name)),
-                        text(fmt::format("Kind: {}", p.kind)),
-                        text(fmt::format("Time: {}ms  Mem: {}KB", r.time_ms, r.memory_kb)),
-                        separator(),
-                        text("Input:"),
-                        paragraph(ensure_utf8(r.input.substr(0, 6000))) | frame | vscroll_indicator | size(HEIGHT, LESS_THAN, 8),
-                        separator(),
-                        text("Expected:"),
-                        paragraph(ensure_utf8(r.expected.substr(0, 6000))) | frame | vscroll_indicator | size(HEIGHT, LESS_THAN, 8),
-                        separator(),
-                        text("Actual:"),
-                        paragraph(ensure_utf8(r.output.substr(0, 6000))) | frame | vscroll_indicator | size(HEIGHT, LESS_THAN, 8),
-                    }) | flex;
-                    return hbox({
-                        window(text("测试点列表 (Enter 查看, q 退出)"), menu->Render() | frame | vscroll_indicator | size(WIDTH, LESS_THAN, 60)) | border,
-                        separator(),
-                        window(text("详情"), detail) | border,
-                    });
-                });
-
-                auto screen = ScreenInteractive::TerminalOutput();
-                screen.Loop(renderer);
-            }
         } catch (const std::exception& e) {
-            fmt::print(fg(fmt::color::red), "[!] 测评异常: {}\n", e.what());
+            fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
         }
     });
 
