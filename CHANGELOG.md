@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.3] - 2026-02-15
+
+### Added
+- **AI Stress Testing**: New `shuati test` mode that uses AI to generate python scripts (`gen.py` and `sol.py`) for dynamic stress testing.
+- **Robustness**: Enhanced `test` command with local sample verification for AI scripts and better error handling.
+
+### Changed
+- **Refactor**: Cleaned up `main.cpp` by extracting test logic into `cmd_test`.
+- **Docs**: Updated README with stress testing instructions.
+
 ## [1.5.1] - 2026-02-14
 
 ### 修复

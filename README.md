@@ -13,7 +13,7 @@
 
 **专为算法爱好者打造的本地化、智能化命令行工具**
 
-[![Version](https://img.shields.io/badge/version-1.5.2-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
+[![Version](https://img.shields.io/badge/version-1.5.3-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
 [![CI](https://github.com/Xustalis/shuati-Cli/actions/workflows/release.yml/badge.svg)](https://github.com/Xustalis/shuati-Cli/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![C++20](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
@@ -114,6 +114,21 @@ shuati test 1
 ```
 
 🎉 **恭喜！** 你已经完成了第一次本地刷题闭环。
+
+### 6️⃣ [进阶] AI 智能对拍 (1分钟)
+
+当静态测试点不足以覆盖边界情况时，开启 AI 帮手：
+
+```bash
+# 生成生成器和标程，进行 100 轮随机数据对拍
+shuati test 1 --max 100 --oracle ai
+```
+
+- **自动生成**: AI 会根据题目描述自动写出 `gen.py` (数据生成) 和 `sol.py` (标程)。
+- **自动纠错**: 如果发现错误，Shuati 会自动保存数据并请求 AI 分析原因。
+- **安全**: 系统会自动验证 AI 写的标程是否通过样例，防止误判。
+
+> **提示**: 需要先通过 `shuati config --api-key` 配置 API Key (支持 DeepSeek 等)。
 
 ---
 
