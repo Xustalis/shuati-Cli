@@ -526,4 +526,49 @@ JudgeResult Judge::run_case(const std::string& executable,
 }
 #endif
 
+JudgeResult Judge::run_process_redirect(const std::string& cmd, 
+                                        const std::string& input_file, 
+                                        const std::string& output_file, 
+                                        int time_limit_ms, 
+                                        int memory_limit_kb) {
+    // Construct command: cmd < "input" > "output"
+    // Quote files to handle spaces
+    std::string full_cmd = fmt::format("{} < \"{}\" > \"{}\"", cmd, input_file, output_file);
+    
+    auto start = std::chrono::steady_clock::now();
+    int ret = std::system(full_cmd.c_str());
+    auto end = std::chrono::steady_clock::now();
+    
+    JudgeResult res;
+    res.time_ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    res.memory_kb = 0; // std::system doesn't give memory usage easily
+    
+    if (ret != 0) {
+        res.verdict = Verdict::RE;
+        res.message = fmt::format("Exit code {}", ret);
+    } else {
+        if (res.time_ms > time_limit_ms) res.verdict = Verdict::TLE;
+        else res.verdict = Verdict::AC;
+    }
+    
+    return res;
+}
+
+bool Judge::stream_file_diff(const std::string& path1, const std::string& path2) {
+    std::ifstream f1(path1), f2(path2);
+    if (!f1 || !f2) return false;
+
+    std::string s1, s2;
+    // Token-based comparison ignores whitespace/newlines
+    while (true) {
+        bool b1 = (bool)(f1 >> s1);
+        bool b2 = (bool)(f2 >> s2);
+        
+        if (b1 != b2) return false; // One ended before other
+        if (!b1) break; // Both ended
+        if (s1 != s2) return false; // Mismatch
+    }
+    return true;
+}
+
 } // namespace shuati

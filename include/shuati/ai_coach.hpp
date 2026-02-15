@@ -38,6 +38,10 @@ public:
 
     std::string chat_sync(const std::string& system_prompt, const std::string& user_prompt);
 
+    // Generate Python scripts for stress testing (gen.py and sol.py)
+    // Returns a pair: {gen_code, sol_code}
+    std::pair<std::string, std::string> generate_test_scripts(const std::string& problem_desc);
+
 private:
     Config cfg_;
     MemoryManager* mm_ = nullptr;

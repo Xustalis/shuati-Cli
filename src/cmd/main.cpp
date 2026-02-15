@@ -573,9 +573,9 @@ void cmd_test(CommandContext& ctx) {
                 
                 std::string verdict;
                 bool pass = false;
-                if (res.exit_code != 0) verdict = "RE";
-                else if (res.tle) verdict = "TLE";
-                else if (res.mle) verdict = "MLE";
+                if (res.verdict == Verdict::RE) verdict = "RE";
+                else if (res.verdict == Verdict::TLE) verdict = "TLE";
+                else if (res.verdict == Verdict::MLE) verdict = "MLE";
                 else {
                     if (fs::exists(out_path)) {
                         if (svc.judge->stream_file_diff(out_path.string(), my_out.string())) {
@@ -659,7 +659,7 @@ void cmd_test(CommandContext& ctx) {
                 }
 
                 auto res = svc.judge->run_process_redirect("python \"" + sol_py.string() + "\"", sample_in.string(), sample_actual.string(), 5000, 512*1024);
-                if (res.exit_code != 0 || res.tle) {
+                if (res.verdict != Verdict::AC) {
                      fmt::print(fg(fmt::color::red), "[!] AI 标程运行样例失败 (RE/TLE)。请检查 validator/sol.py\n");
                      return;
                 }
@@ -689,14 +689,14 @@ void cmd_test(CommandContext& ctx) {
             for (int i = 1; i <= rounds; i++) {
                  // 1. Gen
                  auto r_gen = svc.judge->run_process_redirect("python \"" + gen_py.string() + "\"", "", cur_in.string(), 5000, 512*1024);
-                 if (r_gen.exit_code != 0) {
+                 if (r_gen.verdict != Verdict::AC) {
                      fmt::print(fg(fmt::color::red), "[!] 生成器错误 (Case {})\n", i);
                      break;
                  }
 
                  // 2. Oracle
                  auto r_sol = svc.judge->run_process_redirect("python \"" + sol_py.string() + "\"", cur_in.string(), cur_exp.string(), 5000, 512*1024);
-                 if (r_sol.exit_code != 0) {
+                 if (r_sol.verdict != Verdict::AC) {
                      fmt::print(fg(fmt::color::red), "[!] 标程错误 (Case {})\n", i);
                      break; 
                  }
@@ -704,12 +704,12 @@ void cmd_test(CommandContext& ctx) {
                  // 3. User
                  auto r_user = svc.judge->run_process_redirect(user_exe, cur_in.string(), cur_out.string(), 2000, 256*1024);
                  
-                 if (r_user.exit_code != 0) {
+                 if (r_user.verdict == Verdict::RE) {
                      fmt::print(fg(fmt::color::red), "[RE] Case {}\n", i);
                      fs::copy_file(cur_in, prob_dir / "debug" / "fail.in", fs::copy_options::overwrite_existing);
                      break;
                  } 
-                 if (r_user.tle) {
+                 if (r_user.verdict == Verdict::TLE) {
                      fmt::print(fg(fmt::color::red), "[TLE] Case {}\n", i);
                      fs::copy_file(cur_in, prob_dir / "debug" / "fail.in", fs::copy_options::overwrite_existing);
                      break;
@@ -743,9 +743,7 @@ void cmd_test(CommandContext& ctx) {
                      return; // Stop on first error
                  }
 
-                 if (i % 10 == 0) fmt::print(".");
-                 if (i % 50 == 0) fmt::print(" {}\n", i);
-                 std::cout.flush();
+                 fmt::print("[AC] Case {} ({}ms, {}KB)\n", i, r_user.time_ms, r_user.memory_kb);
             }
             fmt::print(fg(fmt::color::green), "\n[+] 对拍完成，未发现错误。\n");
         }

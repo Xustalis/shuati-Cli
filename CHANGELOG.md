@@ -6,11 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - **AI Stress Testing**: New `shuati test` mode that uses AI to generate python scripts (`gen.py` and `sol.py`) for dynamic stress testing.
+- **Verbose Output**: `shuati test` stress mode now lists every test case with AC/WA status, time, and memory usage.
 - **Robustness**: Enhanced `test` command with local sample verification for AI scripts and better error handling.
 
 ### Changed
 - **Refactor**: Cleaned up `main.cpp` by extracting test logic into `cmd_test`.
 - **Docs**: Updated README with stress testing instructions.
+- **Fix**: Resolved compilation errors across platforms by simplifying process execution logic (`std::system`) and ensuring missing declarations are present.
 
 ## [1.5.1] - 2026-02-14
 
