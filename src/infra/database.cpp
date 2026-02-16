@@ -38,6 +38,10 @@ Database::Database(const std::string& db_path) {
 }
 
 void Database::init_schema() {
+    // Migration: Drop any existing views that may reference old columns
+    try { db_->exec("DROP VIEW IF EXISTS problem_stats"); } catch (...) {}
+    try { db_->exec("DROP VIEW IF EXISTS problem_summary"); } catch (...) {}
+    
     db_->exec(
         "CREATE TABLE IF NOT EXISTS problems ("
         "  id TEXT PRIMARY KEY,"
@@ -49,6 +53,26 @@ void Database::init_schema() {
         "  difficulty TEXT DEFAULT 'medium',"
         "  created_at INTEGER"
         ")");
+    
+    // Migration: Check for old schema artifacts and clean up
+    // If there's a view or trigger referencing pass_count, drop it
+    try {
+        // Check for any views referencing pass_count
+        SQLite::Statement check_view(*db_, "SELECT name FROM sqlite_master WHERE type='view' AND sql LIKE '%pass_count%'");
+        while (check_view.executeStep()) {
+            std::string view_name = check_view.getColumn(0).getText();
+            db_->exec("DROP VIEW IF EXISTS " + view_name);
+        }
+    } catch (...) {}
+    
+    try {
+        // Check for any triggers referencing pass_count
+        SQLite::Statement check_trigger(*db_, "SELECT name FROM sqlite_master WHERE type='trigger' AND sql LIKE '%pass_count%'");
+        while (check_trigger.executeStep()) {
+            std::string trigger_name = check_trigger.getColumn(0).getText();
+            db_->exec("DROP TRIGGER IF EXISTS " + trigger_name);
+        }
+    } catch (...) {}
 
     db_->exec(
         "CREATE TABLE IF NOT EXISTS mistakes ("
