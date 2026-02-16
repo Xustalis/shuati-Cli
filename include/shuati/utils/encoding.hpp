@@ -20,6 +20,13 @@ std::string ensure_utf8_lossy(const std::string& s);
 std::string wide_to_utf8(const std::wstring& w);
 
 // Shorten a UTF-8 string to a maximum number of bytes, ensuring valid UTF-8 and appending "..." if truncated
+// Shorten a UTF-8 string to a maximum number of bytes, ensuring valid UTF-8 and appending "..." if truncated
 std::string shorten_utf8_lossy(const std::string& s, size_t max_bytes);
+
+// Calculate the display width of a UTF-8 string (ASCII=1, others=2)
+size_t utf8_display_width(const std::string& s);
+
+// Pad a string on the right with spaces to reach a specific display width
+std::string pad_string(const std::string& s, size_t width);
 
 } // namespace shuati::utils

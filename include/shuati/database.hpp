@@ -31,6 +31,9 @@ public:
     std::vector<Mistake> get_mistakes_for(const std::string& problem_id);
     std::vector<std::pair<std::string, int>> get_mistake_stats();
 
+    // Problem Status
+    void update_problem_status(const std::string& id, const std::string& verdict, int pass_count, int total_count);
+
     // Review / Spaced Repetition
     void upsert_review(const ReviewItem& r);
     std::vector<ReviewItem> get_due_reviews(long long now);

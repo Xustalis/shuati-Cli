@@ -106,4 +106,28 @@ std::string shorten_utf8_lossy(const std::string& s, size_t max_bytes) {
     return ensure_utf8(cut) + "...";
 }
 
+
+size_t utf8_display_width(const std::string& s) {
+    size_t width = 0;
+    for (size_t i = 0; i < s.size(); ++i) {
+        unsigned char c = static_cast<unsigned char>(s[i]);
+        if (c < 0x80) {
+            width += 1;
+        } else if ((c & 0xC0) == 0x80) {
+            // Continuation byte, ignore
+            continue;
+        } else {
+            // Start of multi-byte sequence (assume width 2 for CJK etc)
+            width += 2;
+        }
+    }
+    return width;
+}
+
+std::string pad_string(const std::string& s, size_t width) {
+    size_t w = utf8_display_width(s);
+    if (w >= width) return s;
+    return s + std::string(width - w, ' ');
+}
+
 } // namespace shuati::utils

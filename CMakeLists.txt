@@ -33,6 +33,14 @@ include_directories(include)
 # Add source files
 add_executable(shuati
     src/cmd/main.cpp
+    src/cmd/commands.cpp
+    src/cmd/services.cpp
+    src/cmd/basic_commands.cpp
+    src/cmd/manage_commands.cpp
+    src/cmd/solve_command.cpp
+    src/cmd/list_command.cpp
+    src/cmd/view_command.cpp
+    src/cmd/test_command.cpp
     src/core/problem_manager.cpp
     src/core/mistake_analyzer.cpp
     src/core/sm2_algorithm.cpp

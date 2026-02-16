@@ -15,6 +15,12 @@ struct Problem {
     std::string tags;      // comma-separated
     std::string difficulty; // "easy", "medium", "hard"
     long long created_at = 0;
+    
+    // Status
+    std::string last_verdict;
+    int pass_count = 0;
+    int total_count = 0;
+    long long last_checked_at = 0;
 };
 
 struct Mistake {
@@ -84,7 +90,14 @@ struct JudgeResult {
     std::string verdict_str() const;
 };
 
-
+struct TestReport {
+    std::string problem_id;
+    long long timestamp;
+    std::string verdict;
+    int pass_count;
+    int total_count;
+    std::vector<JudgeResult> cases;
+};
 
 inline std::string JudgeResult::verdict_str() const {
     switch (verdict) {

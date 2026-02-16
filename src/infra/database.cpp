@@ -74,6 +74,16 @@ void Database::init_schema() {
         }
     } catch (...) {}
 
+    // Migration: Add status columns if not exist
+    try {
+        db_->exec("ALTER TABLE problems ADD COLUMN last_verdict TEXT DEFAULT ''");
+        db_->exec("ALTER TABLE problems ADD COLUMN pass_count INTEGER DEFAULT 0");
+        db_->exec("ALTER TABLE problems ADD COLUMN total_count INTEGER DEFAULT 0");
+        db_->exec("ALTER TABLE problems ADD COLUMN last_checked_at INTEGER DEFAULT 0");
+    } catch (...) {
+        // Ignore if columns already exist
+    }
+
     db_->exec(
         "CREATE TABLE IF NOT EXISTS mistakes ("
         "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -160,7 +170,10 @@ bool Database::problem_exists(const std::string& url) {
 std::vector<Problem> Database::get_all_problems() {
     std::vector<Problem> out;
     // Fetch rowid as display_id
-    SQLite::Statement q(*db_, "SELECT rowid, id,source,title,url,content_path,tags,difficulty,created_at FROM problems ORDER BY created_at DESC");
+    SQLite::Statement q(*db_, 
+        "SELECT rowid, id,source,title,url,content_path,tags,difficulty,created_at, "
+        "last_verdict, pass_count, total_count, last_checked_at "
+        "FROM problems ORDER BY created_at DESC");
     while (q.executeStep()) {
         Problem p;
         p.display_id = q.getColumn(0).getInt();
@@ -172,13 +185,23 @@ std::vector<Problem> Database::get_all_problems() {
         p.tags = safe_column_text(q.getColumn(6));
         p.difficulty = safe_column_text(q.getColumn(7));
         p.created_at = q.getColumn(8).getInt64();
+        
+        // New columns might be null if migrating, safe_column_text handles text, but for int we need try/catch or default
+        p.last_verdict = safe_column_text(q.getColumn(9));
+        try { p.pass_count = q.getColumn(10).getInt(); } catch(...) { p.pass_count = 0; }
+        try { p.total_count = q.getColumn(11).getInt(); } catch(...) { p.total_count = 0; }
+        try { p.last_checked_at = q.getColumn(12).getInt64(); } catch(...) { p.last_checked_at = 0; }
+        
         out.push_back(p);
     }
     return out;
 }
 
 Problem Database::get_problem(const std::string& id) {
-    SQLite::Statement q(*db_, "SELECT rowid, id,source,title,url,content_path,tags,difficulty,created_at FROM problems WHERE id=?");
+    SQLite::Statement q(*db_, 
+        "SELECT rowid, id,source,title,url,content_path,tags,difficulty,created_at, "
+        "last_verdict, pass_count, total_count, last_checked_at "
+        "FROM problems WHERE id=?");
     q.bind(1, ensure_utf8_lossy(id));
     if (q.executeStep()) {
         Problem p;
@@ -191,13 +214,20 @@ Problem Database::get_problem(const std::string& id) {
         p.tags = safe_column_text(q.getColumn(6));
         p.difficulty = safe_column_text(q.getColumn(7));
         p.created_at = q.getColumn(8).getInt64();
+        p.last_verdict = safe_column_text(q.getColumn(9));
+        try { p.pass_count = q.getColumn(10).getInt(); } catch(...) { p.pass_count = 0; }
+        try { p.total_count = q.getColumn(11).getInt(); } catch(...) { p.total_count = 0; }
+        try { p.last_checked_at = q.getColumn(12).getInt64(); } catch(...) { p.last_checked_at = 0; }
         return p;
     }
     return {};
 }
 
 Problem Database::get_problem_by_display_id(int tid) {
-    SQLite::Statement q(*db_, "SELECT rowid, id,source,title,url,content_path,tags,difficulty,created_at FROM problems WHERE rowid=?");
+    SQLite::Statement q(*db_, 
+        "SELECT rowid, id,source,title,url,content_path,tags,difficulty,created_at, "
+        "last_verdict, pass_count, total_count, last_checked_at "
+        "FROM problems WHERE rowid=?");
     q.bind(1, tid);
     if (q.executeStep()) {
         Problem p;
@@ -210,6 +240,10 @@ Problem Database::get_problem_by_display_id(int tid) {
         p.tags = safe_column_text(q.getColumn(6));
         p.difficulty = safe_column_text(q.getColumn(7));
         p.created_at = q.getColumn(8).getInt64();
+        p.last_verdict = safe_column_text(q.getColumn(9));
+        try { p.pass_count = q.getColumn(10).getInt(); } catch(...) { p.pass_count = 0; }
+        try { p.total_count = q.getColumn(11).getInt(); } catch(...) { p.total_count = 0; }
+        try { p.last_checked_at = q.getColumn(12).getInt64(); } catch(...) { p.last_checked_at = 0; }
         return p;
     }
     return {};
@@ -240,6 +274,17 @@ void Database::delete_problem(int tid) {
 }
 
 // ---- Mistake ----
+
+void Database::update_problem_status(const std::string& pid, const std::string& verdict, int pass_count, int total_count) {
+    SQLite::Statement q(*db_, 
+        "UPDATE problems SET last_verdict=?, pass_count=?, total_count=?, last_checked_at=? WHERE id=?");
+    q.bind(1, ensure_utf8_lossy(verdict));
+    q.bind(2, pass_count);
+    q.bind(3, total_count);
+    q.bind(4, static_cast<int64_t>(std::time(nullptr)));
+    q.bind(5, ensure_utf8_lossy(pid));
+    q.exec();
+}
 
 void Database::log_mistake(const std::string& pid, const std::string& type, const std::string& desc) {
     SQLite::Statement q(*db_, "INSERT INTO mistakes (problem_id,type,description,timestamp) VALUES (?,?,?,?)");
