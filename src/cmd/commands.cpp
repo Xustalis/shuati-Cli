@@ -1,4 +1,5 @@
 #include "commands.hpp"
+#include "shuati/version.hpp"
 #include <iostream>
 
 namespace shuati {
@@ -22,7 +23,8 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
     
     app.add_subcommand("init", "在当前目录初始化项目")->callback([&](){ cmd_init(ctx); });
     
-    app.set_version_flag("-v,--version", "1.5.3 (Refactored)", "显示版本信息"); // Reuse version logic
+    static std::string v_str = shuati::current_version().to_string();
+    app.set_version_flag("-v,--version", v_str, "显示版本信息");
     app.add_subcommand("info", "显示环境信息")->callback([&](){ cmd_info(ctx); });
 
     auto pull = app.add_subcommand("pull", "从 URL 拉取题目");
@@ -39,7 +41,9 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
     solvecmd->add_option("id", ctx.solve_pid, "题目 ID 或 TID");
     solvecmd->callback([&](){ cmd_solve(ctx); });
 
-    app.add_subcommand("list", "列出所有题目")->callback([&](){ cmd_list(ctx); });
+    auto list_cmd = app.add_subcommand("list", "列出所有题目");
+    list_cmd->add_option("-f,--filter", ctx.list_filter, "过滤状态: all, ac, failed, unaudited, review");
+    list_cmd->callback([&](){ cmd_list(ctx); });
 
     auto del = app.add_subcommand("delete", "删除题目");
     del->add_option("id", ctx.solve_pid, "题目 ID 或 TID");
@@ -54,7 +58,7 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
     tst->add_option("id", ctx.solve_pid, "题目 ID")->required();
     tst->add_option("--max", ctx.test_max_cases, "最大用例数");
     tst->add_option("--oracle", ctx.test_oracle, "Oracle 模式");
-    tst->add_flag("--ui", ctx.test_ui, "交互模式");
+    // tst->add_flag("--ui", ctx.test_ui, "交互模式 (暂不可用)"); 
     tst->callback([&](){ cmd_test(ctx); });
 
     auto hint = app.add_subcommand("hint", "获取 AI 提示");
@@ -65,15 +69,11 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
     // View command
     auto view = app.add_subcommand("view", "查看测试详情");
     view->add_option("id", ctx.solve_pid, "题目 ID")->required();
-    view->callback([&](){ 
-        // Forward declare just for compilation inside lambda if strictly needed, 
-        // but better to have it in commands.hpp
-        // cmd_view(ctx); 
-        // I will implement calls once commands.hpp is updated.
-        // For now, I'll assume header is updated.
-        extern void cmd_view(CommandContext&);
-        cmd_view(ctx);
-    });
+    view->add_option("--save-to", ctx.view_export_dir, "导出测试点数据到指定目录");
+
+    view->callback([&](){ cmd_view(ctx); });
+
+    app.add_subcommand("clean", "清理临时文件")->callback([&](){ cmd_clean(ctx); });
 
     auto cfg = app.add_subcommand("config", "配置工具");
     cfg->add_flag("--show", ctx.cfg_show, "显示配置");

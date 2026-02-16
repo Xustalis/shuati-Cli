@@ -230,10 +230,103 @@ void cmd_test(CommandContext& ctx) {
         // Let's stick to what we have. If no cases, warn.
 
         if (cases.empty()) {
-             std::cout << "[!] 未找到测试用例 (data/*.in 或 数据库样例)。尝试生成..." << std::endl;
-             // Fallback to dynamic loop logic from original main.cpp if we want? 
-             // Or just report 0.
-             // Given the requirements "Passed X/Y", exact set is better.
+             // Check if we should/can generate
+             fs::path validator_dir = prob_dir / "validator";
+             if (!fs::exists(validator_dir)) fs::create_directories(validator_dir);
+             
+             fs::path gen_py = validator_dir / "gen.py";
+             fs::path sol_py = validator_dir / "sol.py";
+             
+             bool has_scripts = fs::exists(gen_py) && fs::exists(sol_py);
+
+             if (has_scripts) {
+                 // Silent entry, maybe just a header
+                 std::cout << "=== 动态对拍模式 (Dynamic Test Mode) ===" << std::endl;
+             } else if (svc.ai->enabled()) {
+                 std::cout << "[*] 未找到静态用例，正在请求 AI 生成脚本..." << std::endl;
+             } else {
+                 std::cout << "[!] 未找到静态测试用例，且未启用 AI。" << std::endl;
+             }
+             
+             if (!has_scripts) {
+                 if (svc.ai->enabled()) {
+                     std::cout << "[*] 正在调用 AI 生成对拍脚本 (gen.py / sol.py)..." << std::endl;
+                     try {
+                         // Need problem description. 
+                         // We have limited info in 'prob' struct usually (title, etc).
+                         // We might need to read the content file or fetch.
+                         // For now use build_problem_text or just title + tags?
+                         // Ideally we read the md file.
+                         std::string desc = build_problem_text(prob); 
+                         auto scripts = svc.ai->generate_test_scripts(desc);
+                         
+                         if (scripts.first.empty() || scripts.second.empty()) {
+                             std::cerr << "[!] AI 生成脚本失败或格式无法解析。" << std::endl;
+                         } else {
+                             std::ofstream fg(gen_py); fg << scripts.first;
+                             std::ofstream fs(sol_py); fs << scripts.second;
+                             std::cout << "[+] 脚本已保存至 " << validator_dir.string() << std::endl;
+                             has_scripts = true;
+                         }
+                     } catch (const std::exception& e) {
+                         std::cerr << "[!] AI 调用失败: " << e.what() << std::endl;
+                     }
+                 } else {
+                     std::cout << "[!] AI 未启用 (请配置 api_key)，跳过脚本生成。" << std::endl;
+                 }
+             }
+
+             if (has_scripts) {
+                 std::cout << "[*] 正在生成临时测试用例 (5 sets)..." << std::endl;
+                 int gen_count = 5;
+                 for (int i=1; i<=gen_count; ++i) {
+                     // Run gen.py -> temp/gen_i.in
+                     fs::path in_path = prob_dir / "temp" / ("gen_" + std::to_string(i) + ".in");
+                     fs::path ans_path = prob_dir / "temp" / ("gen_" + std::to_string(i) + ".ans");
+                     
+                     // Run Generator
+                     // python "gen_py" > in_path
+                     // We use run_process_redirect which handles redirection internally if supported, 
+                     // or we pass the command. 
+                     // Judge::run_process_redirect(cmd, input_file, output_file, ...)
+                     std::string cmd_gen = "python \"" + gen_py.string() + "\"";
+                     auto res_gen = svc.judge->run_process_redirect(cmd_gen, "", in_path.string(), 5000, 256*1024);
+                     
+                     if (res_gen.verdict != Verdict::AC) {
+                         std::string msg = res_gen.message.empty() ? res_gen.verdict_str() : res_gen.message;
+                         std::cerr << "[!] 生成器运行失败 (Case " << i << "): " << msg << std::endl;
+                         continue;
+                     }
+                     
+                     // Run Solver
+                     // python "sol_py" < in_path > ans_path
+                     std::string cmd_sol = "python \"" + sol_py.string() + "\"";
+                     auto res_sol = svc.judge->run_process_redirect(cmd_sol, in_path.string(), ans_path.string(), 5000, 256*1024);
+                     
+                     if (res_sol.verdict != Verdict::AC) {
+                         std::string msg = res_sol.message.empty() ? res_sol.verdict_str() : res_sol.message;
+                         std::cerr << "[!] 标程运行失败 (Case " << i << "): " << msg << std::endl;
+                         continue;
+                     }
+                     
+                     // Load as case
+                     TestCase tc;
+                     {
+                        std::ifstream f(in_path, std::ios::binary);
+                        tc.input.assign(std::istreambuf_iterator<char>(f), {});
+                     }
+                     {
+                        std::ifstream f(ans_path, std::ios::binary);
+                        tc.output.assign(std::istreambuf_iterator<char>(f), {});
+                     }
+                     tc.is_sample = false;
+                     cases.push_back(tc);
+                 }
+             }
+        }
+
+        if (cases.empty()) {
+             std::cout << "[!] 无法获取任何测试用例 (静态/数据库/AI生成)。" << std::endl;
         }
 
         report.total_count = cases.size();
@@ -245,6 +338,9 @@ void cmd_test(CommandContext& ctx) {
         for (size_t i = 0; i < cases.size(); i++) {
             const auto& tc = cases[i];
             
+            // Simple Output: "Case 1: Running..."
+            std::cout << "Case " << (i + 1) << ": Running...\r" << std::flush;
+
             // Run
             auto res = svc.judge->run_prepared(user_exe, tc, 2000, 256*1024);
             res.expected = tc.output;
@@ -252,8 +348,7 @@ void cmd_test(CommandContext& ctx) {
             
             report.cases.push_back(res);
 
-            // Simple Output
-            // "Case 1: AC (10ms, 2048KB)"
+            // Overwrite line
             std::cout << "Case " << (i + 1) << ": ";
             if (res.verdict == Verdict::AC) {
                 std::cout << "AC";
@@ -262,7 +357,7 @@ void cmd_test(CommandContext& ctx) {
                 std::cout << res.verdict_str().c_str();
                 all_ac = false;
             }
-            std::cout << " (" << res.time_ms << "ms, " << res.memory_kb << "KB)" << std::endl;
+            std::cout << " (" << res.time_ms << "ms, " << res.memory_kb << "KB)   " << std::endl; // Extra spaces to clear "Running..."
         }
 
         report.pass_count = passed;
@@ -281,7 +376,9 @@ void cmd_test(CommandContext& ctx) {
         if (cases.empty()) report.verdict = "SKIPPED";
 
         // Summary Line
-        if (all_ac && !cases.empty()) {
+        if (cases.empty()) {
+            std::cout << "\n[Result] SKIPPED (No test cases found)." << std::endl;
+        } else if (all_ac) {
             std::cout << "\n[Result] All Accepted! (" << passed << "/" << report.total_count << ")" << std::endl;
         } else {
              std::cout << "\n[Result] Failed. Passed " << passed << "/" << report.total_count << std::endl;
@@ -296,6 +393,61 @@ void cmd_test(CommandContext& ctx) {
         svc.db->update_problem_status(prob.id, report.verdict, report.pass_count, report.total_count);
         
         svc.judge->cleanup_prepared(user_exe, svc.cfg.language);
+
+        // AI Diagnosis
+        // std::cout << "[DEBUG] AI Enabled: " << svc.ai->enabled() << ", All AC: " << all_ac << std::endl;
+        if (!all_ac && svc.ai->enabled()) {
+             std::cout << std::endl << "[*] 测试未通过，正在进行AI分析..." << std::endl;
+             
+             // Gather info
+             std::string code;
+             if (fs::exists(src_file)) {
+                 std::ifstream f(src_file);
+                 code.assign(std::istreambuf_iterator<char>(f), {});
+             }
+
+             // Find first failed
+             std::string failure_info;
+             for (const auto& c : report.cases) {
+                 if (c.verdict != Verdict::AC) {
+                     failure_info = fmt::format("Verdict: {}\nInput:\n{}\nOutput:\n{}\nExpected:\n{}", 
+                         c.verdict_str(), 
+                         c.input.substr(0, 200),
+                         c.output.substr(0, 200), 
+                         c.expected.substr(0, 200));
+                     break;
+                 }
+             }
+
+             std::string desc = build_problem_text(prob);
+             
+             // Streaming output callback with filtering (Reuse logic? Copy for now to be safe)
+             std::string buffer;
+             bool suppress = false;
+             auto print_chunk = [&](std::string chunk) {
+                if (suppress) return;
+                buffer += chunk;
+                size_t start_pos = buffer.find("<!-- SYSTEM_OP");
+                if (start_pos != std::string::npos) {
+                    std::cout << buffer.substr(0, start_pos) << std::flush;
+                    buffer.clear();
+                    suppress = true;
+                } else {
+                    if (buffer.size() > 20) {
+                        size_t print_len = buffer.size() - 20;
+                        std::cout << buffer.substr(0, print_len) << std::flush;
+                        buffer.erase(0, print_len);
+                    }
+                }
+             };
+
+             svc.ai->diagnose(desc, code, failure_info, "", print_chunk);
+             
+             if (!suppress && !buffer.empty() && buffer.find("<!--") == std::string::npos) {
+                 std::cout << buffer << std::flush;
+             }
+             std::cout << std::endl;
+        }
 
     } catch (const std::exception& e) {
         std::cerr << "[!] 错误: " << e.what() << std::endl;

@@ -293,10 +293,7 @@ JudgeResult Judge::run_case(const std::string& executable,
 
     ZeroMemory(&pi, sizeof(pi));
 
-    // Write input
-    DWORD dwWritten;
-    WriteFile(hChildStd_IN_Wr.get(), tc.input.c_str(), (DWORD)tc.input.size(), &dwWritten, NULL);
-    hChildStd_IN_Wr.close(); // Close write end so child sees EOF on stdin
+    ZeroMemory(&pi, sizeof(pi));
 
     auto start_time = std::chrono::high_resolution_clock::now();
 
@@ -308,14 +305,25 @@ JudgeResult Judge::run_case(const std::string& executable,
     ScopedHandle hProcess(pi.hProcess);
     ScopedHandle hThread(pi.hThread);
 
-    // Close write end of output pipe so we don't block reading
+    // Close handles intended for child in parent
     hChildStd_OUT_Wr.close();
+    hChildStd_IN_Rd.close();
+
+    // Write input in a separate thread to prevent deadlock
+    // (If user output fills pipe while we write input)
+    std::thread writer([h = std::move(hChildStd_IN_Wr), data = tc.input]() mutable {
+        DWORD dwWritten;
+        WriteFile(h.get(), data.c_str(), (DWORD)data.size(), &dwWritten, NULL);
+        h.close(); // Close so child gets EOF
+    });
+    writer.detach();
 
     std::string output;
     bool finished = false;
     DWORD exit_code = 0;
     
     while (true) {
+        // ... (rest is same)
         // Check if process has exited
         if (WaitForSingleObject(hProcess.get(), 0) == WAIT_OBJECT_0) {
             finished = true;
@@ -332,12 +340,16 @@ JudgeResult Judge::run_case(const std::string& executable,
 
         // Read available data
         DWORD dwRead, dwAvail;
+        bool has_data = false;
         if (PeekNamedPipe(hChildStd_OUT_Rd.get(), NULL, 0, NULL, &dwAvail, NULL) && dwAvail > 0) {
             char buffer[4096];
             if (ReadFile(hChildStd_OUT_Rd.get(), buffer, sizeof(buffer), &dwRead, NULL) && dwRead > 0) {
                 output.append(buffer, dwRead);
+                has_data = true;
             }
-        } else {
+        } 
+        
+        if (!has_data) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
@@ -376,9 +388,6 @@ JudgeResult Judge::run_case(const std::string& executable,
         }
     }
     
-    // ScopedHandles will close hProcess, hThread, hChildStd_OUT_Rd, hChildStd_IN_Rd
-    // hChildStd_IN_Wr and hChildStd_OUT_Wr were closed earlier
-
     return res;
 }
 #else
@@ -541,12 +550,64 @@ JudgeResult Judge::run_process_redirect(const std::string& cmd,
     }
     
     auto start = std::chrono::steady_clock::now();
+
+#ifdef _WIN32
+    // Windows Implementation using CreateProcess for Timeout Control
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags |= STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE; // Hide window
+
+    ZeroMemory(&pi, sizeof(pi));
+
+    // Use cmd.exe /C to handle redirection
+    std::string shell_cmd = "cmd.exe /C \"" + full_cmd + "\"";
+
+    if (!CreateProcessA(NULL, const_cast<char*>(shell_cmd.c_str()), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+        return {Verdict::RE, 0, 0, "CreateProcess failed"};
+    }
+
+    bool finished = false;
+    DWORD exit_code = 0;
+
+    if (WaitForSingleObject(pi.hProcess, time_limit_ms) == WAIT_OBJECT_0) {
+        finished = true;
+        GetExitCodeProcess(pi.hProcess, &exit_code);
+    } else {
+        // Timeout
+        TerminateProcess(pi.hProcess, 1);
+        finished = false;
+    }
+
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    auto end = std::chrono::steady_clock::now();
+    JudgeResult res;
+    res.time_ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    res.memory_kb = 0; 
+
+    if (!finished) {
+        res.verdict = Verdict::TLE;
+    } else if (exit_code != 0) {
+        res.verdict = Verdict::RE;
+        res.message = fmt::format("Exit code {}", exit_code);
+    } else {
+        res.verdict = Verdict::AC;
+    }
+    return res;
+
+#else
+    // Fallback or Linux implementation (std::system is simple but blocking)
+    // For now keep std::system for non-Windows or implement fork/exec similar to run_case
     int ret = std::system(full_cmd.c_str());
     auto end = std::chrono::steady_clock::now();
     
     JudgeResult res;
     res.time_ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-    res.memory_kb = 0; // std::system doesn't give memory usage easily
+    res.memory_kb = 0;
     
     if (ret != 0) {
         res.verdict = Verdict::RE;
@@ -555,8 +616,8 @@ JudgeResult Judge::run_process_redirect(const std::string& cmd,
         if (res.time_ms > time_limit_ms) res.verdict = Verdict::TLE;
         else res.verdict = Verdict::AC;
     }
-    
     return res;
+#endif
 }
 
 bool Judge::stream_file_diff(const std::string& path1, const std::string& path2) {

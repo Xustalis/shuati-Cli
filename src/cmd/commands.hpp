@@ -35,6 +35,8 @@ struct CommandContext {
     int test_max_cases = 30;
     std::string test_oracle = "auto";
     bool test_ui = false;
+    std::string list_filter; // "all", "ac", "failed", "unaudited"
+    std::string view_export_dir; // Directory to save test cases
 };
 
 // ─── Services ─────────────────────────────────────────
@@ -70,6 +72,7 @@ void cmd_solve(CommandContext& ctx);
 void cmd_delete(CommandContext& ctx);
 void cmd_submit(CommandContext& ctx);
 void cmd_hint(CommandContext& ctx);
+void cmd_clean(CommandContext& ctx);
 void cmd_view(CommandContext& ctx);
 
 // Registers all commands to the App

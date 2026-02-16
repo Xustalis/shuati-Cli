@@ -1,110 +1,115 @@
 #include "commands.hpp"
-#include "shuati/utils/encoding.hpp"
-#include <string>
 #include "shuati/version.hpp"
-#include <fmt/core.h>
-#include <fmt/color.h>
 #include <iostream>
+#include <filesystem>
+#include <fstream>
+#include <nlohmann/json.hpp>
 
 namespace shuati {
 namespace cmd {
 
 namespace fs = std::filesystem;
-using shuati::utils::ensure_utf8;
 
 void cmd_init(CommandContext& ctx) {
-    auto current = fs::current_path();
-    if (fs::exists(current / Config::DIR_NAME)) {
-        fmt::print("[!] 项目已在当前目录初始化。\n");
-        return;
+    try {
+        fs::path cwd = fs::current_path();
+        fs::path shuati_dir = cwd / ".shuati";
+        if (fs::exists(shuati_dir)) {
+            std::cout << "[!] 项目已初始化 (.shuati 目录存在)。" << std::endl;
+            return;
+        }
+
+        fs::create_directories(shuati_dir);
+        fs::create_directories(shuati_dir / "problems");
+        fs::create_directories(shuati_dir / "temp");
+        fs::create_directories(shuati_dir / "logs");
+
+        // Default Config
+        nlohmann::json config;
+        config["version"] = current_version().to_string();
+        config["language"] = "cpp"; // default
+        config["editor"] = "code";  // default vscode
+        
+        std::ofstream o(shuati_dir / "config.json");
+        o << config.dump(4);
+
+        // Database
+        Database db((shuati_dir / "shuati.db").string());
+        db.init_schema();
+
+        std::cout << "[+] 初始化成功!" << std::endl;
+        std::cout << "    位置: " << shuati_dir.string() << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "[!] 初始化失败: " << e.what() << std::endl;
     }
-    
-    auto dir = current / Config::DIR_NAME;
-    fs::create_directories(dir / "templates");
-    fs::create_directories(dir / "problems");
-    
-    Config cfg;
-    cfg.save(Config::config_path(current));
-    
-    Database db(Config::db_path(current).string());
-    db.init_schema();
-    
-    fmt::print(fg(fmt::color::green_yellow), "[+] 初始化成功: {}\n", dir.string().c_str());
-    fmt::print("    请设置 API Key: shuati config --api-key <YOUR_KEY>\n");
 }
 
 void cmd_info(CommandContext& ctx) {
-    try {
-        std::string exe = executable_path_utf8();
-        if (exe.empty()) exe = "shuati (path unknown)";
-        
-        fmt::print("Version: {}\n", current_version().to_string().c_str());
-        fmt::print("Exe:     {}\n", ensure_utf8(exe).c_str());
-        fmt::print("CWD:     {}\n", ensure_utf8(fs::current_path().string()).c_str());
-
-        auto root = Config::find_root();
-        if (root.empty()) {
-            fmt::print("Root:    (not found)\n");
-            return;
+    std::cout << "Shuati CLI " << current_version().to_string() << std::endl;
+    std::cout << "Executable: " << executable_path_utf8() << std::endl;
+    
+    auto root = find_root_or_die();
+    if (!root.empty()) {
+        std::cout << "Project Root: " << root.string() << std::endl;
+        try {
+            auto svc = Services::load(root);
+            std::cout << "Language: " << svc.cfg.language << std::endl;
+            std::cout << "Editor: " << svc.cfg.editor << std::endl;
+        } catch (...) {
+            std::cout << "Config: (Error loading)" << std::endl;
         }
-        fmt::print("Root:    {}\n", ensure_utf8(root.string()).c_str());
-        fmt::print("Config:  {}\n", ensure_utf8(Config::config_path(root).string()).c_str());
-        fmt::print("DB:      {}\n", ensure_utf8(Config::db_path(root).string()).c_str());
-    } catch (const std::exception& e) {
-        fmt::print(fg(fmt::color::red), "[!] 错误: {}\n", e.what());
+    } else {
+        std::cout << "Project Root: (Not in a project)" << std::endl;
     }
 }
 
 void cmd_config(CommandContext& ctx) {
     try {
-        auto root = find_root_or_die();
-        auto cfg_path = Config::config_path(root);
-        auto cfg = Config::load(cfg_path);
-
         if (ctx.cfg_show) {
-            fmt::print(fg(fmt::color::cyan), "当前配置:\n");
-            fmt::print("  API Key:      {}\n", cfg.api_key.empty() ? "(未设置)" : ("******" + cfg.api_key.substr(std::max(0, (int)cfg.api_key.length()-4))).c_str());
-            fmt::print("  Model:        {}\n", cfg.model);
-            fmt::print("  Language:     {}\n", cfg.language);
-            fmt::print("  Editor:       {}\n", cfg.editor.empty() ? "(未设置)" : cfg.editor);
-            fmt::print("  AI Enabled:   {}\n", cfg.ai_enabled ? "Yes" : "No");
+            auto root = find_root_or_die();
+            std::ifstream i(root / ".shuati" / "config.json");
+            std::cout << i.rdbuf() << std::endl;
             return;
+        }
+
+        auto root = find_root_or_die();
+        // Load existing
+        nlohmann::json j;
+        {
+            std::ifstream i(root / ".shuati" / "config.json");
+            if (i.good()) i >> j;
         }
 
         bool changed = false;
         if (!ctx.cfg_key.empty()) {
-            if (ctx.cfg_key.length() < 10) {
-                 fmt::print(fg(fmt::color::red), "[!] API Key 格式似乎不正确。\n");
-            } else {
-                cfg.api_key = ctx.cfg_key;
-                changed = true;
-            }
+            j["api_key"] = ctx.cfg_key;
+            changed = true;
+            std::cout << "[+] API Key set." << std::endl;
         }
         if (!ctx.cfg_model.empty()) {
-            cfg.model = ctx.cfg_model;
+            j["model"] = ctx.cfg_model;
             changed = true;
+            std::cout << "[+] Model set to: " << ctx.cfg_model << std::endl;
         }
-        
-        // Handle language via new_diff reuse hack (cleaned up later ideally)
-        // In main.cpp we saw it reused new_diff. In setup_commands we should map it properly.
-        // Assuming ctx.new_diff provided here contains language if flag used.
-        if (!ctx.new_diff.empty() && ctx.new_diff != "medium") {
-            std::string lang = ctx.new_diff;
-            if (lang == "cpp" || lang == "c++" || lang == "python" || lang == "py") {
-                cfg.language = (lang == "py") ? "python" : (lang == "c++" ? "cpp" : lang);
-                changed = true;
-            } else {
-                fmt::print(fg(fmt::color::yellow), "[!] 未知语言: {} (仅支持 cpp/python)\n", lang.c_str());
-            }
+        if (!ctx.new_diff.empty() && (ctx.new_diff == "cpp" || ctx.new_diff == "python")) {
+            // Reusing new_diff field for language arg as per commands.cpp setup??
+            // commands.cpp: cfg->add_option("--language", ctx.new_diff, "设置语言");
+            // Yes, reusing variable.
+            j["language"] = ctx.new_diff;
+            changed = true;
+            std::cout << "[+] Language set to: " << ctx.new_diff << std::endl;
         }
-        
+
         if (changed) {
-            cfg.save(cfg_path);
-            fmt::print(fg(fmt::color::green), "[+] 配置已保存。\n");
+            std::ofstream o(root / ".shuati" / "config.json");
+            o << j.dump(4);
         } else {
-            if (!ctx.cfg_show) fmt::print("使用 --show 查看配置，或使用 --api-key/--model/--language 修改。\n");
+            std::cout << "No changes specified. Use --show to view config." << std::endl;
         }
-    } catch (...) { fmt::print(fg(fmt::color::red), "[!] 操作失败\n"); }
+
+    } catch (const std::exception& e) {
+        std::cerr << "[!] Error: " << e.what() << std::endl;
+    }
 }
 
 } // namespace cmd

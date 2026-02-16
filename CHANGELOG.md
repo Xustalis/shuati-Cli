@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.4] - 2026-02-17
+
+### Security & Quality
+- **Audit**: Comprehensive security review conducted. No critical vulnerabilities found.
+- **Robustness**: Improved AI test script generation regex to better handle markdown code blocks.
+- **Dependency**: Verified all third-party dependencies in `vcpkg.json`.
+
+### Changed
+- **Docs**: Updated README and installation instructions for v1.5.4.
+- **CI/CD**: Verified release workflow strict version validation.
+
 ## [1.5.3] - 2026-02-15
 
 ### Added

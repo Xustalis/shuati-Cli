@@ -183,19 +183,40 @@ std::string AICoach::chat_sync(const std::string& system_prompt, const std::stri
 std::string AICoach::diagnose(const std::string& problem_desc, 
                               const std::string& user_code, 
                               const std::string& failure_info,
-                              const std::string& user_history) {
+                              const std::string& user_history,
+                              std::function<void(std::string)> callback) {
     std::string sys = "You are a competitive programming coach. "
                       "Diagnose the user's Wrong Answer or Runtime Error. "
                       "I will provide the Problem, Code, Failed Test Case, and User's stats. "
                       "Explain WHY the code failed on this specific case. "
                       "Reference their past weaknesses if relevant. "
-                      "Keep it concise (< 200 words). Use Chinese.";
+                      "Keep it concise (< 200 words). Use Chinese.\n"
+                      "Finally, if you identify a specific mistake pattern, output it in the system block:\n"
+                      "<!-- SYSTEM_OP: UPDATE_MEMORY\n"
+                      "{ \"new_mistake\": \"...\", \"mastery_reinforce\": \"...\" }\n"
+                      "-->";
 
     std::string user = fmt::format(
         "Problem:\n{}\n\nCode:\n```\n{}\n```\n\nFailed Case:\n{}\n\nUser History:\n{}",
-        problem_desc.substr(0, 500), user_code.substr(0, 1000), failure_info, user_history);
+        problem_desc.substr(0, 1000), user_code.substr(0, 2000), failure_info, user_history);
 
-    return call_api(sys, user);
+    std::string full_response;
+    auto wrapped = [&](std::string chunk) {
+        full_response += chunk;
+        if (callback) callback(chunk);
+    };
+
+    std::string err = call_api(sys, user, true, wrapped);
+    
+    if (err.empty() && mm_) {
+        mm_->update_memory_from_response(full_response);
+    }
+    
+    if (!err.empty() && callback) {
+        callback(err);
+    }
+
+    return err;
 }
 
 std::pair<std::string, std::string> AICoach::generate_test_scripts(const std::string& problem_desc) {
@@ -255,15 +276,18 @@ std::pair<std::string, std::string> AICoach::generate_test_scripts(const std::st
 
     // Fallback: Just grab first two blocks if named extraction fails
     if (result.first.empty() || result.second.empty()) {
+        // Regex to match ```python ... ``` or just ``` ... ```
+        // Captures content inside the block
         std::regex re("```(?:python)?\\s*([\\s\\S]*?)```");
         std::sregex_iterator next(raw.begin(), raw.end(), re);
         std::sregex_iterator end;
-        if (next != end) {
-            result.first = next->str(1);
+        
+        int count = 0;
+        while (next != end && count < 2) {
+            if (count == 0) result.first = next->str(1);
+            else result.second = next->str(1);
             next++;
-            if (next != end) {
-                result.second = next->str(1);
-            }
+            count++;
         }
     }
 

@@ -31,7 +31,8 @@ public:
     std::string diagnose(const std::string& problem_desc,
                          const std::string& user_code,
                          const std::string& failure_info,
-                         const std::string& user_history);
+                         const std::string& user_history,
+                         std::function<void(std::string)> callback = nullptr);
 
     // Generate starter code with algorithm hints
     std::string generate_template(const std::string& title, const std::string& desc, const std::string& lang);

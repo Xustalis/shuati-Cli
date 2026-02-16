@@ -73,5 +73,84 @@ void cmd_delete(CommandContext& ctx) {
     }
 }
 
+
+void cmd_clean(CommandContext& ctx) {
+    try {
+        fs::path root;
+        try {
+            root = find_root_or_die();
+        } catch (...) {
+            // If not in root, maybe just return? Or try current dir?
+            // find_root_or_die prints error and throws.
+            return;
+        }
+
+        fs::path shuati_dir = root / ".shuati";
+        int removed_count = 0;
+        uintmax_t removed_size = 0;
+
+        auto remove_file = [&](const fs::path& p) {
+            std::error_code ec;
+            uintmax_t size = fs::file_size(p, ec);
+            if (fs::remove(p, ec)) {
+                removed_count++;
+                if (!ec) removed_size += size;
+                // std::cout << "Del: " << p.filename().string() << std::endl;
+            }
+        };
+
+        // 1. Clean global temp
+        fs::path global_temp = shuati_dir / "temp";
+        if (fs::exists(global_temp)) {
+            for (const auto& entry : fs::directory_iterator(global_temp)) {
+                remove_file(entry.path());
+            }
+        }
+
+        // 2. Clean problem temps
+        fs::path problems_dir = shuati_dir / "problems";
+        if (fs::exists(problems_dir)) {
+            for (const auto& p_entry : fs::directory_iterator(problems_dir)) {
+                if (!p_entry.is_directory()) continue;
+                
+                fs::path p_temp = p_entry.path() / "temp";
+                if (fs::exists(p_temp)) {
+                    for (const auto& entry : fs::directory_iterator(p_temp)) {
+                        remove_file(entry.path());
+                    }
+                }
+            }
+        }
+
+        // 3. Clean root directory artifacts (solution_*.exe, *.o, *.obj)
+        for (const auto& entry : fs::directory_iterator(root)) {
+            if (entry.is_directory()) continue;
+            std::string name = entry.path().filename().string();
+            
+            bool is_garbage = false;
+            if (name.rfind("solution_", 0) == 0) { // starts with solution_
+                 if (name.length() > 4 && (name.substr(name.length()-4) == ".exe" || name.substr(name.length()-4) == ".obj")) {
+                     is_garbage = true;
+                 } else if (name.length() > 2 && name.substr(name.length()-2) == ".o") {
+                     is_garbage = true;
+                 }
+                 #ifndef _WIN32
+                 // If judge.cpp is ever fixed to not add .exe on Linux, we might have solution_ID (no ext).
+                 // For now, Judge adds .exe, so we are good.
+                 #endif
+            }
+
+            if (is_garbage) {
+                remove_file(entry.path());
+            }
+        }
+
+        std::cout << "[+] 清理完成。共删除 " << removed_count << " 个文件 (" << (removed_size / 1024.0) << " KB)。" << std::endl;
+
+    } catch (const std::exception& e) {
+        std::cerr << "[!] Error: " << e.what() << std::endl;
+    }
+}
+
 } // namespace cmd
 } // namespace shuati

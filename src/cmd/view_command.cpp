@@ -77,6 +77,31 @@ void cmd_view(CommandContext& ctx) {
             std::cout << "[!] 未找到测试报告 (请先运行 test 命令)" << std::endl;
             return;
         }
+
+        // Export logic
+        if (!ctx.view_export_dir.empty()) {
+            std::filesystem::path export_dir = ctx.view_export_dir;
+            if (!std::filesystem::exists(export_dir)) {
+                std::filesystem::create_directories(export_dir);
+            }
+            std::cout << "[*] 正在导出测试数据到: " << export_dir.string() << std::endl;
+            
+            for (size_t i = 0; i < report.cases.size(); ++i) {
+                const auto& c = report.cases[i];
+                std::string base = "case_" + std::to_string(i + 1);
+                
+                std::ofstream in(export_dir / (base + ".in"));
+                in << c.input;
+                
+                std::ofstream out(export_dir / (base + ".out"));
+                out << c.output;
+                
+                std::ofstream ans(export_dir / (base + ".ans"));
+                ans << c.expected;
+            }
+            std::cout << "[+] 成功导出 " << report.cases.size() << " 个测试点。" << std::endl;
+            return;
+        }
         
         std::cout << "=== 测试报告: " << ensure_utf8(prob.title).c_str() << " ===" << std::endl;
         std::cout << "Verdict: " << report.verdict.c_str() << std::endl;
@@ -86,8 +111,14 @@ void cmd_view(CommandContext& ctx) {
         for (size_t i = 0; i < report.cases.size(); ++i) {
             const auto& c = report.cases[i];
             
+            // Colorize verdict
+            std::string v = c.verdict_str();
+            if (c.verdict == Verdict::AC) v = "\033[32m" + v + "\033[0m";
+            else if (c.verdict == Verdict::WA) v = "\033[31m" + v + "\033[0m";
+            else v = "\033[33m" + v + "\033[0m";
+
             std::cout << "Case #" << (i+1) << ": ";
-            std::cout << c.verdict_str() << " (" << c.time_ms << "ms, " << c.memory_kb << "KB)";
+            std::cout << v << " (" << c.time_ms << "ms, " << c.memory_kb << "KB)";
             if (c.verdict != Verdict::AC) {
                  std::cout << std::endl;
                  std::cout << "  Input:    " << (c.input.substr(0, 100) + (c.input.size()>100?"...":"")) << std::endl;
