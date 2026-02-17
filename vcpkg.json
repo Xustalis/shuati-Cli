@@ -1,6 +1,6 @@
 {
   "name": "shuati-cli",
-  "version-string": "1.5.4",
+  "version-string": "1.5.5",
   "builtin-baseline": "f310de9dc9f16bd016e06d6c9a1decc07a918273",
   "dependencies": [
     "cli11",
@@ -10,6 +10,7 @@
     "replxx",
     "fmt",
     "ftxui",
-    "cpp-httplib"
+    "cpp-httplib",
+    "openssl"
   ]
 }
