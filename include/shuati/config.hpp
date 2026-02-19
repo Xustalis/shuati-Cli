@@ -20,6 +20,12 @@ struct Config {
     bool ai_enabled = true;           // Enable AI features
     bool template_enabled = true;     // Enable template generation
 
+    // ─── Local Model (llama.cpp server) ───────────────────
+    std::string local_model_path;     // Path to llama-server binary (e.g., "C:/llama/llama-server.exe")
+    std::string local_model_file;     // Path to GGUF model file (e.g., "C:/models/qwen2.5-7b.gguf")
+    std::string local_model_url = "http://localhost:11434"; // Ollama/llama.cpp server URL
+    bool local_model_auto_start = false; // Auto-start local model server on shuati launch
+
     static constexpr const char* DIR_NAME = ".shuati";
     static constexpr const char* DB_NAME = "shuati.db";
     static constexpr const char* CONFIG_NAME = "config.json";
@@ -58,6 +64,10 @@ struct Config {
         j["editor"] = editor;
         j["ai_enabled"] = ai_enabled;
         j["template_enabled"] = template_enabled;
+        j["local_model_path"] = local_model_path;
+        j["local_model_file"] = local_model_file;
+        j["local_model_url"] = local_model_url;
+        j["local_model_auto_start"] = local_model_auto_start;
         std::ofstream(path) << j.dump(2);
     }
 
@@ -74,6 +84,10 @@ struct Config {
             if (j.contains("editor"))     c.editor     = j["editor"];
             if (j.contains("ai_enabled")) c.ai_enabled = j["ai_enabled"];
             if (j.contains("template_enabled")) c.template_enabled = j["template_enabled"];
+            if (j.contains("local_model_path"))       c.local_model_path       = j["local_model_path"];
+            if (j.contains("local_model_file"))       c.local_model_file       = j["local_model_file"];
+            if (j.contains("local_model_url"))        c.local_model_url        = j["local_model_url"];
+            if (j.contains("local_model_auto_start")) c.local_model_auto_start = j["local_model_auto_start"];
         } catch (...) {}
         return c;
     }

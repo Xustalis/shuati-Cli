@@ -75,6 +75,9 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
 
     app.add_subcommand("clean", "清理临时文件")->callback([&](){ cmd_clean(ctx); });
 
+    auto up = app.add_subcommand("update", "更新工具和模型列表");
+    up->callback([&](){ cmd_update(ctx); });
+
     auto cfg = app.add_subcommand("config", "配置工具");
     cfg->add_flag("--show", ctx.cfg_show, "显示配置");
     cfg->add_option("--api-key", ctx.cfg_key, "设置 API Key");

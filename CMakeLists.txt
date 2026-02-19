@@ -1,12 +1,17 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(shuati-cli VERSION 1.5.5 LANGUAGES CXX)
+project(shuati-cli VERSION 1.5.4 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(MSVC)
     add_compile_options(/utf-8)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # Clang handles UTF-8 by default usually, or needs different flags
+    if(WIN32)
+        add_compile_options(-finput-charset=UTF-8 -fexec-charset=UTF-8)
+    endif()
 else()
     add_compile_options(-finput-charset=UTF-8 -fexec-charset=UTF-8)
 endif()
@@ -41,6 +46,7 @@ add_executable(shuati
     src/cmd/list_command.cpp
     src/cmd/view_command.cpp
     src/cmd/test_command.cpp
+    src/cmd/update_command.cpp
     src/core/problem_manager.cpp
     src/core/mistake_analyzer.cpp
     src/core/sm2_algorithm.cpp
