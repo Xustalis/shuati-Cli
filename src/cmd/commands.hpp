@@ -74,6 +74,7 @@ void cmd_submit(CommandContext& ctx);
 void cmd_hint(CommandContext& ctx);
 void cmd_clean(CommandContext& ctx);
 void cmd_view(CommandContext& ctx);
+void cmd_update(CommandContext& ctx);
 
 // Registers all commands to the App
 void setup_commands(CLI::App& app, CommandContext& ctx);

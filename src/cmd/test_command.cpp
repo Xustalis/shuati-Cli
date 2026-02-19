@@ -166,7 +166,29 @@ void cmd_test(CommandContext& ctx) {
         try {
             user_exe = svc.judge->prepare(src_file, svc.cfg.language);
         } catch (const std::exception& e) {
-            std::cerr << "[Compile Error]\n" << e.what() << std::endl;
+            std::string err_info = e.what();
+            
+            // ─── Fancy Compilation Error Box ───
+            fmt::print("\n");
+            fmt::print(fg(fmt::color::red) | fmt::emphasis::bold, "╔══════════════════════════════════════╗\n");
+            fmt::print(fg(fmt::color::red) | fmt::emphasis::bold, "║  [编译错误]                           ║\n");
+            fmt::print(fg(fmt::color::red) | fmt::emphasis::bold, "╚══════════════════════════════════════╝\n\n");
+
+            // Load source for AI diagnosis
+            std::string code;
+            {
+                std::ifstream f(src_file);
+                code.assign(std::istreambuf_iterator<char>(f), {});
+            }
+
+            // Call fallback diagnosis chain
+            svc.ai->diagnose_compile_error(err_info, code, [](std::string chunk) {
+                fmt::print("{}", chunk);
+                std::cout << std::flush;
+            });
+
+            fmt::print("\n\n--- 原始错误 (首300字符) ---\n");
+            fmt::print(fg(fmt::color::gray), "{}\n", err_info.substr(0, 300));
             return;
         }
 

@@ -26,7 +26,7 @@
    cd shuati-cli
    ```
 
-2. **配置 CMake** (假设 vcpkg 已安装并配置环境变量，或使用 vcpkg 子模块)：
+2. **配置 CMake** (vcpkg 已安装并配置环境变量)：
    ```bash
    cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=[path to vcpkg]/scripts/buildsystems/vcpkg.cmake
    ```
@@ -56,7 +56,7 @@
 
 ## 📜 代码规范
 - 使用 C++20 标准。
-- 遵循 Google C++ Style Guide (或项目现有的 `.clang-format`)。
+- 遵循 `.clang-format`
 - 变量命名使用 `snake_case`，类名使用 `PascalCase`。
 
 感谢你的贡献！🚀
