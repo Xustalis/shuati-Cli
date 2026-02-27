@@ -245,7 +245,7 @@ var
 begin
   Result := True;
 
-  ; Check if already installed
+  // Check if already installed
   if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#MyAppName}_is1', 'DisplayVersion', Version) then begin
     Log('Previous version detected: ' + Version);
   end;
@@ -255,12 +255,12 @@ function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
 
-  ; Custom validation can be added here
+  // Custom validation can be added here
   case CurPageID of
     wpSelectDir: begin
-      ; Validate installation directory
+      // Validate installation directory
       if Pos(' ', ExpandConstant('{app}')) > 0 then begin
-        ; Warn about spaces in path but allow it
+        // Warn about spaces in path but allow it
         Log('Warning: Installation path contains spaces');
       end;
     end;
