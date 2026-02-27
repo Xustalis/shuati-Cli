@@ -87,10 +87,11 @@ AllowUNCPath=no
 MinVersion=6.1sp1
 UninstallDisplayName={#MyAppName}
 UninstallFilesDir={app}\uninstall
+LanguageDetectionMethod=uilanguage
 
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "en"; MessagesFile: "compiler:Default.isl"
+Name: "zh_CN"; MessagesFile: "{#SourcePath}\Languages\ChineseSimplified.isl"
 
 [Types]
 Name: "full"; Description: "Full installation"
