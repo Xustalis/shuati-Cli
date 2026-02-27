@@ -1,6 +1,0 @@
-fix(ci): stabilize judge output capture and packaging across platforms
-
-Fix Large Output Deadlock Check by draining stdout/stderr concurrently
-Preserve first N bytes on truncation; align capture limit with tests
-Fix Windows checksum step (no hashing directories)
-CI: ctest Release passes on Windows/macOS/Linux

@@ -20,6 +20,8 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <algorithm>
+#include <cerrno>
+#include <cstring>
 #endif
 
 #include <random>
@@ -442,7 +444,11 @@ JudgeResult Judge::run_case(const std::string& executable,
              if (script.front() == '"') script = script.substr(1, script.length()-2);
             args_vec.push_back(script);
         } else {
-            args_vec.push_back(executable);
+            fs::path exec_path = executable;
+            if (!exec_path.has_parent_path() && exec_path.string().find('/') == std::string::npos) {
+                exec_path = fs::path("./") / exec_path;
+            }
+            args_vec.push_back(exec_path.string());
         }
 
         std::vector<char*> args;
@@ -450,9 +456,7 @@ JudgeResult Judge::run_case(const std::string& executable,
         args.push_back(nullptr);
 
         execvp(args[0], args.data());
-        
-        // If exec fails, print to stderr so parent can capture it
-        std::cerr << "Exec failed: " << errno << std::endl;
+        std::cerr << "Exec failed: " << errno << " " << std::strerror(errno) << std::endl;
         exit(127); 
     } else {
         // Parent
