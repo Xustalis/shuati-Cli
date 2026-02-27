@@ -60,7 +60,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
 ; Output settings
-OutputDir=..\dist
+OutputDir=.
 OutputBaseFilename={#MyOutputBaseFilename}
 
 ; Compression settings - optimized for size and speed
