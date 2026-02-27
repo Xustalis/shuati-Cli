@@ -1,0 +1,92 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+
+    inputs:
+      force:
+        description: Force a release even when no semver bump is detected
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: prepare-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Load Release Notes Template (optional)
+        shell: bash
+        run: |
+          if [[ -f ".github/release-notes-template.md" ]]; then
+            echo "RELEASE_NOTES_TEMPLATE=.github/release-notes-template.md" >> "$GITHUB_ENV"
+          fi
+
+      - name: Plan Release
+        id: plan
+        shell: bash
+        run: |
+          python tools/release/plan_release.py > release_plan.json
+          python -c 'import json, pathlib; p = json.loads(pathlib.Path("release_plan.json").read_text(encoding="utf-8")); pathlib.Path("RELEASE_NOTES.md").write_text(p.get("notes_markdown",""), encoding="utf-8")'
+
+      - name: Decide
+        id: decide
+        shell: bash
+        run: |
+          bump="${{ steps.plan.outputs.bump }}"
+          force="${{ inputs.force }}"
+          if [[ "$bump" == "none" && "$force" != "true" ]]; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+
+      - name: Update Versions and Changelog
+        if: steps.decide.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          python tools/release/update_versions.py "${{ steps.plan.outputs.new_version }}" RELEASE_NOTES.md
+
+      - name: Commit and Tag
+        if: steps.decide.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CMakeLists.txt vcpkg.json README.md install.ps1 CHANGELOG.md
+          git commit -m "chore(release): ${{ steps.plan.outputs.new_tag }}"
+          git tag -a "${{ steps.plan.outputs.new_tag }}" -m "${{ steps.plan.outputs.new_tag }}"
+          git push origin HEAD:main
+          git push origin "${{ steps.plan.outputs.new_tag }}"
+
+      - name: Trigger Release Workflow
+        if: steps.decide.outputs.should_release == 'true'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ steps.plan.outputs.new_tag }}"
+          echo "Triggering release workflow for tag: $tag"
+          sleep 5  # Wait for tag to be available
+          gh workflow run release.yml --ref "$tag"

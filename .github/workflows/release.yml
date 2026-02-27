@@ -1,0 +1,378 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Create/update GitHub Release and upload assets
+        type: boolean
+        required: false
+        default: true
+      dry_run:
+        description: Build artifacts only (skip release publish & notifications)
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  build_assets:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 4
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Version Tag (vX.Y.Z matches CMakeLists)
+        shell: bash
+        run: |
+          if command -v python3 &>/dev/null; then py=python3; else py=python; fi
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag must be vX.Y.Z, got: $tag"
+            exit 1
+          fi
+          
+          # Extract version from CMakeLists.txt using a robust python script
+          cmake_ver="$($py -c "
+          import re, pathlib, sys
+          try:
+              txt = pathlib.Path('CMakeLists.txt').read_text(encoding='utf-8', errors='ignore')
+              # Match: project(shuati-cli VERSION 1.4.2 ...)
+              m = re.search(r'project\(shuati-cli\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)', txt)
+              if m:
+                  print(m.group(1))
+              else:
+                  print('')
+          except Exception:
+              print('')
+          " | tr -d '\r')"
+
+          if [[ -z "$cmake_ver" ]]; then
+            echo "Failed to parse version from CMakeLists.txt"
+            exit 1
+          fi
+          
+          if [[ "v$cmake_ver" != "$tag" ]]; then
+            echo "Tag ($tag) does not match CMakeLists.txt version ($cmake_ver)"
+            exit 1
+          fi
+          
+          # Extract version from vcpkg.json
+          vcpkg_ver="$($py -c "
+          import json, pathlib, sys
+          try:
+              content = pathlib.Path('vcpkg.json').read_text(encoding='utf-8', errors='ignore')
+              obj = json.loads(content)
+              print(obj.get('version-string', ''))
+          except Exception:
+              print('')
+          " | tr -d '\r')"
+
+          if [[ -z "$vcpkg_ver" ]]; then
+            echo "Failed to parse version-string from vcpkg.json"
+            exit 1
+          fi
+          
+          if [[ "$vcpkg_ver" != "$cmake_ver" ]]; then
+            echo "vcpkg.json version ($vcpkg_ver) does not match CMakeLists.txt version ($cmake_ver)"
+            exit 1
+          fi
+
+      - name: Install Linux Dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev libx11-dev libxt-dev libgl1-mesa-dev xorg-dev
+
+      - name: Set up CMake
+        uses: jwlawson/actions-setup-cmake@v2
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: 'vcpkg.json'
+
+      - name: Configure CMake (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >
+          cmake -B build -S .
+          -G "Visual Studio 17 2022"
+          -A x64
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
+
+      - name: Configure CMake (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: >
+          cmake -B build -S .
+          -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake"
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmake --build build --config Release --parallel
+
+      - name: Build (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: cmake --build build --parallel
+
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Test (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Verify Binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Add vcpkg DLLs to PATH so the executable can run
+          $vcpkgBin = Resolve-Path "build/vcpkg_installed/*/bin" | Select-Object -First 1 -ExpandProperty Path
+          if ($vcpkgBin) {
+            Write-Host "Adding vcpkg bin to PATH: $vcpkgBin"
+            $env:PATH = "$vcpkgBin;$env:PATH"
+          }
+          
+          & "build/Release/shuati.exe" --help
+          
+          New-Item -ItemType Directory -Force -Path smoke | Out-Null
+          Push-Location smoke
+          & "..\build\Release\shuati.exe" init
+          Pop-Location
+
+      - name: Verify Binary (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          ./build/shuati --help
+          mkdir -p smoke
+          (cd smoke && ../build/shuati init)
+
+      - name: Stage (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dist = "dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item -Force "build/Release/shuati.exe" "$dist/"
+          Copy-Item -Force "install.ps1" "$dist/"
+          Copy-Item -Force "README.md" "$dist/"
+          Copy-Item -Force "CHANGELOG.md" "$dist/"
+          Copy-Item -Force -Recurse "build/vcpkg_installed/x64-windows/bin/*" "$dist/"
+          # Copy resources folder for JSON rules
+          if (Test-Path "resources") {
+            Copy-Item -Force -Recurse "resources" "$dist/"
+          }
+
+      - name: Pack (Windows .zip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd dist
+          7z a ../shuati-windows-x64-${{ github.ref_name }}.zip *
+
+      - name: Pack (Windows Installer .exe)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $ver = "${{ github.ref_name }}".TrimStart("v")
+          $env:SHUATI_VERSION = $ver
+          $env:SHUATI_OUTPUT_NAME = "shuati-setup-x64-${{ github.ref_name }}"
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) { throw "ISCC.exe not found: $iscc" }
+          & $iscc "installer\shuati.iss"
+
+      - name: Stage (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp -f build/shuati dist/
+          cp -f install.ps1 dist/ || true
+          cp -f README.md dist/ || true
+          cp -f CHANGELOG.md dist/ || true
+          # Copy resources folder for JSON rules
+          if [ -d "resources" ]; then
+            cp -rf resources dist/
+          fi
+          cp -f install.sh dist/ || true
+
+      - name: Pack (Linux/macOS .tar.gz)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          tar -czf "shuati-${{ runner.os }}-x64-${{ github.ref_name }}.tar.gz" -C dist .
+
+      - name: Checksums
+        shell: bash
+        run: |
+          sha_one () {
+            f="$1"
+            if command -v python3 &>/dev/null; then py=python3; else py=python; fi
+            $py -c "import hashlib, pathlib; p=pathlib.Path(r'''$f'''); h=hashlib.sha256(p.read_bytes()).hexdigest(); pathlib.Path(str(p)+'.sha256').write_text(f\"{h}  {p.name}\\n\"); print(h)"
+          }
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            sha_one "shuati-windows-x64-${{ github.ref_name }}.zip"
+            sha_one "shuati-setup-x64-${{ github.ref_name }}.exe"
+          else
+            sha_one "shuati-${{ runner.os }}-x64-${{ github.ref_name }}.tar.gz"
+          fi
+
+      - name: Upload Assets (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: assets-Windows
+          path: |
+            shuati-windows-x64-${{ github.ref_name }}.zip
+            shuati-windows-x64-${{ github.ref_name }}.zip.sha256
+            shuati-setup-x64-${{ github.ref_name }}.exe
+            shuati-setup-x64-${{ github.ref_name }}.exe.sha256
+
+      - name: Upload Assets (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: assets-Linux
+          path: |
+            shuati-Linux-x64-${{ github.ref_name }}.tar.gz
+            shuati-Linux-x64-${{ github.ref_name }}.tar.gz.sha256
+
+      - name: Upload Assets (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: assets-macOS
+          path: |
+            shuati-macOS-x64-${{ github.ref_name }}.tar.gz
+            shuati-macOS-x64-${{ github.ref_name }}.tar.gz.sha256
+
+  release:
+    name: Create GitHub Release
+    needs: build_assets
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') && (github.event_name != 'workflow_dispatch' || github.event.inputs.publish == 'true') && (github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: assets-*
+          merge-multiple: true
+
+      - name: Build Release Notes
+        shell: bash
+        run: |
+          ver="${VER#v}"
+          if [[ ! -f CHANGELOG.md ]]; then
+            printf "## %s\n\n(CHANGELOG.md not found)\n" "$ver" > RELEASE_NOTES.md
+            exit 0
+          fi
+          {
+            printf "## %s\n\n" "$ver"
+            awk -v ver="$ver" '
+              $0 ~ "^## \\[" ver "\\]" {found=1; next}
+              found && $0 ~ "^## \\[" {exit}
+              found {print}
+            ' CHANGELOG.md | sed -e 's/[[:space:]]*$//' | awk 'NF{p=1} p{print}'
+            echo ""
+          } > RELEASE_NOTES.md
+        env:
+          VER: ${{ github.ref_name }}
+
+      - name: Combine Checksums
+        shell: bash
+        run: |
+          cat *.sha256 > checksums.sha256
+
+      - name: Create/Upload Release (with retry)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          title="$tag"
+          files=(
+            "shuati-windows-x64-${tag}.zip"
+            "shuati-windows-x64-${tag}.zip.sha256"
+            "shuati-setup-x64-${tag}.exe"
+            "shuati-setup-x64-${tag}.exe.sha256"
+            "shuati-Linux-x64-${tag}.tar.gz"
+            "shuati-Linux-x64-${tag}.tar.gz.sha256"
+            "shuati-macOS-x64-${tag}.tar.gz"
+            "shuati-macOS-x64-${tag}.tar.gz.sha256"
+            "checksums.sha256"
+          )
+
+          for i in 1 2 3; do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "Release exists: $tag"
+              gh release edit "$tag" --notes-file RELEASE_NOTES.md
+            else
+              gh release create "$tag" --title "$title" --notes-file RELEASE_NOTES.md
+            fi
+
+            if gh release upload "$tag" "${files[@]}" --clobber; then
+              exit 0
+            fi
+            echo "Upload failed (attempt $i). Retrying..."
+            sleep $((i * 5))
+          done
+          exit 1
+
+      - name: Summary
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          repo="${GITHUB_REPOSITORY}"
+          {
+            echo "### Release $tag"
+            echo ""
+            echo "- https://github.com/${repo}/releases/tag/${tag}"
+            echo ""
+            echo "### Checksums"
+            echo ""
+            echo '```'
+            cat checksums.sha256
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Notify (optional)
+        shell: bash
+        env:
+          WEBHOOK: ${{ secrets.RELEASE_WEBHOOK_URL }}
+        run: |
+          if [[ -z "${WEBHOOK:-}" ]]; then
+            exit 0
+          fi
+          tag="${GITHUB_REF_NAME}"
+          repo="${GITHUB_REPOSITORY}"
+          export TAG="$tag"
+          export REPO="$repo"
+          payload="$(python3 -c "import json, os; tag=os.environ['TAG']; repo=os.environ['REPO']; print(json.dumps({'text': f'✅ {repo} 发布完成: {tag}\\\\nhttps://github.com/{repo}/releases/tag/{tag}'}))")"
+          curl -sS -X POST -H "Content-Type: application/json" -d "$payload" "$WEBHOOK"

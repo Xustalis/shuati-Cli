@@ -1,0 +1,47 @@
+name: Workflow Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actionlint
+        shell: bash
+        run: |
+          ver="1.7.10"
+          url="https://github.com/rhysd/actionlint/releases/download/v${ver}/actionlint_${ver}_linux_amd64.tar.gz"
+          curl -fsSL "$url" -o actionlint.tgz
+          tar -xzf actionlint.tgz actionlint
+          chmod +x ./actionlint
+      - name: Lint workflows
+        shell: bash
+        run: ./actionlint -no-color -shellcheck "" -pyflakes ""
+
+  release_tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Verify release tools
+        shell: bash
+        run: |
+          python tools/release/verify_release_logic.py
+          OUT_JSON=out/release_plan.json python tools/release/plan_release.py > /dev/null

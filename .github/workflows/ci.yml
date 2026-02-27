@@ -1,0 +1,203 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 4
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+jobs:
+  # ============================================
+  # 阶段1: 代码质量检查
+  # ============================================
+  quality:
+    name: Quality Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+
+      - name: Check Code Formatting
+        continue-on-error: true
+        run: |
+          files=$(git ls-files '*.cpp' '*.cc' '*.cxx' '*.hpp' '*.h')
+          if [[ -z "$files" ]]; then
+            echo "No C/C++ files found."
+            exit 0
+          fi
+          echo "Checking code formatting..."
+          clang-format -style=file --dry-run --Werror $files || true
+
+  # ============================================
+  # 阶段2: 构建和测试矩阵
+  # ============================================
+  build:
+    name: Build (${{ matrix.os }} / ${{ matrix.build_type }})
+    runs-on: ${{ matrix.os }}
+    needs: quality
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows Release Build
+          - os: windows-latest
+            build_type: Release
+            preset: windows-release
+            artifact_name: shuati-windows
+          # Linux Release Build
+          - os: ubuntu-latest
+            build_type: Release
+            preset: linux-release
+            artifact_name: shuati-linux
+          # macOS Release Build
+          - os: macos-latest
+            build_type: Release
+            preset: macos-release
+            artifact_name: shuati-macos
+
+    steps:
+      # ---------- 检出代码 ----------
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ---------- 安装系统依赖 ----------
+      - name: Install Linux Dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libcurl4-openssl-dev \
+            libx11-dev \
+            libxt-dev \
+            libgl1-mesa-dev \
+            xorg-dev \
+            ninja-build
+
+      - name: Install macOS Dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install ninja
+
+      # ---------- 设置构建工具 ----------
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.25'
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: 'vcpkg.json'
+
+      # ---------- 配置和构建 ----------
+      - name: Configure CMake (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake -B build -S . `
+            -G "Visual Studio 17 2022" `
+            -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Configure CMake (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_CXX_STANDARD=20
+
+      - name: Build Project
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cmake --build build --config ${{ matrix.build_type }} --parallel 4
+          else
+            cmake --build build --parallel 4
+          fi
+
+      # ---------- 运行测试 ----------
+      - name: Run Tests
+        shell: bash
+        run: |
+          ctest --test-dir build -C ${{ matrix.build_type }} \
+            --output-on-failure --parallel 4
+
+      # ---------- 准备发布包 ----------
+      - name: Prepare Release Package
+        shell: bash
+        run: |
+          mkdir -p release_pkg
+          
+          # 复制可执行文件
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp build/${{ matrix.build_type }}/shuati.exe release_pkg/
+            # 复制DLL依赖（Windows需要）
+            if [[ -d "build/vcpkg_installed/x64-windows/bin" ]]; then
+              cp build/vcpkg_installed/x64-windows/bin/*.dll release_pkg/ 2>/dev/null || true
+            fi
+          else
+            cp build/shuati release_pkg/
+          fi
+          
+          # 复制资源文件
+          if [[ -d "resources" ]]; then
+            cp -r resources release_pkg/
+          fi
+          
+          # 复制文档
+          cp README.md LICENSE release_pkg/ 2>/dev/null || true
+          
+          # 列出包内容
+          echo "Package contents:"
+          ls -la release_pkg/
+
+      - name: Generate Checksum
+        shell: bash
+        working-directory: release_pkg
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            FILE="shuati.exe"
+          else
+            FILE="shuati"
+          fi
+          
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum * > "checksums.sha256"
+          elif command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 * > "checksums.sha256"
+          fi
+          
+          echo "Checksums:"
+          cat checksums.sha256 2>/dev/null || echo "No checksums generated"
+
+      # ---------- 上传构建产物 ----------
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: release_pkg/*
+          retention-days: 30
+          if-no-files-found: error

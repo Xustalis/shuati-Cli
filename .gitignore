@@ -1,0 +1,101 @@
+# ============================================
+# Shuati CLI - Git Ignore Configuration
+# ============================================
+
+# Build directories
+build/
+build_*/
+out/
+cmake-build-*/
+.cache/
+dist/
+release/
+
+# Tools (keep release tools)
+!tools/release/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.sln.docstates
+*.ncb
+*.sdf
+*.opensdf
+compile_commands.json
+
+# Binaries
+*.exe
+*.pdb
+*.ilk
+*.obj
+*.o
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+
+# Specific Installer Exes (except source)
+installer/*.exe
+installer/assets/*.ico
+
+# vcpkg (local clone)
+vcpkg/
+vcpkg_installed/
+
+# Build validation artifacts
+build_validation/
+
+# shuati runtime & user data
+.shuati/
+*.db
+*.db-journal
+*.log
+logs/
+
+# Design Docs (Private)
+prd.md
+update.md
+TODO.md
+
+# OS generated files
+Thumbs.db
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Test outputs
+test-results/
+coverage/
+*.gcov
+*.gcda
+*.gcno
+
+# Documentation build
+docs/_build/
+docs/_site/

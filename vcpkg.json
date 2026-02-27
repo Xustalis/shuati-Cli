@@ -1,0 +1,15 @@
+{
+  "name": "shuati-cli",
+  "version-string": "0.0.1",
+  "builtin-baseline": "f310de9dc9f16bd016e06d6c9a1decc07a918273",
+  "dependencies": [
+    "cli11",
+    "nlohmann-json",
+    "cpr",
+    "sqlitecpp",
+    "replxx",
+    "fmt",
+    "ftxui",
+    "cpp-httplib"
+  ]
+}
