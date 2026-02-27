@@ -88,6 +88,7 @@ Thumbs.db
 *.temp
 temp/
 tmp/
+temp_*.txt
 
 # Test outputs
 test-results/

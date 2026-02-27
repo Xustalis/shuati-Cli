@@ -59,7 +59,7 @@ PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
-; Output settings
+; Output settings - use current directory for CI/CD compatibility
 OutputDir=.
 OutputBaseFilename={#MyOutputBaseFilename}
 
@@ -125,6 +125,14 @@ Source: "..\build\vcpkg_installed\x64-windows\bin\*.dll"; DestDir: "{app}"; Flag
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\shuati.exe"; Comment: "Shuati CLI - Algorithm Practice Tool"
 
+[Registry]
+; Add to PATH environment variable
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{#MyAppName}_is1"; ValueType: string; ValueName: "DisplayIcon"; ValueData: "{app}\shuati.exe"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{#MyAppName}_is1"; ValueType: string; ValueName: "Publisher"; ValueData: "{#MyAppPublisher}"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{#MyAppName}_is1"; ValueType: string; ValueName: "URLInfoAbout"; ValueData: "{#MyAppURL}"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{#MyAppName}_is1"; ValueType: string; ValueName: "HelpLink"; ValueData: "{#MyAppSupportURL}"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{#MyAppName}_is1"; ValueType: string; ValueName: "URLUpdateInfo"; ValueData: "{#MyAppUpdatesURL}"; Flags: uninsdeletevalue
+
 [CustomMessages]
 AddToPath=Add to PATH environment variable
 zh_CN.AddToPath=添加到 PATH 环境变量
@@ -132,3 +140,129 @@ AddContextMenu=Add "Open Shuati CLI Here" to Windows Explorer context menu
 zh_CN.AddContextMenu=在 Windows 资源管理器右键菜单中添加"在此处打开 Shuati CLI"
 AdditionalTasks=Additional tasks:
 zh_CN.AdditionalTasks=附加任务:
+
+[Code]
+const
+  WM_SETTINGCHANGE = $001A;
+  SMTO_ABORTIFHUNG = $0002;
+
+function SendMessageTimeout(hWnd: HWND; Msg: UINT; wParam: Longint; lParam: string; fuFlags, uTimeout: UINT; var lpdwResult: DWORD): UINT;
+  external 'SendMessageTimeoutW@user32.dll stdcall';
+
+function NormalizePath(const S: string): string;
+begin
+  Result := Trim(S);
+  if (Length(Result) > 0) and (Result[Length(Result)] = '\') then
+    Delete(Result, Length(Result), 1);
+end;
+
+function ContainsPath(const PathList: string; const Candidate: string): Boolean;
+var
+  P: string;
+  C: string;
+begin
+  P := ';' + Lowercase(NormalizePath(PathList)) + ';';
+  C := ';' + Lowercase(NormalizePath(Candidate)) + ';';
+  Result := Pos(C, P) > 0;
+end;
+
+procedure AddPath(const Dir: string);
+var
+  OldPath: string;
+  NewPath: string;
+  R: DWORD;
+begin
+  if not RegQueryStringValue(HKCU, 'Environment', 'Path', OldPath) then
+    OldPath := '';
+
+  if not ContainsPath(OldPath, Dir) then begin
+    if OldPath = '' then
+      NewPath := Dir
+    else
+      NewPath := OldPath + ';' + Dir;
+
+    if RegWriteExpandStringValue(HKCU, 'Environment', 'Path', NewPath) then begin
+      SendMessageTimeout(HWND_BROADCAST, WM_SETTINGCHANGE, 0, 'Environment', SMTO_ABORTIFHUNG, 5000, R);
+    end;
+  end;
+end;
+
+procedure RemovePath(const Dir: string);
+var
+  OldPath: string;
+  NewPath: string;
+  P: Integer;
+  Part: string;
+  R: DWORD;
+  QDir: string;
+begin
+  if not RegQueryStringValue(HKCU, 'Environment', 'Path', OldPath) then
+    Exit;
+
+  NewPath := '';
+  QDir := Lowercase(NormalizePath(Dir));
+
+  while OldPath <> '' do begin
+    P := Pos(';', OldPath);
+    if P = 0 then begin
+      Part := OldPath;
+      OldPath := '';
+    end else begin
+      Part := Copy(OldPath, 1, P - 1);
+      Delete(OldPath, 1, P);
+    end;
+
+    if Lowercase(NormalizePath(Part)) <> QDir then begin
+      if NewPath = '' then
+        NewPath := Part
+      else
+        NewPath := NewPath + ';' + Part;
+    end;
+  end;
+
+  if RegWriteExpandStringValue(HKCU, 'Environment', 'Path', NewPath) then begin
+      SendMessageTimeout(HWND_BROADCAST, WM_SETTINGCHANGE, 0, 'Environment', SMTO_ABORTIFHUNG, 5000, R);
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and WizardIsTaskSelected('addtopath') then begin
+    AddPath(ExpandConstant('{app}'));
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then begin
+    RemovePath(ExpandConstant('{app}'));
+  end;
+end;
+
+function InitializeSetup(): Boolean;
+var
+  Version: string;
+begin
+  Result := True;
+
+  ; Check if already installed
+  if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#MyAppName}_is1', 'DisplayVersion', Version) then begin
+    Log('Previous version detected: ' + Version);
+  end;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+
+  ; Custom validation can be added here
+  case CurPageID of
+    wpSelectDir: begin
+      ; Validate installation directory
+      if Pos(' ', ExpandConstant('{app}')) > 0 then begin
+        ; Warn about spaces in path but allow it
+        Log('Warning: Installation path contains spaces');
+      end;
+    end;
+  end;
+end;
