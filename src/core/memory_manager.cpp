@@ -88,8 +88,11 @@ bool MemoryManager::update_memory_from_response(const std::string& ai_response) 
                 }
             }
             return true;
-        } catch (const std::exception& e) {
+        } catch (const nlohmann::json::parse_error& e) {
             std::cerr << "Failed to parse memory update JSON: " << e.what() << "\n";
+            return false;
+        } catch (const std::exception& e) {
+            std::cerr << "Database error during memory update: " << e.what() << "\n";
             return false;
         }
     }

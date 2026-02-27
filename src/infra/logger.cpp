@@ -38,10 +38,15 @@ void Logger::log(LogLevel level, const std::string& message) {
     if (!initialized_ || !log_file_.is_open()) return;
 
     std::time_t now = std::time(nullptr);
-    std::tm* tm_now = std::localtime(&now);
+    std::tm tm_now{};
+#ifdef _WIN32
+    localtime_s(&tm_now, &now);
+#else
+    localtime_r(&now, &tm_now);
+#endif
 
     char time_buf[20];
-    std::strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", tm_now);
+    std::strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", &tm_now);
 
     const char* level_str = "";
     switch (level) {

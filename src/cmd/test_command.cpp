@@ -9,6 +9,7 @@
 #include <random>
 #include <nlohmann/json.hpp>
 #include <iomanip>
+#include <cstdlib>
 
 // Assuming these headers are available or we need to fix includes
 #include "shuati/utils/encoding.hpp"

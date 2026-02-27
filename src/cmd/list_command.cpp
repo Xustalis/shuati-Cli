@@ -107,7 +107,7 @@ void cmd_list(CommandContext& ctx) {
             std::string time_str = "-";
             if (p.last_checked_at > 0) {
                 std::time_t t = p.last_checked_at;
-                std::tm tm;
+                std::tm tm{};
                 #ifdef _WIN32
                 localtime_s(&tm, &t);
                 #else

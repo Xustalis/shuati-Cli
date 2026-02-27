@@ -232,13 +232,6 @@ ctest --test-dir build
 clang-format -i src/**/*.cpp include/**/*.hpp
 ```
 
-## 已知限制
-
-1. **平台支持**: 目前主要支持Windows平台，macOS和Linux支持正在完善中
-2. **AI功能**: 需要有效的DeepSeek API密钥才能使用AI辅助功能
-3. **浏览器集成**: 浏览器扩展Companion Server功能需要手动配置
-4. **多语言**: 当前版本主要支持中文和英文界面
-
 ## 贡献指南
 
 欢迎提交Issue和Pull Request！请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解详细信息。

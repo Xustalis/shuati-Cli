@@ -104,8 +104,14 @@ void BootGuard::record_history(const std::string& path) {
     });
 
     auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm tm_now{};
+#ifdef _WIN32
+    localtime_s(&tm_now, &now);
+#else
+    localtime_r(&now, &tm_now);
+#endif
     std::stringstream ss;
-    ss << std::put_time(std::localtime(&now), "%Y-%m-%d %H:%M:%S");
+    ss << std::put_time(&tm_now, "%Y-%m-%d %H:%M:%S");
     
     if (it != history.end()) {
         it->last_accessed = ss.str();

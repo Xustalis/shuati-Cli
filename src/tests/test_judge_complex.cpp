@@ -60,6 +60,8 @@ int main() {
     
     if (res.output.size() < 1024 * 1024) {
         std::cerr << "FAIL: Output truncated. Got " << (unsigned long long)res.output.size() << " bytes." << std::endl;
+        std::cerr << "Captured content (head): " << res.output.substr(0, 100) << std::endl;
+        std::cerr << "Captured error output: " << res.error_output << std::endl;
         std::filesystem::remove("large_out.cpp");
         #ifdef _WIN32
         std::filesystem::remove("large_out.exe");

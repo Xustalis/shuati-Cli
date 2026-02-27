@@ -58,6 +58,7 @@ public:
     UserProfile get_user_profile();
 
 private:
+    void init_indexes();
     std::unique_ptr<SQLite::Database> db_;
 };
 

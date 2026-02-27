@@ -8,6 +8,7 @@
 #include <sstream>
 #include <iostream>
 #include <system_error>
+#include <cstdlib>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -17,6 +18,8 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <algorithm>
 #endif
 
 #include <random>
@@ -270,6 +273,7 @@ JudgeResult Judge::run_case(const std::string& executable,
     // Pipes
     ScopedHandle hChildStd_IN_Rd, hChildStd_IN_Wr;
     ScopedHandle hChildStd_OUT_Rd, hChildStd_OUT_Wr;
+    ScopedHandle hChildStd_ERR_Rd, hChildStd_ERR_Wr;
 
     SECURITY_ATTRIBUTES saAttr; 
     saAttr.nLength = sizeof(SECURITY_ATTRIBUTES); 
@@ -278,6 +282,10 @@ JudgeResult Judge::run_case(const std::string& executable,
 
     if (!CreatePipe(hChildStd_OUT_Rd.receive(), hChildStd_OUT_Wr.receive(), &saAttr, 0)) return {Verdict::SE, 0, 0, "Pipe Error"};
     if (!SetHandleInformation(hChildStd_OUT_Rd.get(), HANDLE_FLAG_INHERIT, 0)) return {Verdict::SE, 0, 0, "Handle Error"};
+    
+    if (!CreatePipe(hChildStd_ERR_Rd.receive(), hChildStd_ERR_Wr.receive(), &saAttr, 0)) return {Verdict::SE, 0, 0, "Pipe Error"};
+    if (!SetHandleInformation(hChildStd_ERR_Rd.get(), HANDLE_FLAG_INHERIT, 0)) return {Verdict::SE, 0, 0, "Handle Error"};
+
     if (!CreatePipe(hChildStd_IN_Rd.receive(), hChildStd_IN_Wr.receive(), &saAttr, 0)) return {Verdict::SE, 0, 0, "Pipe Error"};
     if (!SetHandleInformation(hChildStd_IN_Wr.get(), HANDLE_FLAG_INHERIT, 0)) return {Verdict::SE, 0, 0, "Handle Error"};
 
@@ -285,7 +293,7 @@ JudgeResult Judge::run_case(const std::string& executable,
     PROCESS_INFORMATION pi;
     ZeroMemory(&si, sizeof(si));
     si.cb = sizeof(si);
-    si.hStdError = hChildStd_OUT_Wr.get();
+    si.hStdError = hChildStd_ERR_Wr.get();
     si.hStdOutput = hChildStd_OUT_Wr.get();
     si.hStdInput = hChildStd_IN_Rd.get();
     si.dwFlags |= STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
@@ -293,12 +301,11 @@ JudgeResult Judge::run_case(const std::string& executable,
 
     ZeroMemory(&pi, sizeof(pi));
 
-    ZeroMemory(&pi, sizeof(pi));
-
     auto start_time = std::chrono::high_resolution_clock::now();
 
     if (!CreateProcessA(NULL, const_cast<char*>(cmd_line.c_str()), NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
-        return {Verdict::RE, 0, 0, "CreateProcess failed"};
+        std::string msg = fmt::format("CreateProcess failed: {}", GetLastError());
+        return {Verdict::RE, 0, 0, msg, "", "", msg, ""};
     }
     
     // Automatically close process handles when function returns
@@ -307,68 +314,67 @@ JudgeResult Judge::run_case(const std::string& executable,
 
     // Close handles intended for child in parent
     hChildStd_OUT_Wr.close();
+    hChildStd_ERR_Wr.close();
     hChildStd_IN_Rd.close();
 
-    // Write input in a separate thread to prevent deadlock
-    // (If user output fills pipe while we write input)
+    // Write input in a separate thread
     std::thread writer([h = std::move(hChildStd_IN_Wr), data = tc.input]() mutable {
-        DWORD dwWritten;
-        WriteFile(h.get(), data.c_str(), (DWORD)data.size(), &dwWritten, NULL);
-        h.close(); // Close so child gets EOF
+        if (!data.empty()) {
+            DWORD dwWritten;
+            WriteFile(h.get(), data.c_str(), (DWORD)data.size(), &dwWritten, NULL);
+        }
+        h.close(); 
     });
-    writer.detach();
 
-    std::string output;
+    std::string output, error_output;
+    const size_t MAX_CAPTURE = 4 * 1024 * 1024; // 4MB limit
+
+    // Drain stdout
+    std::thread reader_out([&]() {
+        char buffer[4096];
+        DWORD dwRead;
+        while (ReadFile(hChildStd_OUT_Rd.get(), buffer, sizeof(buffer), &dwRead, NULL) && dwRead > 0) {
+            if (output.size() < MAX_CAPTURE) {
+                size_t to_copy = std::min((size_t)dwRead, MAX_CAPTURE - output.size());
+                output.append(buffer, to_copy);
+            }
+        }
+    });
+
+    // Drain stderr
+    std::thread reader_err([&]() {
+        char buffer[4096];
+        DWORD dwRead;
+        while (ReadFile(hChildStd_ERR_Rd.get(), buffer, sizeof(buffer), &dwRead, NULL) && dwRead > 0) {
+             if (error_output.size() < MAX_CAPTURE) {
+                size_t to_copy = std::min((size_t)dwRead, MAX_CAPTURE - error_output.size());
+                error_output.append(buffer, to_copy);
+            }
+        }
+    });
+
     bool finished = false;
     DWORD exit_code = 0;
     
-    while (true) {
-        // ... (rest is same)
-        // Check if process has exited
-        if (WaitForSingleObject(hProcess.get(), 0) == WAIT_OBJECT_0) {
-            finished = true;
-            GetExitCodeProcess(hProcess.get(), &exit_code);
-            break;
-        }
-
-        // Check timeout
-        auto now = std::chrono::high_resolution_clock::now();
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count() > time_limit_ms) {
-            finished = false; // TLE
-            break;
-        }
-
-        // Read available data
-        DWORD dwRead, dwAvail;
-        bool has_data = false;
-        if (PeekNamedPipe(hChildStd_OUT_Rd.get(), NULL, 0, NULL, &dwAvail, NULL) && dwAvail > 0) {
-            char buffer[4096];
-            if (ReadFile(hChildStd_OUT_Rd.get(), buffer, sizeof(buffer), &dwRead, NULL) && dwRead > 0) {
-                output.append(buffer, dwRead);
-                has_data = true;
-            }
-        } 
-        
-        if (!has_data) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
+    if (WaitForSingleObject(hProcess.get(), time_limit_ms) == WAIT_OBJECT_0) {
+        finished = true;
+        GetExitCodeProcess(hProcess.get(), &exit_code);
+    } else {
+        TerminateProcess(hProcess.get(), 1);
+        finished = false;
     }
+
+    // Wait for IO threads to finish (handles closed by child exit or termination)
+    if (writer.joinable()) writer.join();
+    if (reader_out.joinable()) reader_out.join();
+    if (reader_err.joinable()) reader_err.join();
 
     auto end_time = std::chrono::high_resolution_clock::now();
     res.time_ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
 
-    // Read any remaining output after exit
-    DWORD dwRead;
-    char buffer[4096];
-    while (ReadFile(hChildStd_OUT_Rd.get(), buffer, sizeof(buffer), &dwRead, NULL) && dwRead > 0) {
-        output.append(buffer, dwRead);
-    }
-
     if (!finished) {
-        TerminateProcess(hProcess.get(), 1);
         res.verdict = Verdict::TLE;
     } else {
-        // Check Memory
         PROCESS_MEMORY_COUNTERS pmc;
         if (GetProcessMemoryInfo(hProcess.get(), &pmc, sizeof(pmc))) {
              res.memory_kb = pmc.PeakPagefileUsage / 1024;
@@ -376,13 +382,14 @@ JudgeResult Judge::run_case(const std::string& executable,
         }
 
         if (res.verdict != Verdict::MLE) {
+             res.output = output;
+             res.error_output = error_output;
+             
              if (exit_code != 0) {
                 res.verdict = Verdict::RE;
                 res.message = fmt::format("Exit code: {}", exit_code);
             } else {
                 res.verdict = Verdict::AC;
-                res.output = output; 
-                // Only now check output
                 res.verdict = check_output(output, tc.output);
             }
         }
@@ -400,36 +407,38 @@ JudgeResult Judge::run_case(const std::string& executable,
     res.input = tc.input;
     res.expected = tc.output;
 
-    // Use TempFile for input/output buffering if pipes are tricky with large data, 
-    // but pipes are generally fine for stdio
-    int pipe_in[2], pipe_out[2];
-    if (pipe(pipe_in) < 0 || pipe(pipe_out) < 0) return {Verdict::SE, 0, 0, "Pipe failed"};
+    int pipe_in[2], pipe_out[2], pipe_err[2];
+    if (pipe(pipe_in) < 0 || pipe(pipe_out) < 0 || pipe(pipe_err) < 0) {
+        return {Verdict::SE, 0, 0, "Pipe creation failed"};
+    }
 
     auto start_time = std::chrono::steady_clock::now();
     pid_t pid = fork();
 
     if (pid < 0) {
+        close(pipe_in[0]); close(pipe_in[1]);
+        close(pipe_out[0]); close(pipe_out[1]);
+        close(pipe_err[0]); close(pipe_err[1]);
         return {Verdict::SE, 0, 0, "Fork failed"};
     } else if (pid == 0) {
         // Child
         // Redirect stdin
-        dup2(pipe_in[0], STDIN_FILENO);
-        close(pipe_in[0]);
-        close(pipe_in[1]);
+        if (dup2(pipe_in[0], STDIN_FILENO) == -1) exit(1);
+        
+        // Redirect stdout/stderr
+        if (dup2(pipe_out[1], STDOUT_FILENO) == -1) exit(1);
+        if (dup2(pipe_err[1], STDERR_FILENO) == -1) exit(1);
 
-        // Redirect stdout
-        dup2(pipe_out[1], STDOUT_FILENO);
-        close(pipe_out[1]);
-        close(pipe_out[0]);
+        // Close all pipe fds
+        close(pipe_in[0]); close(pipe_in[1]);
+        close(pipe_out[0]); close(pipe_out[1]);
+        close(pipe_err[0]); close(pipe_err[1]);
 
         // Execute
-        // Split executable for python cases: "python script.py"
         std::vector<std::string> args_vec;
         if (executable.find("python") == 0) {
             args_vec.push_back("python3");
-            // Primitive parsing, assuming "python script.py"
             std::string script = executable.substr(7); 
-            // remove quotes
              if (script.front() == '"') script = script.substr(1, script.length()-2);
             args_vec.push_back(script);
         } else {
@@ -441,95 +450,156 @@ JudgeResult Judge::run_case(const std::string& executable,
         args.push_back(nullptr);
 
         execvp(args[0], args.data());
-        exit(127); // Command not found
+        
+        // If exec fails, print to stderr so parent can capture it
+        std::cerr << "Exec failed: " << errno << std::endl;
+        exit(127); 
     } else {
         // Parent
         close(pipe_in[0]);
         close(pipe_out[1]);
+        close(pipe_err[1]);
 
-        // Write input
-        if (::write(pipe_in[1], tc.input.c_str(), tc.input.size()) < 0) {}
+        // Set non-blocking read
+        fcntl(pipe_out[0], F_SETFL, O_NONBLOCK);
+        fcntl(pipe_err[0], F_SETFL, O_NONBLOCK);
+
+        // Write input (blocking write for simplicity, assuming small input or pipe buffer enough)
+        // If input is large, this should be non-blocking too, but to keep it simple and focus on output drain:
+        if (!tc.input.empty()) {
+            size_t total_written = 0;
+            while (total_written < tc.input.size()) {
+                ssize_t w = write(pipe_in[1], tc.input.c_str() + total_written, tc.input.size() - total_written);
+                if (w < 0) break;
+                total_written += w;
+            }
+        }
         close(pipe_in[1]); 
 
-        // Wait loop
-        int status;
-        bool finished = false;
-        auto start_wait = std::chrono::steady_clock::now();
+        std::string output, error_output;
+        const size_t MAX_CAPTURE = 4 * 1024 * 1024; // 4MB
 
+        struct pollfd pfd[2];
+        pfd[0].fd = pipe_out[0]; pfd[0].events = POLLIN;
+        pfd[1].fd = pipe_err[0]; pfd[1].events = POLLIN;
+
+        bool finished = false;
+        int status = 0;
         long long max_memory_kb = 0;
 
-        while(true) {
-            pid_t w = waitpid(pid, &status, WNOHANG);
-            if (w == pid) {
-                finished = true;
-                break;
-            }
+        // Loop until both pipes are closed (EOF)
+        bool out_closed = false;
+        bool err_closed = false;
+
+        while (!out_closed || !err_closed) {
             // Timeout check
             auto now = std::chrono::steady_clock::now();
-            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start_wait).count() > time_limit_ms) {
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count() > time_limit_ms) {
                 break;
             }
 
-            // Check memory usage via /proc/[pid]/status
-            std::string status_path = fmt::format("/proc/{}/status", pid);
+            int ret = poll(pfd, 2, 10); // 10ms timeout
+            if (ret < 0 && errno != EINTR) break;
+
+            // Read stdout
+            if (!out_closed) {
+                if (pfd[0].revents & (POLLIN | POLLHUP | POLLERR)) {
+                    char buffer[4096];
+                    ssize_t n = read(pipe_out[0], buffer, sizeof(buffer));
+                    if (n > 0) {
+                        if (output.size() < MAX_CAPTURE) {
+                            output.append(buffer, std::min((size_t)n, MAX_CAPTURE - output.size()));
+                        }
+                    } else if (n == 0) {
+                        out_closed = true;
+                    } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                         out_closed = true;
+                    }
+                }
+            }
+
+            // Read stderr
+            if (!err_closed) {
+                if (pfd[1].revents & (POLLIN | POLLHUP | POLLERR)) {
+                    char buffer[4096];
+                    ssize_t n = read(pipe_err[0], buffer, sizeof(buffer));
+                    if (n > 0) {
+                        if (error_output.size() < MAX_CAPTURE) {
+                            error_output.append(buffer, std::min((size_t)n, MAX_CAPTURE - error_output.size()));
+                        }
+                    } else if (n == 0) {
+                        err_closed = true;
+                    } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                         err_closed = true;
+                    }
+                }
+            }
+
+            // Check memory usage periodically
+             std::string status_path = fmt::format("/proc/{}/status", pid);
             if (fs::exists(status_path)) {
                 std::ifstream f(status_path);
                 std::string line;
                 while (std::getline(f, line)) {
-                    if (line.compare(0, 6, "VmPeak") == 0) { // Or VmHWM
+                    if (line.compare(0, 6, "VmPeak") == 0) {
                          std::stringstream ss(line);
-                         std::string label;
+                         std::string label, unit;
                          long long val;
-                         ss >> label >> val;
+                         ss >> label >> val >> unit;
                          if (val > max_memory_kb) max_memory_kb = val;
                          break;
                     }
                 }
             }
-            if (max_memory_kb > memory_limit_kb) {
-                 // MLE detected, kill process immediately
+             if (max_memory_kb > memory_limit_kb) {
                  kill(pid, SIGKILL);
                  res.verdict = Verdict::MLE;
                  res.memory_kb = max_memory_kb;
-                 finished = true; // technically finished by our kill
-                 waitpid(pid, &status, 0); // reap
-                 break;
+                 waitpid(pid, &status, 0);
+                 finished = true; 
+                 out_closed = true; err_closed = true;
             }
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
+        
+        close(pipe_out[0]);
+        close(pipe_err[0]);
 
         if (res.verdict == Verdict::MLE) {
-            // Already handled above
-        } else if (!finished) {
-            kill(pid, SIGKILL);
-            waitpid(pid, &status, 0);
-            res.verdict = Verdict::TLE;
-             res.time_ms = time_limit_ms;
+            // Already handled
         } else {
-            auto end_time = std::chrono::steady_clock::now();
-            res.time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_wait).count();
-            res.memory_kb = max_memory_kb;
+             // Check if process finished
+             int w = waitpid(pid, &status, WNOHANG);
+             if (w == 0) {
+                 // Still running, so it must be TLE
+                 kill(pid, SIGKILL);
+                 waitpid(pid, &status, 0);
+                 res.verdict = Verdict::TLE;
+                 res.time_ms = time_limit_ms;
+             } else {
+                 finished = true;
+                 auto end_time = std::chrono::steady_clock::now();
+                 res.time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+                 res.memory_kb = max_memory_kb;
+                 
+                 res.output = output;
+                 res.error_output = error_output;
 
-             if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-                res.verdict = Verdict::RE;
-                res.message = fmt::format("Exit code: {}", WEXITSTATUS(status));
-            } else if (WIFSIGNALED(status)) {
-                res.verdict = Verdict::RE;
-                res.message = fmt::format("Signal: {}", WTERMSIG(status));
-            } else {
-                // Read output
-                std::vector<char> buffer(4096);
-                std::string output;
-                ssize_t bytes;
-                while((bytes = read(pipe_out[0], buffer.data(), buffer.size())) > 0) {
-                    output.append(buffer.data(), bytes);
+                 if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+                    res.verdict = Verdict::RE;
+                    res.message = fmt::format("Exit code: {}", WEXITSTATUS(status));
+                    // If exec failed (exit 127), ensure output is not empty for tests
+                    if (WEXITSTATUS(status) == 127 && res.output.empty() && !res.error_output.empty()) {
+                         res.output = "Exec failed: " + res.error_output;
+                    }
+                } else if (WIFSIGNALED(status)) {
+                    res.verdict = Verdict::RE;
+                    res.message = fmt::format("Signal: {}", WTERMSIG(status));
+                } else {
+                    res.verdict = Verdict::AC;
+                    res.verdict = check_output(output, tc.output);
                 }
-                res.output = output;
-                res.verdict = check_output(output, tc.output);
-            }
+             }
         }
-        close(pipe_out[0]);
     }
     return res;
 }
@@ -609,9 +679,12 @@ JudgeResult Judge::run_process_redirect(const std::string& cmd,
     res.time_ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     res.memory_kb = 0;
     
-    if (ret != 0) {
+    if (WIFEXITED(ret) && WEXITSTATUS(ret) != 0) {
         res.verdict = Verdict::RE;
-        res.message = fmt::format("Exit code {}", ret);
+        res.message = fmt::format("Exit code {}", WEXITSTATUS(ret));
+    } else if (WIFSIGNALED(ret)) {
+        res.verdict = Verdict::RE;
+        res.message = fmt::format("Signal {}", WTERMSIG(ret));
     } else {
         if (res.time_ms > time_limit_ms) res.verdict = Verdict::TLE;
         else res.verdict = Verdict::AC;

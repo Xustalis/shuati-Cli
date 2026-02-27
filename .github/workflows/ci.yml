@@ -114,6 +114,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          # Install MinGW for g++ if not present (VS generator uses MSVC, but Judge might need g++)
+          # Actually, let's just ensure we use MSVC for everything and fix Judge if needed.
+          # But for "One-shot fix", installing MinGW is safer as Judge hardcodes "g++".
+          choco install mingw --force --no-progress
+          
           cmake -B build -S . `
             -G "Visual Studio 17 2022" `
             -A x64 `
@@ -182,6 +187,12 @@ jobs:
             FILE="shuati.exe"
           else
             FILE="shuati"
+          fi
+          
+          # Package resources directory if it exists to avoid directory checksum errors
+          if [[ -d "resources" ]]; then
+            tar -czf resources.tar.gz resources/
+            rm -rf resources/
           fi
           
           if command -v sha256sum >/dev/null 2>&1; then

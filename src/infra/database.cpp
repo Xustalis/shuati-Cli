@@ -67,8 +67,9 @@ Database::Database(const std::string& db_path) {
         std::filesystem::create_directories(p.parent_path());
 
     db_ = std::make_unique<SQLite::Database>(db_path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
+    db_->exec("PRAGMA foreign_keys = ON;");
     init_schema();
-    init_indexes(); // 新增：初始化索引
+    this->init_indexes(); // 新增：初始化索引
 }
 
 void Database::init_schema() {
@@ -194,7 +195,15 @@ void Database::init_indexes() {
     db_->exec("CREATE INDEX IF NOT EXISTS idx_test_cases_problem ON test_cases(problem_id)");
     
     // 记忆系统索引
-    db_->exec("CREATE INDEX IF NOT EXISTS idx_memory_mistakes_pattern ON memory_mistakes(pattern)");
+    // Fix: ON CONFLICT(pattern) requires a unique index on pattern
+    try {
+        db_->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_mistakes_pattern_uniq ON memory_mistakes(pattern)");
+    } catch (...) {}
+    
+    // Keep old non-unique index or drop it? Better to keep it or ignore if redundant. 
+    // If we have unique index on pattern, we don't need non-unique one.
+    // But to be safe and minimal changes, we just add the unique one required for UPSERT.
+    
     db_->exec("CREATE INDEX IF NOT EXISTS idx_memory_mistakes_freq ON memory_mistakes(frequency DESC, last_seen DESC)");
 }
 
