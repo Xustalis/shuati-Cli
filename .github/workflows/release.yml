@@ -33,6 +33,7 @@ jobs:
     env:
       CMAKE_BUILD_PARALLEL_LEVEL: 4
       VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      INSTALLER_NAME: "shuati-setup-x64-${{ github.ref_name }}.exe"
 
     steps:
       - uses: actions/checkout@v4
@@ -204,6 +205,26 @@ jobs:
           $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
           if (!(Test-Path $iscc)) { throw "ISCC.exe not found: $iscc" }
           & $iscc "installer\shuati.iss"
+          
+          # Verify installer was created and rename to consistent name
+          $expectedInstaller = "${{ env.INSTALLER_NAME }}"
+          if (Test-Path $expectedInstaller) {
+            Write-Host "Installer created: $expectedInstaller"
+          } else {
+            # Try to find the installer
+            $exeFile = Get-ChildItem -Recurse -Filter "*.exe" | Where-Object { $_.Name -match "shuati.*setup|setup.*shuati|installer" } | Select-Object -First 1
+            if (-not $exeFile) {
+              $exeFile = Get-ChildItem -Recurse -Filter "*.exe" | Select-Object -First 1
+            }
+            if ($exeFile) {
+              Write-Host "Found installer at: $($exeFile.FullName), renaming to $expectedInstaller"
+              Copy-Item $exeFile.FullName $expectedInstaller
+            } else {
+              Write-Error "No installer exe found!"
+              Get-ChildItem -Recurse -Filter "*.exe"
+              exit 1
+            }
+          }
 
       - name: Stage (Linux/macOS)
         if: runner.os != 'Windows'
@@ -226,20 +247,43 @@ jobs:
         run: |
           tar -czf "shuati-${{ runner.os }}-x64-${{ github.ref_name }}.tar.gz" -C dist .
 
-      - name: Checksums
+      - name: Checksums (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Hash ZIP file
+          $zipFile = "shuati-windows-x64-${{ github.ref_name }}.zip"
+          if (Test-Path $zipFile) {
+            $hash = (Get-FileHash -Algorithm SHA256 $zipFile).Hash
+            "$hash  $zipFile" | Out-File -FilePath "$zipFile.sha256" -Encoding utf8
+            Write-Host "$zipFile`: $hash"
+          } else {
+            Write-Error "ZIP file not found: $zipFile"
+            exit 1
+          }
+          
+          # Hash installer exe
+          $exeFile = "${{ env.INSTALLER_NAME }}"
+          if (Test-Path $exeFile) {
+            $hash = (Get-FileHash -Algorithm SHA256 $exeFile).Hash
+            "$hash  $exeFile" | Out-File -FilePath "$exeFile.sha256" -Encoding utf8
+            Write-Host "$exeFile`: $hash"
+          } else {
+            Write-Error "Installer exe not found: $exeFile"
+            Get-ChildItem -Recurse -Filter "*.exe"
+            exit 1
+          }
+
+      - name: Checksums (Linux/macOS)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           sha_one () {
             f="$1"
             if command -v python3 &>/dev/null; then py=python3; else py=python; fi
-            $py -c "import hashlib, pathlib; p=pathlib.Path(r'''$f'''); h=hashlib.sha256(p.read_bytes()).hexdigest(); pathlib.Path(str(p)+'.sha256').write_text(f\"{h}  {p.name}\\n\"); print(h)"
+            $py -c "import hashlib, pathlib; p=pathlib.Path(r'''$f'''); h=hashlib.sha256(p.read_bytes()).hexdigest(); pathlib.Path(str(p)+'.sha256').write_text(f\"{h}  {p.name}\n\"); print(h)"
           }
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            sha_one "shuati-windows-x64-${{ github.ref_name }}.zip"
-            sha_one "shuati-setup-x64-${{ github.ref_name }}.exe"
-          else
-            sha_one "shuati-${{ runner.os }}-x64-${{ github.ref_name }}.tar.gz"
-          fi
+          sha_one "shuati-${{ runner.os }}-x64-${{ github.ref_name }}.tar.gz"
 
       - name: Upload Assets (Windows)
         if: runner.os == 'Windows'
@@ -249,8 +293,8 @@ jobs:
           path: |
             shuati-windows-x64-${{ github.ref_name }}.zip
             shuati-windows-x64-${{ github.ref_name }}.zip.sha256
-            shuati-setup-x64-${{ github.ref_name }}.exe
-            shuati-setup-x64-${{ github.ref_name }}.exe.sha256
+            ${{ env.INSTALLER_NAME }}
+            ${{ env.INSTALLER_NAME }}.sha256
 
       - name: Upload Assets (Linux)
         if: runner.os == 'Linux'
@@ -317,17 +361,40 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME}"
           title="$tag"
-          files=(
-            "shuati-windows-x64-${tag}.zip"
-            "shuati-windows-x64-${tag}.zip.sha256"
-            "shuati-setup-x64-${tag}.exe"
-            "shuati-setup-x64-${tag}.exe.sha256"
-            "shuati-Linux-x64-${tag}.tar.gz"
-            "shuati-Linux-x64-${tag}.tar.gz.sha256"
-            "shuati-macOS-x64-${tag}.tar.gz"
-            "shuati-macOS-x64-${tag}.tar.gz.sha256"
-            "checksums.sha256"
-          )
+          
+          # Find all files to upload
+          zip_file=$(ls shuati-windows-x64-*.zip 2>/dev/null | head -1)
+          zip_hash=$(ls shuati-windows-x64-*.zip.sha256 2>/dev/null | head -1)
+          installer=$(ls shuati-setup-x64-*.exe 2>/dev/null | head -1)
+          installer_hash=$(ls shuati-setup-x64-*.exe.sha256 2>/dev/null | head -1)
+          linux_tar=$(ls shuati-Linux-x64-*.tar.gz 2>/dev/null | head -1)
+          linux_hash=$(ls shuati-Linux-x64-*.tar.gz.sha256 2>/dev/null | head -1)
+          macos_tar=$(ls shuati-macOS-x64-*.tar.gz 2>/dev/null | head -1)
+          macos_hash=$(ls shuati-macOS-x64-*.tar.gz.sha256 2>/dev/null | head -1)
+          
+          # Build files array with only existing files
+          files=()
+          [[ -f "$zip_file" ]] && files+=("$zip_file")
+          [[ -f "$zip_hash" ]] && files+=("$zip_hash")
+          [[ -f "$installer" ]] && files+=("$installer")
+          [[ -f "$installer_hash" ]] && files+=("$installer_hash")
+          [[ -f "$linux_tar" ]] && files+=("$linux_tar")
+          [[ -f "$linux_hash" ]] && files+=("$linux_hash")
+          [[ -f "$macos_tar" ]] && files+=("$macos_tar")
+          [[ -f "$macos_hash" ]] && files+=("$macos_hash")
+          [[ -f "checksums.sha256" ]] && files+=("checksums.sha256")
+          
+          echo "Files to upload:"
+          printf '%s\n' "${files[@]}"
+          
+          # Verify installer exists
+          if [[ -z "$installer" ]] || [[ ! -f "$installer" ]]; then
+            echo "ERROR: Windows installer not found!"
+            echo "Available files:"
+            ls -la *.exe 2>/dev/null || echo "No .exe files found"
+            ls -la
+            exit 1
+          fi
 
           for i in 1 2 3; do
             if gh release view "$tag" >/dev/null 2>&1; then
@@ -374,5 +441,5 @@ jobs:
           repo="${GITHUB_REPOSITORY}"
           export TAG="$tag"
           export REPO="$repo"
-          payload="$(python3 -c "import json, os; tag=os.environ['TAG']; repo=os.environ['REPO']; print(json.dumps({'text': f'✅ {repo} 发布完成: {tag}\\\\nhttps://github.com/{repo}/releases/tag/{tag}'}))")"
+          payload="$(python3 -c "import json, os; tag=os.environ['TAG']; repo=os.environ['REPO']; print(json.dumps({'text': f'✅ {repo} 发布完成: {tag}\nhttps://github.com/{repo}/releases/tag/{tag}'}))")"
           curl -sS -X POST -H "Content-Type: application/json" -d "$payload" "$WEBHOOK"
