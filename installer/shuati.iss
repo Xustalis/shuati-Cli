@@ -125,6 +125,10 @@ Source: "..\build\vcpkg_installed\x64-windows\bin\*.dll"; DestDir: "{app}"; Flag
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\shuati.exe"; Comment: "Shuati CLI - Algorithm Practice Tool"
 
-[Tasks]
-Name: "addtopath"; Description: "{cm:AddToPath}"; GroupDescription: "{cm:AdditionalTasks}"
-Name: "contextmenu"; Description: "{cm:AddContextMenu}"; GroupDescription: "{cm:AdditionalTasks}"; Flags: unchecked
+[CustomMessages]
+AddToPath=Add to PATH environment variable
+zh_CN.AddToPath=添加到 PATH 环境变量
+AddContextMenu=Add "Open Shuati CLI Here" to Windows Explorer context menu
+zh_CN.AddContextMenu=在 Windows 资源管理器右键菜单中添加"在此处打开 Shuati CLI"
+AdditionalTasks=Additional tasks:
+zh_CN.AdditionalTasks=附加任务:
