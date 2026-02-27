@@ -1,14 +1,48 @@
+<div align="center">
+
+```text
+  ███████╗██╗  ██╗██╗   ██╗ █████╗ ████████╗██╗
+  ██╔════╝██║  ██║██║   ██║██╔══██╗╚══██╔══╝██║
+  ███████╗███████║██║   ██║███████║   ██║   ██║
+  ╚════██║██╔══██║██║   ██║██╔══██║   ██║   ██║
+  ███████║██║  ██║╚██████╔╝██║  ██║   ██║   ██║
+  ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝
+```
+
 # Shuati CLI
 
-[![CI](https://github.com/Xustalis/shuati-Cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Xustalis/shuati-Cli/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-v0.0.1-blue.svg)](https://github.com/Xustalis/shuati-Cli/releases)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+**专为算法爱好者打造的本地化、智能化命令行工具**
+
+[![Version](https://img.shields.io/badge/version-1.5.4-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
+[![CI](https://github.com/Xustalis/shuati-Cli/actions/workflows/release.yml/badge.svg)](https://github.com/Xustalis/shuati-Cli/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![C++20](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
+
+[🚀 快速开始](#-15分钟快速上手) • [📥 安装指南](#-安装指南) • [✨ 核心特性](#-核心特性) • [📚 文档](#-详细文档) • [❓ FAQ](#-常见问题)
+
+</div>
+
+---
 
 ## 项目简介
 
-**Shuati CLI** 是一款专为算法竞赛选手和编程爱好者设计的命令行工具，帮助用户高效管理算法练习题、追踪学习进度、分析错误模式，并提供智能复习建议。
+**Shuati CLI** 是一款专为oier和coder设计的命令行工具，帮助用户高效管理算法练习题、追踪学习进度、分析错误模式，并提供智能复习建议。
 
-"刷题"（Shuati）在中文编程社区中意为"练习算法题目"，本工具正是为了帮助用户更好地进行这项活动而诞生。
+### 🛠️ 工作流演示
+
+```mermaid
+graph LR
+    A[🔍 发现题目] -->|shuati pull| B("📥 本地数据库")
+
+    B -->|shuati solve| C{💻 编写代码}
+    C -->|Auto Open| D[📝 编辑器 VSCode/Vim]
+    D -->|Save| E[💾 源码文件]
+    E -->|shuati test| F{⚡ 本地判题}
+    F -->|❌ 失败| D
+    F -->|✅ 通过| G[🚀 提交记录]
+    G -->|shuati submit| H((🧠 记忆强化))
+    H -.->|复习提醒| A
+```
 
 ## 核心功能
 
@@ -257,7 +291,7 @@ clang-format -i src/**/*.cpp include/**/*.hpp
 ## 联系我们
 
 - **GitHub Issues**: [提交问题](https://github.com/Xustalis/shuati-Cli/issues)
-- **Email**: support@shuati-cli.dev
+- **Email**: gmxenith@gmail.com
 
 ---
 
