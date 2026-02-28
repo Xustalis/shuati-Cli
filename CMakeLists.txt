@@ -178,6 +178,14 @@ add_shuati_test(test_crawler_matiji
     LINK_LIBS SQLiteCpp cpr::cpr nlohmann_json::nlohmann_json
 )
 
+add_shuati_test(test_crawler_lanqiao
+    src/tests/test_crawler_lanqiao.cpp
+    EXTRA_SOURCES
+        src/adapters/lanqiao_crawler.cpp
+        src/utils/encoding.cpp
+    LINK_LIBS cpr::cpr
+)
+
 # Print configuration summary
 message(STATUS "")
 message(STATUS "Shuati CLI Configuration:")
