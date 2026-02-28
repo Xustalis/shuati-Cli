@@ -47,7 +47,7 @@ graph LR
 ## 核心功能
 
 ### 🎯 题目管理
-- **多平台支持**: 支持从 Codeforces、LeetCode、洛谷、蓝桥云课等平台自动抓取题目
+- **多平台支持**: 支持从 Codeforces、LeetCode、洛谷、蓝桥云课、马蹄集等平台自动抓取题目
 - **本地题目创建**: 支持手动创建本地题目，记录个人练习内容
 - **统一存储**: 所有题目以Markdown格式存储，便于阅读和编辑
 - **标签系统**: 支持为题目添加难度、标签等元数据
@@ -71,6 +71,26 @@ graph LR
 - **本地编译**: 支持C++、Python等语言的本地编译和运行
 - **测试用例**: 自动获取样例测试用例进行验证
 - **性能分析**: 检测时间复杂度和空间复杂度
+
+
+### 爬虫稳健性配置（可选）
+
+可通过环境变量调优抓取策略：
+
+```bash
+export SHUATI_CRAWLER_TIMEOUT_MS=12000
+export SHUATI_CRAWLER_MAX_RETRIES=3
+export SHUATI_CRAWLER_MIN_INTERVAL_MS=300
+export SHUATI_CRAWLER_BACKOFF_BASE_MS=400
+export SHUATI_CRAWLER_PROXIES="http://127.0.0.1:7890,http://127.0.0.1:7891"
+```
+
+### 爬虫测试与数据集
+
+```bash
+python3 tools/testing/generate_crawler_test_dataset.py
+python3 tools/testing/mock_matiji_server.py
+```
 
 ## 技术栈
 
@@ -149,6 +169,7 @@ shuati init
 shuati pull https://leetcode.com/problems/two-sum/
 shuati pull https://codeforces.com/problemset/problem/4/A
 shuati pull https://www.luogu.com.cn/problem/P1001
+shuati pull https://www.matiji.net/exam/ojquestionlist
 
 # 创建本地题目
 shuati create "自定义题目名称" --tags "dp,array" --difficulty medium

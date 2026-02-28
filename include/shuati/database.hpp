@@ -40,7 +40,8 @@ public:
     ReviewItem get_review(const std::string& problem_id);
 
     // Test Cases
-    void add_test_case(const std::string& problem_id, const std::string& input, const std::string& output, bool is_sample = true);
+    bool add_test_case(const std::string& problem_id, const std::string& input, const std::string& output, bool is_sample = true);
+    void clear_test_cases(const std::string& problem_id);
     std::vector<std::pair<std::string, std::string>> get_test_cases(const std::string& problem_id);
 
     // Memory System (V3)

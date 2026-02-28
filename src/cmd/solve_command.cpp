@@ -149,7 +149,7 @@ void cmd_hint(CommandContext& ctx) {
         std::string buffer;
         bool suppress = false;
         
-        auto print_chunk = [&](std::string chunk) {
+        auto print_chunk = [&](const std::string& chunk) {
             if (suppress) return;
             
             buffer += chunk;

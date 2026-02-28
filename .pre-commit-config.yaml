@@ -1,0 +1,13 @@
+repos:
+  - repo: local
+    hooks:
+      - id: cpp-format-check
+        name: cpp-format-check
+        entry: bash -c 'files=$(git diff --cached --name-only -- "*.cpp" "*.hpp" "*.h" "*.cc" "*.cxx"); [ -z "$files" ] || clang-format -style=file --dry-run --Werror $files'
+        language: system
+        pass_filenames: false
+      - id: crawler-tests
+        name: crawler-tests
+        entry: bash -c 'ctest --test-dir build --output-on-failure -R test_crawler_matiji'
+        language: system
+        pass_filenames: false
