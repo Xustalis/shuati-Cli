@@ -108,6 +108,7 @@ jobs:
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgJsonGlob: 'vcpkg.json'
+          vcpkgGitCommitId: 'e1decf72bc06ea7a7e2d9b53aa28931392254332'
 
       # ---------- 配置和构建 ----------
       - name: Configure CMake (Windows)
