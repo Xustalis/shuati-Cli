@@ -78,12 +78,13 @@ void ProblemManager::pull_problem(const std::string& url) {
     p.content_path = std::filesystem::absolute(filename).string();
     db_->add_problem(p);
 
-    // Save test cases
+    // Save test cases (idempotent + incremental)
     if (!cases.empty()) {
+        int inserted = 0;
         for (const auto& tc : cases) {
-            db_->add_test_case(p.id, tc.input, tc.output, tc.is_sample);
+            if (db_->add_test_case(p.id, tc.input, tc.output, tc.is_sample)) inserted++;
         }
-        fmt::print(fg(fmt::color::cyan), "    获取到 {} 个测试用例。\n", cases.size());
+        fmt::print(fg(fmt::color::cyan), "    测试用例: 新增 {} / 总抓取 {}。\n", inserted, cases.size());
     }
 
     ReviewItem r;

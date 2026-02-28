@@ -425,7 +425,7 @@ void cmd_test(CommandContext& ctx) {
              // Streaming output callback with filtering (Reuse logic? Copy for now to be safe)
              std::string buffer;
              bool suppress = false;
-             auto print_chunk = [&](std::string chunk) {
+             auto print_chunk = [&](const std::string& chunk) {
                 if (suppress) return;
                 buffer += chunk;
                 size_t start_pos = buffer.find("<!-- SYSTEM_OP");

@@ -67,6 +67,7 @@ shuati-Cli/
 |---------|---------|---------|---------|
 | [src/adapters/leetcode_crawler.cpp](src/adapters/leetcode_crawler.cpp) | LeetCode 爬虫 | 是 | cpr, nlohmann_json |
 | [src/adapters/codeforces_crawler.cpp](src/adapters/codeforces_crawler.cpp) | Codeforces 爬虫 | 是 | cpr, nlohmann_json |
+| [src/adapters/matiji_crawler.cpp](src/adapters/matiji_crawler.cpp) | 马蹄集爬虫 | 是 | cpr |
 | [src/adapters/luogu_crawler.cpp](src/adapters/luogu_crawler.cpp) | 洛谷爬虫 | 是 | cpr, nlohmann_json |
 | [src/adapters/lanqiao_crawler.cpp](src/adapters/lanqiao_crawler.cpp) | 蓝桥杯爬虫 | 是 | cpr, nlohmann_json |
 | [src/adapters/companion_server.cpp](src/adapters/companion_server.cpp) | Companion Server (浏览器插件通信) | 是 | httplib, nlohmann_json |
@@ -116,6 +117,7 @@ shuati-Cli/
 |---------|---------|---------|
 | [include/shuati/adapters/leetcode_crawler.hpp](include/shuati/adapters/leetcode_crawler.hpp) | LeetCode 爬虫接口 | 是 |
 | [include/shuati/adapters/codeforces_crawler.hpp](include/shuati/adapters/codeforces_crawler.hpp) | Codeforces 爬虫接口 | 是 |
+| [include/shuati/adapters/matiji_crawler.hpp](include/shuati/adapters/matiji_crawler.hpp) | 马蹄集爬虫接口 | 是 |
 | [include/shuati/adapters/luogu_crawler.hpp](include/shuati/adapters/luogu_crawler.hpp) | 洛谷爬虫接口 | 是 |
 | [include/shuati/adapters/lanqiao_crawler.hpp](include/shuati/adapters/lanqiao_crawler.hpp) | 蓝桥杯爬虫接口 | 是 |
 | [include/shuati/adapters/companion_server.hpp](include/shuati/adapters/companion_server.hpp) | Companion Server 接口 | 是 |

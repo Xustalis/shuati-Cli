@@ -63,6 +63,7 @@ set(ADAPTER_SOURCES
     src/adapters/companion_server.cpp
     src/adapters/luogu_crawler.cpp
     src/adapters/lanqiao_crawler.cpp
+    src/adapters/matiji_crawler.cpp
 )
 
 set(INFRA_SOURCES
@@ -165,6 +166,16 @@ add_shuati_test(test_judge_security
     src/tests/test_judge_security.cpp
     EXTRA_SOURCES src/core/judge.cpp
     LINK_LIBS Threads::Threads
+)
+
+# Crawler robustness test
+add_shuati_test(test_crawler_matiji
+    src/tests/test_crawler_matiji.cpp
+    EXTRA_SOURCES
+        src/adapters/matiji_crawler.cpp
+        src/infra/database.cpp
+        src/utils/encoding.cpp
+    LINK_LIBS SQLiteCpp cpr::cpr nlohmann_json::nlohmann_json
 )
 
 # Print configuration summary

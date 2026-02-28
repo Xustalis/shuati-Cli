@@ -6,6 +6,8 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
 
 permissions:
   contents: write
@@ -35,16 +37,74 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-format
 
-      - name: Check Code Formatting
-        continue-on-error: true
+      - name: Check Code Formatting (changed files)
+        continue-on-error: false
         run: |
-          files=$(git ls-files '*.cpp' '*.cc' '*.cxx' '*.hpp' '*.h')
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            files=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" -- '*.cpp' '*.cc' '*.cxx' '*.hpp' '*.h')
+          else
+            files=$(git diff --name-only HEAD~1 HEAD -- '*.cpp' '*.cc' '*.cxx' '*.hpp' '*.h' || true)
+          fi
           if [[ -z "$files" ]]; then
-            echo "No C/C++ files found."
+            echo "No changed C/C++ files to check."
             exit 0
           fi
-          echo "Checking code formatting..."
-          clang-format -style=file --dry-run --Werror $files || true
+          echo "Checking changed files:"
+          echo "$files"
+          clang-format -style=file --dry-run --Werror $files
+
+      - name: Static Analysis (cppcheck)
+        continue-on-error: false
+        run: |
+          sudo apt-get install -y cppcheck
+          cppcheck --error-exitcode=1 --language=c++ --std=c++20 --enable=warning,performance,portability --suppress=missingIncludeSystem include src
+
+  # ============================================
+  # 阶段2: 爬虫专项测试与覆盖率
+  # ============================================
+  crawler_tests:
+    name: Crawler Tests (Linux)
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev libx11-dev libxt-dev libgl1-mesa-dev xorg-dev ninja-build gcovr
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.25'
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: 'vcpkg.json'
+
+      - name: Configure (Coverage)
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="--coverage -O0" \
+            -DCMAKE_EXE_LINKER_FLAGS="--coverage"
+
+      - name: Build crawler tests
+        run: cmake --build build --parallel 4 --target test_crawler_matiji
+
+      - name: Run crawler tests
+        run: ctest --test-dir build --output-on-failure -R test_crawler_matiji
+
+      - name: Coverage gate (>=85%)
+        run: |
+          gcovr -r . --filter 'src/adapters/matiji_crawler.cpp|include/shuati/adapters/base_crawler.hpp|src/core/problem_manager.cpp' --xml-pretty -o coverage.xml
+          pct=$(gcovr -r . --filter 'src/adapters/matiji_crawler.cpp|include/shuati/adapters/base_crawler.hpp|src/core/problem_manager.cpp' --print-summary | awk '/lines:/ {gsub("%","",$2); print int($2)}')
+          echo "coverage=$pct%"
+          test "$pct" -ge 85
 
   # ============================================
   # 阶段2: 构建和测试矩阵
@@ -52,7 +112,7 @@ jobs:
   build:
     name: Build (${{ matrix.os }} / ${{ matrix.build_type }})
     runs-on: ${{ matrix.os }}
-    needs: quality
+    needs: [quality, crawler_tests]
     strategy:
       fail-fast: false
       matrix:

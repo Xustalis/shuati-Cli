@@ -193,6 +193,7 @@ void Database::init_indexes() {
     
     // 测试用例查询优化索引
     db_->exec("CREATE INDEX IF NOT EXISTS idx_test_cases_problem ON test_cases(problem_id)");
+    db_->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_test_cases_dedupe ON test_cases(problem_id,input,output,is_sample)");
     
     // 记忆系统索引
     // Fix: ON CONFLICT(pattern) requires a unique index on pattern
@@ -410,14 +411,21 @@ ReviewItem Database::get_review(const std::string& pid) {
 
 // ---- Test Cases ----
 
-void Database::add_test_case(const std::string& problem_id, const std::string& input, 
+bool Database::add_test_case(const std::string& problem_id, const std::string& input, 
                              const std::string& output, bool is_sample) {
     SQLite::Statement q(*db_, 
-        "INSERT INTO test_cases (problem_id,input,output,is_sample) VALUES (?,?,?,?)");
+        "INSERT OR IGNORE INTO test_cases (problem_id,input,output,is_sample) VALUES (?,?,?,?)");
     q.bind(1, ensure_utf8_lossy(problem_id));
     q.bind(2, ensure_utf8_lossy(input));
     q.bind(3, ensure_utf8_lossy(output));
     q.bind(4, is_sample ? 1 : 0);
+    q.exec();
+    return db_->getChanges() > 0;
+}
+
+void Database::clear_test_cases(const std::string& problem_id) {
+    SQLite::Statement q(*db_, "DELETE FROM test_cases WHERE problem_id=?");
+    q.bind(1, ensure_utf8_lossy(problem_id));
     q.exec();
 }
 

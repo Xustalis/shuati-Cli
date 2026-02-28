@@ -5,6 +5,7 @@
 #include "shuati/adapters/codeforces_crawler.hpp"
 #include "shuati/adapters/luogu_crawler.hpp"
 #include "shuati/adapters/lanqiao_crawler.hpp"
+#include "shuati/adapters/matiji_crawler.hpp"
 #include <fmt/core.h>
 #include <fmt/color.h>
 #include <iostream>
@@ -67,6 +68,7 @@ Services Services::load(const fs::path& root) {
         s.pm->register_crawler(std::make_unique<CodeforcesCrawler>());
         s.pm->register_crawler(std::make_unique<LuoguCrawler>());
         s.pm->register_crawler(std::make_unique<LanqiaoCrawler>());
+        s.pm->register_crawler(std::make_unique<MatijiCrawler>());
         
         s.ma  = std::make_shared<MistakeAnalyzer>(s.db);
         s.mm  = std::make_unique<MemoryManager>(*s.db); // Database& constructor
