@@ -18,7 +18,8 @@ HttpResponse CprHttpClient::get(const std::string& url, const std::map<std::stri
     return HttpResponse{
         static_cast<int>(r.status_code),
         r.text,
-        {} // headers map conversion if needed
+        {}, // headers map conversion if needed
+        r.error.message
     };
 }
 
@@ -38,7 +39,8 @@ HttpResponse CprHttpClient::post(const std::string& url, const std::string& body
     return HttpResponse{
         static_cast<int>(r.status_code),
         r.text,
-        {}
+        {},
+        r.error.message
     };
 }
 

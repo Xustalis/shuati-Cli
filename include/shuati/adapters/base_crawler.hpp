@@ -51,8 +51,10 @@ protected:
             get_default_timeout_ms()
         );
 
-        if (response.status_code != 200) {
-            throw std::runtime_error(fmt::format("HTTP {}", response.status_code));
+        if (response.status_code == 0) {
+            throw std::runtime_error(fmt::format("Network Error: Could not reach {} ({})", url, response.error_message));
+        } else if (response.status_code != 200) {
+            throw std::runtime_error(fmt::format("HTTP {} ({})", response.status_code, response.error_message));
         }
         return response.text;
     }
@@ -70,8 +72,10 @@ protected:
             get_default_timeout_ms()
         );
 
-        if (response.status_code != 200) {
-            throw std::runtime_error(fmt::format("HTTP {}", response.status_code));
+        if (response.status_code == 0) {
+            throw std::runtime_error(fmt::format("Network Error: Could not reach {} ({})", url, response.error_message));
+        } else if (response.status_code != 200) {
+            throw std::runtime_error(fmt::format("HTTP {} ({})", response.status_code, response.error_message));
         }
         return response.text;
     }
