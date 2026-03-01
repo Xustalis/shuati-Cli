@@ -14,6 +14,9 @@ public:
     bool can_handle(const std::string& url) const override;
     Problem fetch_problem(const std::string& url) override;
     std::vector<TestCase> fetch_test_cases(const std::string& url) override;
+
+private:
+    std::string extract_cf_description(const std::string& html);
 };
 
 } // namespace shuati
