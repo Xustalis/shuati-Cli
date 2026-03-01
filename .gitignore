@@ -10,6 +10,13 @@ cmake-build-*/
 .cache/
 dist/
 release/
+release_pkg/
+
+# CMake generated files
+cmake_log.txt
+cmake_out.txt
+build_err.txt
+CMakeUserPresets.json
 
 # Tools (keep release tools)
 !tools/release/
@@ -21,13 +28,12 @@ __pycache__/
 *.pyd
 .Python
 *.egg-info/
-dist/
-build/
 
 # IDE
 .vs/
 .vscode/
 .idea/
+.trae/
 *.user
 *.suo
 *.sln.docstates
@@ -90,7 +96,7 @@ temp/
 tmp/
 temp_*.txt
 
-# Test outputs
+# Test outputs  
 test-results/
 coverage/
 *.gcov
@@ -101,5 +107,6 @@ coverage/
 docs/_build/
 docs/_site/
 
-
-.trae/
+# Temp test scripts
+test_simple.bat
+test_simple_crawlers.py
