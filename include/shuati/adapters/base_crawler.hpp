@@ -6,12 +6,16 @@
 #include <fmt/core.h>
 #include <regex>
 #include <ctime>
+#include "shuati/http_client.hpp"
 
 namespace shuati {
 
 // Abstract base class providing common functionality for web crawlers
 class BaseCrawler : public ICrawler {
 public:
+    explicit BaseCrawler(std::shared_ptr<IHttpClient> client = nullptr) 
+        : http_client_(client ? client : std::make_shared<CprHttpClient>()) {}
+    
     virtual ~BaseCrawler() = default;
 
     // Default empty test cases implementation - made public for Impl classes
@@ -21,6 +25,8 @@ public:
     }
 
 protected:
+    std::shared_ptr<IHttpClient> http_client_;
+
     // HTTP request helpers with common configuration
     virtual cpr::Header get_default_headers() const {
         return cpr::Header{
@@ -28,16 +34,21 @@ protected:
         };
     }
 
-    virtual cpr::Timeout get_default_timeout() const {
-        return cpr::Timeout{10000}; // 10 seconds
+    virtual int get_default_timeout_ms() const {
+        return 10000; // 10 seconds
     }
 
     // Perform HTTP GET request
     virtual std::string http_get(const std::string& url) const {
-        auto response = cpr::Get(
-            cpr::Url{url},
-            get_default_headers(),
-            get_default_timeout()
+        std::map<std::string, std::string> headers;
+        for (const auto& kv : get_default_headers()) {
+            headers[kv.first] = kv.second;
+        }
+
+        auto response = http_client_->get(
+            url,
+            headers,
+            get_default_timeout_ms()
         );
 
         if (response.status_code != 200) {
@@ -48,14 +59,15 @@ protected:
 
     // Perform HTTP POST request with JSON body
     virtual std::string http_post_json(const std::string& url, const std::string& json_body) const {
-        auto response = cpr::Post(
-            cpr::Url{url},
-            cpr::Header{
-                {"Content-Type", "application/json"},
-                {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            },
-            cpr::Body{json_body},
-            get_default_timeout()
+        std::map<std::string, std::string> headers;
+        headers["Content-Type"] = "application/json";
+        headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+
+        auto response = http_client_->post(
+            url,
+            json_body,
+            headers,
+            get_default_timeout_ms()
         );
 
         if (response.status_code != 200) {

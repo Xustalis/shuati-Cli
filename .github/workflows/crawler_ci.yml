@@ -1,0 +1,35 @@
+name: Crawler CI
+
+on:
+  push:
+    branches: [ "main", "feature/*" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '0 0 * * *' # Daily regression
+
+jobs:
+  test:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Vcpkg
+      run: |
+        git clone https://github.com/microsoft/vcpkg.git
+        .\vcpkg\bootstrap-vcpkg.bat
+        
+    - name: Configure CMake
+      run: cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake
+      
+    - name: Build
+      run: cmake --build build --config Release
+      
+    - name: Run Crawler Tests
+      run: cd build && ctest -C Release --output-on-failure
+      
+    - name: Run Data Integrity Check (Mock)
+      # This step runs the python script to verify logic on sample URLs (if accessible)
+      # or just re-runs the C++ unit tests which use mocks.
+      run: build\Release\crawler_tests.exe

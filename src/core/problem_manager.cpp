@@ -71,6 +71,7 @@ void ProblemManager::pull_problem(const std::string& url) {
         << "难度: " << p.difficulty << "\n"
         << "标签: " << p.tags << "\n\n"
         << "## 题目描述\n\n"
+        << p.description << "\n\n"
         << "(数据抓取自 " << p.source << ")\n\n"
         << "## 笔记\n\n";
     out.close();

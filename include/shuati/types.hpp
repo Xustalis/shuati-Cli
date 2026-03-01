@@ -10,6 +10,7 @@ struct Problem {
     std::string id;       // UUID or original string ID
     std::string source;   // "web", "local"
     std::string title;
+    std::string description; // Raw problem description (HTML or Markdown)
     std::string url;
     std::string content_path;
     std::string tags;      // comma-separated

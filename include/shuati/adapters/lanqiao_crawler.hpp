@@ -2,6 +2,7 @@
 
 #include "shuati/crawler.hpp"
 #include <memory>
+#include "shuati/http_client.hpp"
 
 namespace shuati {
 
@@ -10,7 +11,7 @@ class LanqiaoCrawlerImpl;
 
 class LanqiaoCrawler : public ICrawler {
 public:
-    LanqiaoCrawler();
+    explicit LanqiaoCrawler(std::shared_ptr<IHttpClient> client = nullptr);
     ~LanqiaoCrawler();
 
     bool can_handle(const std::string& url) const override;

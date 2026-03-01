@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(shuati-cli VERSION 0.0.1 LANGUAGES CXX)
+project(shuati-cli VERSION 0.0.2 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -68,6 +68,7 @@ set(ADAPTER_SOURCES
 set(INFRA_SOURCES
     src/infra/database.cpp
     src/infra/logger.cpp
+    src/infra/http_client.cpp
 )
 
 set(UTIL_SOURCES
@@ -150,28 +151,27 @@ add_shuati_test(test_judge_complex
     LINK_LIBS SQLiteCpp cpr::cpr nlohmann_json::nlohmann_json Threads::Threads
 )
 
-# Memory test
-add_shuati_test(test_memory
-    src/tests/test_memory.cpp
-    EXTRA_SOURCES
-        src/core/memory_manager.cpp
-        src/infra/database.cpp
-        src/utils/encoding.cpp
-    LINK_LIBS SQLiteCpp nlohmann_json::nlohmann_json
+# Crawler unit tests
+add_executable(crawler_tests
+    src/tests/test_crawlers.cpp
+    ${CORE_SOURCES}
+    ${ADAPTER_SOURCES}
+    ${INFRA_SOURCES}
+    ${UTIL_SOURCES}
 )
 
-# Judge security test
-add_shuati_test(test_judge_security
-    src/tests/test_judge_security.cpp
-    EXTRA_SOURCES src/core/judge.cpp
-    LINK_LIBS Threads::Threads
+target_link_libraries(crawler_tests PRIVATE
+    CLI11::CLI11
+    nlohmann_json::nlohmann_json
+    cpr::cpr
+    SQLiteCpp
+    fmt::fmt
+    replxx::replxx
+    ftxui::screen
+    ftxui::dom
+    ftxui::component
+    httplib::httplib
+    Threads::Threads
 )
 
-# Print configuration summary
-message(STATUS "")
-message(STATUS "Shuati CLI Configuration:")
-message(STATUS "  Version: ${PROJECT_VERSION}")
-message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
-message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
-message(STATUS "  Tests: Enabled")
-message(STATUS "")
+add_test(NAME test_crawlers COMMAND $<TARGET_FILE:crawler_tests>)

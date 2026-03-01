@@ -13,7 +13,7 @@
   #if EnvVersion != ""
     #define MyAppVersion EnvVersion
   #else
-    #define MyAppVersion "0.0.1"
+    #define MyAppVersion "0.0.2"
   #endif
 #endif
 

@@ -124,6 +124,11 @@ inline std::string extract_title_from_html(const std::string& html) {
     return "";
 }
 
+inline std::string strip_html_tags(const std::string& html) {
+    std::regex re("<[^>]*>");
+    return std::regex_replace(html, re, "");
+}
+
 inline std::string extract_regex_group(const std::string& text, const std::string& pattern, size_t group = 1) {
     std::regex re(pattern);
     std::smatch m;

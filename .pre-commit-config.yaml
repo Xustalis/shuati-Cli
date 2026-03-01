@@ -1,0 +1,25 @@
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+    -   id: trailing-whitespace
+    -   id: end-of-file-fixer
+    -   id: check-yaml
+    -   id: check-added-large-files
+
+-   repo: https://github.com/pocc/pre-commit-hooks
+    rev: v1.3.5
+    hooks:
+    -   id: clang-format
+        args: [--style=Google]
+    -   id: clang-tidy
+        args: [--checks=readability-*,bugprone-*,modernize-*]
+
+-   repo: local
+    hooks:
+    -   id: run-tests
+        name: Run Crawler Tests
+        entry: ./build/Release/crawler_tests.exe
+        language: system
+        types: [c++]
+        pass_filenames: false

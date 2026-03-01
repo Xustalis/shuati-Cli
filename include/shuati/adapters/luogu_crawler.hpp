@@ -2,15 +2,15 @@
 
 #include "shuati/crawler.hpp"
 #include <memory>
+#include "shuati/http_client.hpp"
 
 namespace shuati {
 
-// Forward declaration
 class LuoguCrawlerImpl;
 
 class LuoguCrawler : public ICrawler {
 public:
-    LuoguCrawler();
+    explicit LuoguCrawler(std::shared_ptr<IHttpClient> client = nullptr);
     ~LuoguCrawler();
 
     bool can_handle(const std::string& url) const override;

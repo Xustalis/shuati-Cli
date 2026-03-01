@@ -2,9 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.0.1] - 2026-02-26
+## [0.0.2] - 2026-03-01
 
-### Added
+### Changed
+- **Version**: Bumped version to v0.0.2 for testing
+
+## [0.0.1] - 2026-02-26### Added
 - **Bootstrap**: Initial project setup with unified version v0.0.1.
 - **Build**: Fixed CMake configuration and build issues.
 - **CI**: Fixed GitHub Actions CI/CD workflows.

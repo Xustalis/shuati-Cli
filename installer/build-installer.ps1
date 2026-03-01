@@ -6,7 +6,7 @@
     This script builds the Windows installer for Shuati CLI using Inno Setup.
     It handles version detection, file preparation, and installer compilation.
 .PARAMETER Version
-    The version number for the installer. If not specified, uses the version from CMakeLists.txt or defaults to "0.0.1".
+    The version number for the installer. If not specified, uses the version from CMakeLists.txt or defaults to "0.0.2".
 .PARAMETER SourceDir
     The directory containing the built executable and resources. Defaults to "..\build\Release".
 .PARAMETER OutputDir
@@ -53,10 +53,11 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     }
     
     if ([string]::IsNullOrWhiteSpace($Version)) {
-        $Version = "0.0.1"
+        $Version = "0.0.2"
         Write-Host "  Using default version: $Version" -ForegroundColor Yellow
     }
-} else {
+}
+else {
     Write-Host "  Using specified version: $Version" -ForegroundColor Green
 }
 
@@ -83,7 +84,8 @@ Write-Host "  Executable found: $Executable" -ForegroundColor Green
 $ResourceDir = Join-Path $FullSourceDir "resources"
 if (Test-Path $ResourceDir) {
     Write-Host "  Resources found: $ResourceDir" -ForegroundColor Green
-} else {
+}
+else {
     Write-Host "  Warning: Resources directory not found" -ForegroundColor Yellow
 }
 
@@ -95,7 +97,8 @@ $FullOutputDir = Join-Path $ProjectRoot $OutputDir
 if (-not (Test-Path $FullOutputDir)) {
     New-Item -ItemType Directory -Force -Path $FullOutputDir | Out-Null
     Write-Host "  Created output directory: $FullOutputDir" -ForegroundColor Green
-} else {
+}
+else {
     Write-Host "  Output directory exists: $FullOutputDir" -ForegroundColor Green
 }
 
@@ -192,7 +195,8 @@ try {
         Write-Host "Size: $([math]::Round($FileInfo.Length / 1MB, 2)) MB" -ForegroundColor Cyan
         Write-Host ""
     }
-} catch {
+}
+catch {
     Write-Error "Failed to build installer: $_"
     exit 1
 }
