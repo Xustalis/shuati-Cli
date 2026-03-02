@@ -9,9 +9,7 @@
   ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝
 ```
 
-# Shuati CLI
-
-**专为算法爱好者打造的本地化、智能化命令行工具**
+**Shuati CLI 专为 OIer 和 Coder 打造的本地化、智能化命令行刷题工具🚀**
 
 [![Version](https://img.shields.io/badge/version-0.0.4-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
 [![CI](https://github.com/Xustalis/shuati-Cli/actions/workflows/release.yml/badge.svg)](https://github.com/Xustalis/shuati-Cli/actions)
@@ -22,277 +20,261 @@
 
 </div>
 
----
+## 📖 项目简介
 
-## 项目简介
+Shuati CLI 是一款专为算法爱好者设计的命令行工具。它不仅能帮助你从各大 OJ 平台自动拉取题目，接管你的 "编码 -> 测试 -> 提交" 工作流，更引入了 AI 辅助，高效管理算法练习题、追踪学习进度、自动分析错题，让刷题更加智能化。
 
-**Shuati CLI** 是一款专为oier和coder设计的命令行工具，帮助用户高效管理算法练习题、追踪学习进度、分析错误模式，并提供智能复习建议。
+## 🚀 15分钟快速上手
 
-### 🛠️ 工作流演示
+按照以下步骤，在 15 分钟内完成环境搭建并解决你的第一道算法题。
+
+### 1️⃣ 一键安装
+
+**Windows 快速安装:**
+打开你的 PowerShell（可以按 Win 键搜索 "PowerShell"），复制并运行下面这两行命令：
+```powershell
+irm https://github.com/Xustalis/shuati-Cli/releases/latest/download/shuati-cli-setup.exe -OutFile shuati-cli-setup.exe
+.\shuati-cli-setup.exe
+```
+*(Linux / macOS 用户请参阅[从源码编译](#从源码编译-linux--macos--windows))*
+
+### 2️⃣ 初始化练习目录 (2分钟)
+
+安装完成后，你可以随便找个地方新建一个文件夹，作为你的专属刷题库：
+
+```bash
+# 创建并进入一个新的练习目录
+mkdir my-algorithm-practice
+cd my-algorithm-practice
+
+# 初始化 Shuati 项目
+shuati init
+```
+
+### 3️⃣ 开始你的第一题 (5分钟)
+
+我们以 LeetCode 经典的第一题 "两数之和" 为例：
+
+```bash
+# 从 LeetCode 拉取这道题
+#（这会自动将题目描述和测试用例下载到本地,同样也支持洛谷、Codeforces、蓝桥云课）
+shuati pull https://leetcode.cn/problems/two-sum/
+
+# 2. 开始解题 (自动生成文件并打开编辑器)
+shuati solve 1
+# 或者使用题目 ID: shuati solve lc_1
+```
+*此时，你的代码编辑器已经打开了包含标准头文件的模板。请编写逻辑并保存。*
+
+### 4️⃣ 一键本地评测
+
+代码写完后，不需要去网页端提交盲猜，直接在当前目录测试：
+
+```bash
+# 直接在本地运行全部测试用例
+shuati test 1
+
+# 如果全部标绿表示通过！
+# 如果有错误的用例，开启 AI 后会自动诊断代码
+```
+
+## ✨ 核心功能与亮点
+
+<div align="center">
+
+| 🎯 题目管理 | ⚡ 本地离线评测 | 🤖 AI 智能教练 |
+| :--- | :--- | :--- |
+| • 一键抓取题面与测试用例<br>• CF/LC/洛谷/蓝桥云课<br>• 本地 Markdown 题库归档<br>• 支持手动创建本地题目 | • 无需联网即可测试自带用例<br>• C++ / Python 实时编译运行<br>• 保护系统的防爆沙箱机制 | • DeepSeek 深度集成<br>• 超越题解的交互式代码诊断<br>• 获取递进式的解题思路提示 |
+
+| 📊 进度追踪 (复习) | 💻 无缝快捷流 | ✔️ 精确安全 |
+| :--- | :--- | :--- |
+| • 自动记录每次 Verdict<br>• 实时统计通过率与成长线<br>• 错题分类统计 | • 现代终端 UI (FTXUI)<br>• 适配 VSCode/Vim<br>• 无缝命令行 Shell 体验 | • 一键拉取、编译、测试<br>• 高度可配置化<br>• 跨平台支持 |
+
+</div>
+
+## 🛠️ 基本工作流演示
 
 ```mermaid
 graph LR
-    A[🔍 发现题目] -->|shuati pull| B("📥 本地数据库")
-
+    A[🔍 发现题目] -->|shuati pull / create| B("📥 本地 Markdown/DB")
     B -->|shuati solve| C{💻 编写代码}
-    C -->|Auto Open| D[📝 编辑器 VSCode/Vim]
+    C -->|Auto Open| D[📝 你的编辑器]
     D -->|Save| E[💾 源码文件]
     E -->|shuati test| F{⚡ 本地判题}
     F -->|❌ 失败| D
-    F -->|✅ 通过| G[🚀 提交记录]
-    G -->|shuati submit| H((🧠 记忆强化))
-    H -.->|复习提醒| A
+    F -->|✅ 通过| G[🚀 提交记录 Verdict]
 ```
 
-## 核心功能
+## 📥 安装指南
 
-### 🎯 题目管理
-- **多平台支持**: 支持从 Codeforces、LeetCode、洛谷、蓝桥云课等平台自动抓取题目
-- **本地题目创建**: 支持手动创建本地题目，记录个人练习内容
-- **统一存储**: 所有题目以Markdown格式存储，便于阅读和编辑
-- **标签系统**: 支持为题目添加难度、标签等元数据
-
-### 📊 进度追踪
-- **解题记录**: 自动记录每次提交的 verdict（AC/WA/TLE等）
-- **通过率统计**: 实时统计各题目的通过情况
-- **历史回顾**: 查看完整的解题历史和时间线
-
-### 🧠 智能复习
-- **SM2算法**: 基于SuperMemo-2间隔重复算法，智能安排复习时间
-- **遗忘曲线**: 根据艾宾浩斯遗忘曲线优化复习间隔
-- **错题分析**: 自动分析错误类型（逻辑错误、边界条件、算法理解等）
-
-### 🤖 AI辅助
-- **智能提示**: 集成DeepSeek AI，提供解题思路和提示
-- **代码分析**: 分析代码错误并提供改进建议
-- **个性化推荐**: 根据学习进度推荐适合的题目
-
-### ⚡ 快速评测
-- **本地编译**: 支持C++、Python等语言的本地编译和运行
-- **测试用例**: 自动获取样例测试用例进行验证
-- **性能分析**: 检测时间复杂度和空间复杂度
-
-## 技术栈
-
-- **编程语言**: C++20
-- **构建系统**: CMake 3.20+
-- **包管理**: vcpkg
-- **数据库**: SQLite3
-- **UI框架**: FTXUI（终端UI）
-- **HTTP客户端**: cpr
-- **JSON处理**: nlohmann/json
-- **命令行解析**: CLI11
-
-## 安装指南
-
-### 系统要求
-
-- Windows 10/11 (x64)
-- macOS 10.15+ (Intel/Apple Silicon)
-- Linux (Ubuntu 20.04+, CentOS 8+)
-
-### 从源码编译
-
-#### 前置依赖
-
-1. **CMake** (>= 3.20)
-2. **vcpkg** - C++包管理器
-3. **Git**
-
-#### 编译步骤
-
-```bash
-# 克隆仓库
-git clone https://github.com/Xustalis/shuati-Cli.git
-cd shuati-Cli
-
-# 配置项目（使用vcpkg）
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=[vcpkg路径]/scripts/buildsystems/vcpkg.cmake
-
-# 构建
-cmake --build build --config Release
-
-# 运行测试
-ctest --test-dir build -C Release
-
-# 安装（可选）
-cmake --install build
-```
-
-### Windows安装包
-
-下载最新的Windows安装包：
-
+### 安装包
+**Windows** 下载最新的 Windows 安装包并执行：
 ```powershell
-# 使用PowerShell安装
 irm https://github.com/Xustalis/shuati-Cli/releases/latest/download/shuati-cli-setup.exe -OutFile shuati-cli-setup.exe
 .\shuati-cli-setup.exe
 ```
 
-## 使用指南
+### 从源码编译 (Linux / macOS / Windows)
 
-### 初始化项目
+**前置依赖**
+- CMake (>= 3.20)
+- vcpkg (C++ 包管理器)
+- Git
+- 支持 C++20 的编译器 (GCC 10+ / Clang 10+ / MSVC)
 
-```bash
-# 创建新的刷题项目目录
-mkdir my-algorithm-practice
-cd my-algorithm-practice
-
-# 初始化Shuati CLI
-shuati init
-```
-
-### 添加题目
+**编译步骤**
 
 ```bash
-# 从URL自动抓取题目
-shuati pull https://leetcode.com/problems/two-sum/
-shuati pull https://codeforces.com/problemset/problem/4/A
-shuati pull https://www.luogu.com.cn/problem/P1001
+# 1. 克隆仓库
+git clone https://github.com/Xustalis/shuati-Cli.git
+cd shuati-Cli
 
-# 创建本地题目
-shuati create "自定义题目名称" --tags "dp,array" --difficulty medium
+# 2. 配置项目（请替换 [vcpkg路径] 为你的实际路径）
+cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=[vcpkg路径]/scripts/buildsystems/vcpkg.cmake
+
+# 3. 构建
+cmake --build build --config Release
+
+# 4. 运行测试确保无误
+ctest --test-dir build -C Release
+
+# 5. 安装（可选）
+cmake --install build
 ```
 
-### 开始练习
+## ❓ 常见问题 (FAQ)
+
+<details>
+<summary><strong>Q1: 运行 <code>shuati test</code> 时提示 "Compiler not found" 或编译失败怎么办？</strong></summary>
+
+**A:** Shuati 并没有内置编译器，它在底层会直接调用你电脑上的编译器。
+- **C++ 语言**: 请确保你已经安装了 `MinGW-w64` (Windows)，并将它所在的文件夹中的 `bin` 路径添加到了系统的环境变量 Path 中，而且编译器需要支持 **C++20** 标准。
+- **Python 语言**: 请确保你已经安装了 Python (3.8+版本)，并且 `python` 能在命令行中直接使用。
+</details>
+
+<details>
+<summary><strong>Q2: 怎么改变默认的编程语言？</strong></summary>
+
+**A:** Shuati 默认会为你生成 C++ 的模板。如果你要写 Python，只需要运行一次：
+```bash
+shuati config --language python
+```
+(如果以后想换回 C++，运行 `shuati config --language cpp` 即可。)
+</details>
+
+<details>
+<summary><strong>Q3: 如何配置并使用 AI 解题提示功能？</strong></summary>
+
+**A:** 我们深度集成了大语言模型，你需要准备一个 DeepSeek (或其他兼容接口) 的 API Key。配置方法如下：
 
 ```bash
-# 列出所有题目
-shuati list
+# 替换为你的真实密钥
+shuati config --api-key "sk-xxxxxxxx"
 
-# 解决指定题目（使用TID或题目ID）
-shuati solve 1
-shuati solve lc_1
-
-# 查看题目详情
-shuati view 1
+# 如果你想指定非默认使用的模型名称，也可以这样：
+shuati config --model "deepseek-chat"
 ```
+配置完成后，当你在敲题没思路时，运行 `shuati hint <题目ID>`，或者在 `shuati test <题目ID>` 没通过时，AI 会自动开始为你分析问题。
+</details>
 
-### 测试代码
+<details>
+<summary><strong>Q4: 对于蓝桥云课等需要账号登录才能看到的题目，我该如何拉取？</strong></summary>
+
+**A:** 我们提供了简单的登录凭据加载命令。目前已经支持了蓝桥网：
+```bash
+shuati login lanqiao
+```
+根据提示操作并粘贴你在浏览器上获取到的 Cookie 即可无缝拉取题库。
+</details>
+
+<details>
+<summary><strong>Q5: 本地测试失败了，但我感觉我写的没错？</strong></summary>
+
+**A:** `shuati test` 会运行题目附带的样例测试。如果报错，通常是格式对齐问题或未处理好的特殊边界（数组越界等）。如果百思不得其解，确保打开了 AI 开关，测试失败后工具会自动诊断你的错误所在并为你出主意。
+</details>
+
+## 📚 常用命令速查
+
+| 命令分类 | 具体命令                 | 作用介绍                                          | 命令示例                                     |
+| :------- | :----------------------- | :------------------------------------------------ | :------------------------------------------- |
+| **基础** | `shuati init`            | 在当前目录下创建数据库，初始化整个工作区环境      | `shuati init`                                |
+| **基础** | `shuati list` / `ls`     | 列出当前本地题库所有题目的简略列表                | `shuati list`                                |
+| **开题** | `shuati pull <url>`      | 根据网址将 OJ 平台上的题目拉取到本地                | `shuati pull https://leetcode.cn/...`        |
+| **开题** | `shuati new <title>`     | 手动创建一道暂不在主流平台的自定义算法题            | `shuati new "01背包变形" --tags "dp"`        |
+| **做题** | `shuati solve <id>`      | 自动生成代码骨架并打开本地编辑器                    | `shuati solve 12` 或 `shuati solve lc_1`     |
+| **做题** | `shuati hint <id>`       | 做不出来时，唤起 AI 获取关键解题线索和思路线段提示  | `shuati hint 1`                              |
+| **做题** | `shuati test <id>`       | 跑本地自动运行测试并判题，如果失败将由 AI 辅助分析  | `shuati test 1`                              |
+| **做题** | `shuati view <id>`       | 深度查看某个测试点的输出情况和期望数据的 Diff 差异  | `shuati view 1`                              |
+| **收尾** | `shuati submit <id>`     | 做完题目后用于手动记录自我掌握度到错题本地数据库    | `shuati submit 1`                            |
+| **设置** | `shuati config`          | 查看或配置整个工具链的运行上下文 (API、环境等)        | `shuati config --api-key xxx`                |
+| **维护** | `shuati delete <id>`     | 从此刷题练习库中彻底剔除这道题目记录和原文件          | `shuati delete 1`                            |
+| **维护** | `shuati clean`           | 一键清理由于编译过程或者动态对拍产生的垃圾临时文件    | `shuati clean`                               |
+
+## 📥 从源码手动编译 (Linux / macOS / Windows)
+
+如果你不是通过提供的一键安装包，而是偏好源码构建：
+
+**前置系统依赖需要有：**
+- **CMake** (>= 3.20)
+- **vcpkg** (C++ 跨平台包管理器)
+- **支持 C++20 的主流编译器** (GCC 10+ / Clang 10+ / MSVC 2022)
+
+**编译步骤：**
 
 ```bash
-# 编译并运行测试
-shuati test 1 --lang cpp
+# 1. 把仓库克隆下来
+git clone https://github.com/Xustalis/shuati-Cli.git
+cd shuati-Cli
 
-# 使用自定义测试用例
-shuati test 1 --input "1 2 3" --expected "6"
+# 2. 告诉 CMake 你的 vcpkg 在什么地方（请将下面路径替换为真实路径）
+cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=[你机器上的vcpkg路径]/scripts/buildsystems/vcpkg.cmake
+
+# 3. 开始执行构建和编译
+cmake --build build --config Release
+
+# 4. 可选测试和安装到系统目录
+ctest --test-dir build -C Release
+cmake --install build
 ```
 
-### 复习管理
+## 🤝 贡献指南
 
+欢迎提交 Issue / PR！一些很适合贡献的方向：
+
+- 新平台抓题支持（AtCoder 等）
+- 评测器与执行器增强（性能、日志、隔离）
+- 复习算法与分析指标改进
+- 文档与示例补全
+
+### 开发构建
 ```bash
-# 查看今日复习任务
-shuati review
-
-# 标记题目为已复习
-shuati review done 1
-
-# 查看错题分析
-shuati analyze
-```
-
-### AI辅助功能
-
-```bash
-# 获取解题提示
-shuati hint 1
-
-# 分析当前代码
-shuati analyze code
-
-# 配置AI（需要DeepSeek API密钥）
-shuati config set api_key your_api_key_here
-```
-
-## 项目结构
-
-```
-shuati-Cli/
-├── src/                    # 源代码
-│   ├── cmd/               # 命令行接口
-│   ├── core/              # 核心业务逻辑
-│   ├── adapters/          # 外部服务适配器
-│   ├── infra/             # 基础设施层
-│   └── utils/             # 工具函数
-├── include/               # 头文件
-├── resources/             # 资源文件
-├── tests/                 # 测试代码
-├── installer/             # Windows安装程序
-└── docs/                  # 文档
-```
-
-## 配置说明
-
-配置文件位于项目目录下的 `.shuati/config.json`：
-
-```json
-{
-  "api_key": "your_deepseek_api_key",
-  "api_base": "https://api.deepseek.com/v1",
-  "model": "deepseek-chat",
-  "language": "cpp",
-  "max_tokens": 4096,
-  "editor": "code",
-  "ai_enabled": true,
-  "template_enabled": true
-}
-```
-
-## 开发指南
-
-### 构建开发版本
-
-```bash
-cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug
+cmake -B build
 cmake --build build
 ```
 
-### 运行测试
+### 代码规范
+- 项目使用 **C++20** 标准。
+- 提交代码前，请确保您的代码风格符合项目规范，并确保所有测试用例通过。
+- 提交信息请遵循 [Conventional Commits](https://www.conventionalcommits.org/) 规范（例如：`feat(test): add boundary case generation`）。
 
-```bash
-# 运行所有测试
-ctest --test-dir build
+详细开发指南请参阅 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
-# 运行特定测试
-./build/test_version
-./build/test_judge_complex
-```
-
-### 代码风格
-
-项目使用clang-format进行代码格式化：
-
-```bash
-clang-format -i src/**/*.cpp include/**/*.hpp
-```
-
-## 贡献指南
-
-欢迎提交Issue和Pull Request！请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解详细信息。
-
-### 提交规范
-
-- 使用 [Conventional Commits](https://www.conventionalcommits.org/) 规范
-- 确保所有测试通过
-- 更新相关文档
-
-## 许可证
+## 📄 许可证 & 致谢
 
 本项目采用 [MIT License](LICENSE) 开源许可证。
 
-## 致谢
+特别感谢以下优秀的开源项目：
+- [FTXUI](https://github.com/ArthurSonzogni/FTXUI) - 强大的终端 UI 框架
+- [CLI11](https://github.com/CLIUtils/CLI11) - 优雅的命令行解析库
+- [nlohmann/json](https://github.com/nlohmann/json) - 现代 C++ JSON 库
+- [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) - 易用的 SQLite C++ 封装
 
-感谢以下开源项目的支持：
-- [FTXUI](https://github.com/ArthurSonzogni/FTXUI) - 终端UI框架
-- [CLI11](https://github.com/CLIUtils/CLI11) - 命令行解析库
-- [nlohmann/json](https://github.com/nlohmann/json) - JSON处理库
-- [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) - SQLite C++封装
+## 💬 联系我们
 
-## 联系我们
+- **GitHub Issues**: 提交 [Bug](https://github.com/Xustalis/shuati-Cli/issues) 或特性需求
+- **Email**: [EMAIL_ADDRESS]
+<br>
 
-- **GitHub Issues**: [提交问题](https://github.com/Xustalis/shuati-Cli/issues)
-- **Email**: gmxenith@gmail.com
-
----
-
-**Happy Coding! 🚀**
+<div align="center">
+  <b>🌟 Happy Coding! 🚀</b>
+</div>
