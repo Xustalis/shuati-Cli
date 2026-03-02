@@ -379,37 +379,39 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           title="$tag"
           
-          # Find all files to upload
-          zip_file=$(ls shuati-windows-x64-*.zip 2>/dev/null | head -1)
-          zip_hash=$(ls shuati-windows-x64-*.zip.sha256 2>/dev/null | head -1)
-          installer=$(ls shuati-setup-x64-*.exe 2>/dev/null | head -1)
-          installer_hash=$(ls shuati-setup-x64-*.exe.sha256 2>/dev/null | head -1)
-          linux_tar=$(ls shuati-Linux-x64-*.tar.gz 2>/dev/null | head -1)
-          linux_hash=$(ls shuati-Linux-x64-*.tar.gz.sha256 2>/dev/null | head -1)
-          macos_tar=$(ls shuati-macOS-x64-*.tar.gz 2>/dev/null | head -1)
-          macos_hash=$(ls shuati-macOS-x64-*.tar.gz.sha256 2>/dev/null | head -1)
-          linux_deb=$(ls *.deb 2>/dev/null | head -1)
-          linux_deb_hash=$(ls *.deb.sha256 2>/dev/null | head -1)
+          # Find all files to upload safely without triggering set -e on missing globs
+          shopt -s nullglob
+          
+          zip_file=(shuati-windows-x64-*.zip)
+          zip_hash=(shuati-windows-x64-*.zip.sha256)
+          installer=(shuati-setup-x64-*.exe)
+          installer_hash=(shuati-setup-x64-*.exe.sha256)
+          linux_tar=(shuati-Linux-x64-*.tar.gz)
+          linux_hash=(shuati-Linux-x64-*.tar.gz.sha256)
+          macos_tar=(shuati-macOS-x64-*.tar.gz)
+          macos_hash=(shuati-macOS-x64-*.tar.gz.sha256)
+          linux_deb=(*.deb)
+          linux_deb_hash=(*.deb.sha256)
           
           # Build files array with only existing files
           files=()
-          [[ -f "$zip_file" ]] && files+=("$zip_file")
-          [[ -f "$zip_hash" ]] && files+=("$zip_hash")
-          [[ -f "$installer" ]] && files+=("$installer")
-          [[ -f "$installer_hash" ]] && files+=("$installer_hash")
-          [[ -f "$linux_tar" ]] && files+=("$linux_tar")
-          [[ -f "$linux_hash" ]] && files+=("$linux_hash")
-          [[ -f "$macos_tar" ]] && files+=("$macos_tar")
-          [[ -f "$macos_hash" ]] && files+=("$macos_hash")
-          [[ -f "$linux_deb" ]] && files+=("$linux_deb")
-          [[ -f "$linux_deb_hash" ]] && files+=("$linux_deb_hash")
+          [[ ${#zip_file[@]} -gt 0 ]] && files+=("${zip_file[0]}")
+          [[ ${#zip_hash[@]} -gt 0 ]] && files+=("${zip_hash[0]}")
+          [[ ${#installer[@]} -gt 0 ]] && files+=("${installer[0]}")
+          [[ ${#installer_hash[@]} -gt 0 ]] && files+=("${installer_hash[0]}")
+          [[ ${#linux_tar[@]} -gt 0 ]] && files+=("${linux_tar[0]}")
+          [[ ${#linux_hash[@]} -gt 0 ]] && files+=("${linux_hash[0]}")
+          [[ ${#macos_tar[@]} -gt 0 ]] && files+=("${macos_tar[0]}")
+          [[ ${#macos_hash[@]} -gt 0 ]] && files+=("${macos_hash[0]}")
+          [[ ${#linux_deb[@]} -gt 0 ]] && files+=("${linux_deb[0]}")
+          [[ ${#linux_deb_hash[@]} -gt 0 ]] && files+=("${linux_deb_hash[0]}")
           [[ -f "checksums.sha256" ]] && files+=("checksums.sha256")
           
           echo "Files to upload:"
           printf '%s\n' "${files[@]}"
           
           # Verify installer exists
-          if [[ -z "$installer" ]] || [[ ! -f "$installer" ]]; then
+          if [[ ${#installer[@]} -eq 0 ]]; then
             echo "ERROR: Windows installer not found!"
             echo "Available files:"
             ls -la *.exe 2>/dev/null || echo "No .exe files found"
