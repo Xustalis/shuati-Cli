@@ -1,4 +1,5 @@
 #include "shuati/judge.hpp"
+#include "shuati/sandbox.hpp"
 #include <fmt/core.h>
 #include <fmt/color.h>
 #include <filesystem>
@@ -214,49 +215,7 @@ std::vector<JudgeResult> Judge::judge(const std::string& source_file,
 
     return results;
 }
-
-#ifdef _WIN32
-// RAII Wrapper for HANDLE
-class ScopedHandle {
-public:
-    ScopedHandle() : h_(NULL) {}
-    ScopedHandle(HANDLE h) : h_(h) {}
-    ~ScopedHandle() { close(); }
-
-    void close() {
-        if (h_ != NULL && h_ != INVALID_HANDLE_VALUE) {
-            CloseHandle(h_);
-            h_ = NULL;
-        }
-    }
-
-    void reset(HANDLE h) {
-        close();
-        h_ = h;
-    }
-
-    HANDLE get() const { return h_; }
-    HANDLE* receive() { return &h_; } // For output parameters
-
-    // Non-copyable
-    ScopedHandle(const ScopedHandle&) = delete;
-    ScopedHandle& operator=(const ScopedHandle&) = delete;
-
-    // Moveable
-    ScopedHandle(ScopedHandle&& other) noexcept : h_(other.h_) { other.h_ = NULL; }
-    ScopedHandle& operator=(ScopedHandle&& other) noexcept {
-        if (this != &other) {
-            close();
-            h_ = other.h_;
-            other.h_ = NULL;
-        }
-        return *this;
-    }
-
-private:
-    HANDLE h_;
-};
-
+// unified run_case using ISandbox
 JudgeResult Judge::run_case(const std::string& executable, 
                             const TestCase& tc, 
                             int time_limit_ms, 
@@ -265,404 +224,121 @@ JudgeResult Judge::run_case(const std::string& executable,
     res.input = tc.input;
     res.expected = tc.output;
 
-    std::string cmd_line;
-    if (executable.find("python") == 0) {
-        cmd_line = executable;
-    } else {
-        cmd_line = "\"" + executable + "\"";
-    }
+    shuati::TempFile in_file(".in");
+    in_file.write(tc.input);
 
-    // Pipes
-    ScopedHandle hChildStd_IN_Rd, hChildStd_IN_Wr;
-    ScopedHandle hChildStd_OUT_Rd, hChildStd_OUT_Wr;
-    ScopedHandle hChildStd_ERR_Rd, hChildStd_ERR_Wr;
+    shuati::TempFile out_file(".out");
+    shuati::TempFile err_file(".err");
 
-    SECURITY_ATTRIBUTES saAttr; 
-    saAttr.nLength = sizeof(SECURITY_ATTRIBUTES); 
-    saAttr.bInheritHandle = TRUE; 
-    saAttr.lpSecurityDescriptor = NULL; 
+    auto sb = shuati::sandbox::create_sandbox();
+    shuati::sandbox::SandboxLimits limits;
+    limits.cpu_time_ms = time_limit_ms;
+    limits.memory_mb = memory_limit_kb / 1024;
 
-    if (!CreatePipe(hChildStd_OUT_Rd.receive(), hChildStd_OUT_Wr.receive(), &saAttr, 0)) return {Verdict::SE, 0, 0, "Pipe Error"};
-    if (!SetHandleInformation(hChildStd_OUT_Rd.get(), HANDLE_FLAG_INHERIT, 0)) return {Verdict::SE, 0, 0, "Handle Error"};
-    
-    if (!CreatePipe(hChildStd_ERR_Rd.receive(), hChildStd_ERR_Wr.receive(), &saAttr, 0)) return {Verdict::SE, 0, 0, "Pipe Error"};
-    if (!SetHandleInformation(hChildStd_ERR_Rd.get(), HANDLE_FLAG_INHERIT, 0)) return {Verdict::SE, 0, 0, "Handle Error"};
+    std::vector<std::string> args; 
 
-    if (!CreatePipe(hChildStd_IN_Rd.receive(), hChildStd_IN_Wr.receive(), &saAttr, 0)) return {Verdict::SE, 0, 0, "Pipe Error"};
-    if (!SetHandleInformation(hChildStd_IN_Wr.get(), HANDLE_FLAG_INHERIT, 0)) return {Verdict::SE, 0, 0, "Handle Error"};
+    auto sb_res = sb->execute(
+        executable,
+        args,
+        in_file.path(),
+        out_file.path(),
+        err_file.path(),
+        limits
+    );
 
-    STARTUPINFOA si;
-    PROCESS_INFORMATION pi;
-    ZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
-    si.hStdError = hChildStd_ERR_Wr.get();
-    si.hStdOutput = hChildStd_OUT_Wr.get();
-    si.hStdInput = hChildStd_IN_Rd.get();
-    si.dwFlags |= STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE;
+    res.time_ms = sb_res.cpu_time_ms;
+    res.memory_kb = sb_res.memory_mb * 1024;
 
-    ZeroMemory(&pi, sizeof(pi));
-
-    auto start_time = std::chrono::high_resolution_clock::now();
-
-    if (!CreateProcessA(NULL, const_cast<char*>(cmd_line.c_str()), NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
-        std::string msg = fmt::format("CreateProcess failed: {}", GetLastError());
-        return {Verdict::RE, 0, 0, msg, "", "", msg, ""};
-    }
-    
-    // Automatically close process handles when function returns
-    ScopedHandle hProcess(pi.hProcess);
-    ScopedHandle hThread(pi.hThread);
-
-    // Close handles intended for child in parent
-    hChildStd_OUT_Wr.close();
-    hChildStd_ERR_Wr.close();
-    hChildStd_IN_Rd.close();
-
-    // Write input in a separate thread
-    std::thread writer([h = std::move(hChildStd_IN_Wr), data = tc.input]() mutable {
-        if (!data.empty()) {
-            DWORD dwWritten;
-            WriteFile(h.get(), data.c_str(), (DWORD)data.size(), &dwWritten, NULL);
-        }
-        h.close(); 
-    });
-
-    std::string output, error_output;
-    const size_t MAX_CAPTURE = 4 * 1024 * 1024; // 4MB limit
-
-    // Drain stdout
-    std::thread reader_out([&]() {
-        char buffer[4096];
-        DWORD dwRead;
-        while (ReadFile(hChildStd_OUT_Rd.get(), buffer, sizeof(buffer), &dwRead, NULL) && dwRead > 0) {
-            if (output.size() < MAX_CAPTURE) {
-                size_t to_copy = std::min((size_t)dwRead, MAX_CAPTURE - output.size());
-                output.append(buffer, to_copy);
-            }
-        }
-    });
-
-    // Drain stderr
-    std::thread reader_err([&]() {
-        char buffer[4096];
-        DWORD dwRead;
-        while (ReadFile(hChildStd_ERR_Rd.get(), buffer, sizeof(buffer), &dwRead, NULL) && dwRead > 0) {
-             if (error_output.size() < MAX_CAPTURE) {
-                size_t to_copy = std::min((size_t)dwRead, MAX_CAPTURE - error_output.size());
-                error_output.append(buffer, to_copy);
-            }
-        }
-    });
-
-    bool finished = false;
-    DWORD exit_code = 0;
-    
-    if (WaitForSingleObject(hProcess.get(), time_limit_ms) == WAIT_OBJECT_0) {
-        finished = true;
-        GetExitCodeProcess(hProcess.get(), &exit_code);
-    } else {
-        TerminateProcess(hProcess.get(), 1);
-        finished = false;
-    }
-
-    // Wait for IO threads to finish (handles closed by child exit or termination)
-    if (writer.joinable()) writer.join();
-    if (reader_out.joinable()) reader_out.join();
-    if (reader_err.joinable()) reader_err.join();
-
-    auto end_time = std::chrono::high_resolution_clock::now();
-    res.time_ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-
-    if (!finished) {
+    if (sb_res.status == shuati::sandbox::SandboxResultStatus::TimeLimitExceeded) {
         res.verdict = Verdict::TLE;
+    } else if (sb_res.status == shuati::sandbox::SandboxResultStatus::MemoryLimitExceeded) {
+        res.verdict = Verdict::MLE;
+    } else if (sb_res.status == shuati::sandbox::SandboxResultStatus::RuntimeError) {
+        res.verdict = Verdict::RE;
+        res.error_output = shuati::read_text_file(err_file.path());
+        if (res.error_output.empty()) {
+            res.error_output = fmt::format("Process exited with code {}", sb_res.exit_code);
+        }
+    } else if (sb_res.status == shuati::sandbox::SandboxResultStatus::InternalError) {
+        res.verdict = Verdict::RE;
+        res.error_output = "Sandbox Internal Error: " + sb_res.internal_message;
     } else {
-        PROCESS_MEMORY_COUNTERS pmc;
-        if (GetProcessMemoryInfo(hProcess.get(), &pmc, sizeof(pmc))) {
-             res.memory_kb = pmc.PeakPagefileUsage / 1024;
-             if (res.memory_kb > memory_limit_kb) res.verdict = Verdict::MLE;
-        }
-
-        if (res.verdict != Verdict::MLE) {
-             res.output = output;
-             res.error_output = error_output;
-             
-             if (exit_code != 0) {
-                res.verdict = Verdict::RE;
-                res.message = fmt::format("Exit code: {}", exit_code);
-            } else {
-                res.verdict = Verdict::AC;
-                res.verdict = check_output(output, tc.output);
-            }
-        }
-    }
-    
-    return res;
-}
-#else
-// Linux Implementation
-JudgeResult Judge::run_case(const std::string& executable, 
-                            const TestCase& tc, 
-                            int time_limit_ms, 
-                            int memory_limit_kb) {
-    JudgeResult res;
-    res.input = tc.input;
-    res.expected = tc.output;
-
-    int pipe_in[2], pipe_out[2], pipe_err[2];
-    if (pipe(pipe_in) < 0 || pipe(pipe_out) < 0 || pipe(pipe_err) < 0) {
-        return {Verdict::SE, 0, 0, "Pipe creation failed"};
-    }
-
-    auto start_time = std::chrono::steady_clock::now();
-    pid_t pid = fork();
-
-    if (pid < 0) {
-        close(pipe_in[0]); close(pipe_in[1]);
-        close(pipe_out[0]); close(pipe_out[1]);
-        close(pipe_err[0]); close(pipe_err[1]);
-        return {Verdict::SE, 0, 0, "Fork failed"};
-    } else if (pid == 0) {
-        // Child: create new process group to contain fork bombs
-        setpgid(0, 0);
-
-        // Redirect stdin
-        if (dup2(pipe_in[0], STDIN_FILENO) == -1) exit(1);
+        // OK
+        res.output = shuati::read_text_file(out_file.path());
+        res.verdict = check_output(res.output, tc.output);
         
-        // Redirect stdout/stderr
-        if (dup2(pipe_out[1], STDOUT_FILENO) == -1) exit(1);
-        if (dup2(pipe_err[1], STDERR_FILENO) == -1) exit(1);
-
-        // Close all pipe fds
-        close(pipe_in[0]); close(pipe_in[1]);
-        close(pipe_out[0]); close(pipe_out[1]);
-        close(pipe_err[0]); close(pipe_err[1]);
-
-        // Execute
-        std::vector<std::string> args_vec;
-        if (executable.find("python") == 0) {
-            args_vec.push_back("python3");
-            std::string script = executable.substr(7); 
-             if (script.front() == '"') script = script.substr(1, script.length()-2);
-            args_vec.push_back(script);
+        if (res.verdict == Verdict::WA) {
+            res.message = fmt::format("Expected:\n{}\nActual:\n{}", tc.output, res.output);
         } else {
-            fs::path exec_path = executable;
-            if (!exec_path.has_parent_path() && exec_path.string().find('/') == std::string::npos) {
-                exec_path = fs::path("./") / exec_path;
-            }
-            args_vec.push_back(exec_path.string());
-        }
-
-        std::vector<char*> args;
-        for(auto& s : args_vec) args.push_back(&s[0]);
-        args.push_back(nullptr);
-
-        execvp(args[0], args.data());
-        std::cerr << "Exec failed: " << errno << " " << std::strerror(errno) << std::endl;
-        exit(127); 
-    } else {
-        // Parent
-        close(pipe_in[0]);
-        close(pipe_out[1]);
-        close(pipe_err[1]);
-
-        if (!tc.input.empty()) {
-            size_t total_written = 0;
-            while (total_written < tc.input.size()) {
-                ssize_t w = write(pipe_in[1], tc.input.c_str() + total_written, tc.input.size() - total_written);
-                if (w < 0) break;
-                total_written += w;
-            }
-        }
-        close(pipe_in[1]); 
-
-        std::string output, error_output;
-        const size_t MAX_CAPTURE = 4 * 1024 * 1024;
-
-        auto reader = [&](int fd, std::string& target) {
-            char buffer[4096];
-            while (true) {
-                ssize_t n = read(fd, buffer, sizeof(buffer));
-                if (n > 0) {
-                    if (target.size() < MAX_CAPTURE) {
-                        target.append(buffer, std::min((size_t)n, MAX_CAPTURE - target.size()));
-                    }
-                    continue;
-                }
-                if (n == 0) break;
-                if (errno == EINTR) continue;
-                break;
-            }
-        };
-
-        std::thread out_thread(reader, pipe_out[0], std::ref(output));
-        std::thread err_thread(reader, pipe_err[0], std::ref(error_output));
-
-        bool finished = false;
-        int status = 0;
-        long long max_memory_kb = 0;
-
-        while (true) {
-            pid_t w = waitpid(pid, &status, WNOHANG);
-            if (w == pid) {
-                finished = true;
-                break;
-            }
-            auto now = std::chrono::steady_clock::now();
-            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count() > time_limit_ms) {
-                killpg(pid, SIGKILL);  // Kill entire process group
-                waitpid(pid, &status, 0);
-                res.verdict = Verdict::TLE;
-                res.time_ms = time_limit_ms;
-                break;
-            }
-
-            std::string status_path = fmt::format("/proc/{}/status", pid);
-            if (fs::exists(status_path)) {
-                std::ifstream f(status_path);
-                std::string line;
-                while (std::getline(f, line)) {
-                    if (line.compare(0, 6, "VmPeak") == 0) {
-                         std::stringstream ss(line);
-                         std::string label, unit;
-                         long long val;
-                         ss >> label >> val >> unit;
-                         if (val > max_memory_kb) max_memory_kb = val;
-                         break;
-                    }
-                }
-            }
-            if (max_memory_kb > memory_limit_kb) {
-                killpg(pid, SIGKILL);  // Kill entire process group
-                res.verdict = Verdict::MLE;
-                res.memory_kb = max_memory_kb;
-                waitpid(pid, &status, 0);
-                break;
-            }
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        }
-
-        if (out_thread.joinable()) out_thread.join();
-        if (err_thread.joinable()) err_thread.join();
-        close(pipe_out[0]);
-        close(pipe_err[0]);
-
-        res.output = output;
-        res.error_output = error_output;
-
-        if (res.verdict == Verdict::MLE || res.verdict == Verdict::TLE) {
-        } else if (finished) {
-            auto end_time = std::chrono::steady_clock::now();
-            res.time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-            res.memory_kb = max_memory_kb;
-
-            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-                res.verdict = Verdict::RE;
-                res.message = fmt::format("Exit code: {}", WEXITSTATUS(status));
-                if (WEXITSTATUS(status) == 127 && res.output.empty() && !res.error_output.empty()) {
-                    res.output = "Exec failed: " + res.error_output;
-                }
-            } else if (WIFSIGNALED(status)) {
-                res.verdict = Verdict::RE;
-                res.message = fmt::format("Signal: {}", WTERMSIG(status));
-            } else {
-                res.verdict = Verdict::AC;
-                res.verdict = check_output(output, tc.output);
-            }
+            res.verdict = Verdict::AC;
         }
     }
+
     return res;
 }
-#endif
 
 JudgeResult Judge::run_process_redirect(const std::string& cmd, 
                                         const std::string& input_file, 
                                         const std::string& output_file, 
                                         int time_limit_ms, 
                                         int memory_limit_kb) {
-    // Construct command: cmd [ < "input" ] [ > "output" ]
-    std::string full_cmd = cmd;
-    if (!input_file.empty()) {
-        full_cmd += fmt::format(" < \"{}\"", input_file);
-    }
-    if (!output_file.empty()) {
-        full_cmd += fmt::format(" > \"{}\"", output_file);
-    }
-    
     auto start = std::chrono::steady_clock::now();
-
-#ifdef _WIN32
-    // Windows Implementation using CreateProcess for Timeout Control
-    STARTUPINFOA si;
-    PROCESS_INFORMATION pi;
-    ZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
-    si.dwFlags |= STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE; // Hide window
-
-    ZeroMemory(&pi, sizeof(pi));
-
-    // Use cmd.exe /C to handle redirection
-    std::string shell_cmd = "cmd.exe /C \"" + full_cmd + "\"";
-
-    if (!CreateProcessA(NULL, const_cast<char*>(shell_cmd.c_str()), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-        return {Verdict::RE, 0, 0, "CreateProcess failed"};
-    }
-
-    bool finished = false;
-    DWORD exit_code = 0;
-
-    if (WaitForSingleObject(pi.hProcess, time_limit_ms) == WAIT_OBJECT_0) {
-        finished = true;
-        GetExitCodeProcess(pi.hProcess, &exit_code);
+    
+    // Naively parse cmd into executable and args for Sandbox compatibility
+    std::string executable;
+    std::vector<std::string> args;
+    size_t first_space = cmd.find(' ');
+    if (first_space == std::string::npos) {
+        executable = cmd;
     } else {
-        // Timeout
-        TerminateProcess(pi.hProcess, 1);
-        finished = false;
+        executable = cmd.substr(0, first_space);
+        std::string rest = cmd.substr(first_space + 1);
+        
+        // Very basic quote un-escaping since test generators pass `python "file"`
+        if (rest.size() >= 2 && rest.front() == '"' && rest.back() == '"') {
+            rest = rest.substr(1, rest.size() - 2);
+        }
+        args.push_back(rest);
     }
 
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
+    shuati::TempFile err_file(".err");
 
-    auto end = std::chrono::steady_clock::now();
+    auto sb = shuati::sandbox::create_sandbox();
+    shuati::sandbox::SandboxLimits limits;
+    limits.cpu_time_ms = time_limit_ms;
+    limits.memory_mb = memory_limit_kb / 1024;
+
+    auto sb_res = sb->execute(
+        executable,
+        args,
+        input_file,
+        output_file,
+        err_file.path(),
+        limits
+    );
+
     JudgeResult res;
-    res.time_ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-    res.memory_kb = 0; 
+    res.time_ms = sb_res.cpu_time_ms;
+    res.memory_kb = sb_res.memory_mb * 1024;
 
-    if (!finished) {
+    if (sb_res.status == shuati::sandbox::SandboxResultStatus::TimeLimitExceeded) {
         res.verdict = Verdict::TLE;
-    } else if (exit_code != 0) {
+    } else if (sb_res.status == shuati::sandbox::SandboxResultStatus::MemoryLimitExceeded) {
+        res.verdict = Verdict::MLE;
+    } else if (sb_res.status == shuati::sandbox::SandboxResultStatus::RuntimeError) {
         res.verdict = Verdict::RE;
-        res.message = fmt::format("Exit code {}", exit_code);
+        std::string err_output = shuati::read_text_file(err_file.path());
+        res.message = err_output.empty() ? fmt::format("Exit code {}", sb_res.exit_code) : err_output;
+    } else if (sb_res.status == shuati::sandbox::SandboxResultStatus::InternalError) {
+        res.verdict = Verdict::RE;
+        res.message = "Sandbox Internal Error: " + sb_res.internal_message;
     } else {
         res.verdict = Verdict::AC;
     }
-    return res;
 
-#else
-    // Fallback or Linux implementation (std::system is simple but blocking)
-    // For now keep std::system for non-Windows or implement fork/exec similar to run_case
-    int ret = std::system(full_cmd.c_str());
-    auto end = std::chrono::steady_clock::now();
-    
-    JudgeResult res;
-    res.time_ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-    res.memory_kb = 0;
-    
-    if (WIFEXITED(ret) && WEXITSTATUS(ret) != 0) {
-        res.verdict = Verdict::RE;
-        res.message = fmt::format("Exit code {}", WEXITSTATUS(ret));
-    } else if (WIFSIGNALED(ret)) {
-        res.verdict = Verdict::RE;
-        res.message = fmt::format("Signal {}", WTERMSIG(ret));
-    } else {
-        if (res.time_ms > time_limit_ms) res.verdict = Verdict::TLE;
-        else res.verdict = Verdict::AC;
-    }
     return res;
-#endif
 }
+
 
 bool Judge::stream_file_diff(const std::string& path1, const std::string& path2) {
     std::ifstream f1(path1), f2(path2);

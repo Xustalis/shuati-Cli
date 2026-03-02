@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(shuati-cli VERSION 0.0.3 LANGUAGES CXX)
+project(shuati-cli VERSION 0.0.4 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -51,6 +51,8 @@ set(CORE_SOURCES
     src/core/sm2_algorithm.cpp
     src/core/judge.cpp
     src/core/compiler_doctor.cpp
+    src/core/sandbox/sandbox_windows.cpp
+    src/core/sandbox/sandbox_linux.cpp
     src/core/boot_guard.cpp
     src/core/memory_manager.cpp
     src/core/version.cpp
@@ -168,7 +170,10 @@ add_shuati_test(test_version
 # Judge complex test
 add_shuati_test(test_judge_complex
     src/tests/test_judge_complex.cpp
-    EXTRA_SOURCES src/core/judge.cpp
+    EXTRA_SOURCES 
+        src/core/judge.cpp 
+        src/core/sandbox/sandbox_windows.cpp 
+        src/core/sandbox/sandbox_linux.cpp
     LINK_LIBS SQLiteCpp cpr::cpr nlohmann_json::nlohmann_json Threads::Threads
 )
 

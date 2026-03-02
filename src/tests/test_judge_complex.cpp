@@ -82,9 +82,58 @@ int main() {
     #endif
 }
 
+void test_mle() {
+    std::cout << "[Test] Memory Limit Exceeded (MLE) Check..." << std::endl;
+    std::string code = R"(
+#include <iostream>
+#include <vector>
+int main() {
+    std::vector<char*> ptrs;
+    while(true) {
+        ptrs.push_back(new char[10 * 1024 * 1024]);
+    }
+    return 0;
+}
+    )";
+    
+    std::ofstream src("mle_test.cpp");
+    src << code;
+    src.close();
+
+    Judge judge;
+    TestCase tc;
+    tc.input = ""; tc.output = ""; tc.is_sample = false;
+
+    // 64MB limit
+    auto results = judge.judge("mle_test.cpp", "cpp", {tc}, 5000, 64 * 1024);
+
+    if (results.empty()) {
+        std::cerr << "FAIL: MLE Test - No results returned" << std::endl;
+        exit(1);
+    }
+    
+    auto res = results[0];
+    if (res.verdict != Verdict::MLE) {
+        std::cerr << "FAIL: MLE Test - Expected MLE, but got " << (int)res.verdict << std::endl;
+        std::cerr << "Message: " << res.message << std::endl;
+        std::cerr << "Memory: " << res.memory_kb << " KB" << std::endl;
+        exit(1);
+    }
+    
+    std::cout << "PASS: MLE caught successfully. Peak Memory: " << res.memory_kb << " KB" << std::endl;
+    std::filesystem::remove("mle_test.cpp");
+    #ifdef _WIN32
+    std::filesystem::remove("mle_test.exe");
+    #else
+    std::filesystem::remove("mle_test");
+    #endif
+}
+
+
 int main() {
     try {
         test_large_output();
+        test_mle();
         std::cout << "All Judge Complex Tests Passed!" << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "Exception: " << e.what() << std::endl;
