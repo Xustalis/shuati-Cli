@@ -271,7 +271,7 @@ cmake --build build
 ## 💬 联系我们
 
 - **GitHub Issues**: 提交 [Bug](https://github.com/Xustalis/shuati-Cli/issues) 或特性需求
-- **Email**: [EMAIL_ADDRESS]
+- **Email**: gmxenith@gmail.com
 <br>
 
 <div align="center">
