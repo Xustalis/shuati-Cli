@@ -112,5 +112,86 @@ void cmd_config(CommandContext& ctx) {
     }
 }
 
+void cmd_login(CommandContext& ctx) {
+    try {
+        std::string platform = ctx.login_platform;
+        if (platform.empty()) {
+            std::cout << "可用平台: lanqiao\n";
+            std::cout << "用法: login <平台名>\n";
+            return;
+        }
+
+        // Normalize
+        for (auto& c : platform) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+        if (platform == "lanqiao") {
+            std::cout << "\n";
+            std::cout << "══════════════════════════════════════════════════\n";
+            std::cout << "  蓝桥云课 (lanqiao.cn) 登录配置向导\n";
+            std::cout << "══════════════════════════════════════════════════\n";
+            std::cout << "\n";
+            std::cout << "【步骤 1】用浏览器打开并登录 https://www.lanqiao.cn\n";
+            std::cout << "\n";
+            std::cout << "【步骤 2】按 F12 打开开发者工具，选择【网络(Network)】标签\n";
+            std::cout << "\n";
+            std::cout << "【步骤 3】刷新页面，在左侧请求列表中点击任意一个\n";
+            std::cout << "          lanqiao.cn 开头的请求\n";
+            std::cout << "\n";
+            std::cout << "【步骤 4】在右侧找到【请求头(Request Headers)】中的\n";
+            std::cout << "          \"Cookie\" 一行，右键复制其对应的完整值\n";
+            std::cout << "\n";
+            std::cout << "──────────────────────────────────────────────────\n";
+            std::cout << "  请在此处粘贴您的 Cookie 并按回车:\n";
+            std::cout << "  > ";
+            std::cout.flush();
+
+            std::string cookie;
+            std::getline(std::cin, cookie);
+
+            // Trim whitespace
+            auto trim_str = [](std::string s) {
+                size_t start = s.find_first_not_of(" \t\r\n");
+                if (start == std::string::npos) return std::string{};
+                size_t end = s.find_last_not_of(" \t\r\n");
+                return s.substr(start, end - start + 1);
+            };
+            cookie = trim_str(cookie);
+
+            if (cookie.empty()) {
+                std::cout << "\n[!] 未输入任何内容，操作取消。\n";
+                return;
+            }
+
+            // Simple sanity check: valid cookies contain '=' sign
+            if (cookie.find('=') == std::string::npos) {
+                std::cout << "\n[!] 看起来不像是有效的 Cookie (应包含'='字符)。\n";
+                std::cout << "    您粘贴的是否是正确的 Cookie 值?\n";
+                return;
+            }
+
+            auto root = Config::find_root();
+            if (root.empty()) {
+                std::cerr << "[!] 未找到项目目录。请先在项目目录中运行 'shuati init'。\n";
+                return;
+            }
+
+            auto cfg_path = Config::config_path(root);
+            auto cfg = Config::load(cfg_path);
+            cfg.lanqiao_cookie = cookie;
+            cfg.save(cfg_path);
+
+            std::cout << "\n[+] Cookie 已保存！\n";
+            std::cout << "    现在可以使用 'shuati pull <蓝桥题目URL>' 抓取完整题目了。\n\n";
+
+        } else {
+            std::cout << "[!] 未知平台: " << platform << "\n";
+            std::cout << "    目前支持: lanqiao\n";
+        }
+
+    } catch (const std::exception& e) {
+        std::cerr << "[!] Error: " << e.what() << "\n";
+    }
+}
+
 } // namespace cmd
 } // namespace shuati

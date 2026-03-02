@@ -423,7 +423,9 @@ JudgeResult Judge::run_case(const std::string& executable,
         close(pipe_err[0]); close(pipe_err[1]);
         return {Verdict::SE, 0, 0, "Fork failed"};
     } else if (pid == 0) {
-        // Child
+        // Child: create new process group to contain fork bombs
+        setpgid(0, 0);
+
         // Redirect stdin
         if (dup2(pipe_in[0], STDIN_FILENO) == -1) exit(1);
         
@@ -508,7 +510,7 @@ JudgeResult Judge::run_case(const std::string& executable,
             }
             auto now = std::chrono::steady_clock::now();
             if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count() > time_limit_ms) {
-                kill(pid, SIGKILL);
+                killpg(pid, SIGKILL);  // Kill entire process group
                 waitpid(pid, &status, 0);
                 res.verdict = Verdict::TLE;
                 res.time_ms = time_limit_ms;
@@ -531,14 +533,14 @@ JudgeResult Judge::run_case(const std::string& executable,
                 }
             }
             if (max_memory_kb > memory_limit_kb) {
-                kill(pid, SIGKILL);
+                killpg(pid, SIGKILL);  // Kill entire process group
                 res.verdict = Verdict::MLE;
                 res.memory_kb = max_memory_kb;
                 waitpid(pid, &status, 0);
                 break;
             }
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
 
         if (out_thread.joinable()) out_thread.join();

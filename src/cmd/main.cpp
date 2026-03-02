@@ -38,7 +38,7 @@ void run_repl() {
     // Set up completion
     rx.set_completion_callback([&](std::string const& input, int& contextLen) {
         std::vector<Replxx::Completion> completions;
-        std::vector<std::string> cmds = {"init", "info", "pull", "new", "solve", "list", "delete", "submit", "test", "hint", "config", "exit", "view"};
+        std::vector<std::string> cmds = {"init", "info", "pull", "new", "solve", "list", "delete", "submit", "test", "hint", "config", "login", "exit", "view"};
         
         // Command completion
         size_t last_space = input.rfind(' ');
@@ -200,6 +200,7 @@ void run_repl() {
              fmt::print("{:<10} {:<35} {}\n", "test", "运行测试用例", "test <id>");
              fmt::print("{:<10} {:<35} {}\n", "hint", "获取 AI 提示", "hint <id>");
              fmt::print("{:<10} {:<35} {}\n", "config", "配置工具", "config [--show]");
+             fmt::print("{:<10} {:<35} {}\n", "login", "配置平台登录 Cookie", "login lanqiao");
              fmt::print("{:<10} {:<35} {}\n", "exit", "退出", "exit");
              fmt::print("\n");
              continue; 

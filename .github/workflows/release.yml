@@ -241,6 +241,15 @@ jobs:
           fi
           cp -f install.sh dist/ || true
 
+      - name: Pack (Linux .deb)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cd build
+          cpack -G DEB
+          cp *.deb ../ || echo "No .deb files generated"
+          cd ..
+
       - name: Pack (Linux/macOS .tar.gz)
         if: runner.os != 'Windows'
         shell: bash
@@ -304,6 +313,7 @@ jobs:
           path: |
             shuati-Linux-x64-${{ github.ref_name }}.tar.gz
             shuati-Linux-x64-${{ github.ref_name }}.tar.gz.sha256
+            *.deb
 
       - name: Upload Assets (macOS)
         if: runner.os == 'macOS'

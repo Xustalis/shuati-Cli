@@ -98,26 +98,26 @@ if [ ! -w "$INSTALL_DIR" ]; then
     sudo mv "$BINARY_PATH" "$INSTALL_DIR/$BINARY_NAME"
     sudo chmod +x "$INSTALL_DIR/$BINARY_NAME"
     
-    # Also copy resources if they exist
+    # Install resources to FHS-compliant path
     RES_DIR=$(find "$TMP_DIR" -type d -name "resources" | head -1)
+    SHARE_DIR="/usr/local/share/shuati-cli"
     if [ ! -z "$RES_DIR" ]; then
-        # Check if we should copy resources... 
-        # Usually they should be adjacent to binary or in user config.
-        # For simplicity in this script we just copy binary. 
-        # If resources are needed, they should be in standard paths.
-        # Assuming binary handles resources relative to it or embedded.
-        # But wait, earlier scripts copied resources. 
-        # If resources are next to binary, we need to install them too.
-        # Let's assume for now user installs to /usr/local/bin, 
-        # resources in /usr/local/share/shuati-cli or similar would be better.
-        # But existing code expects them relative?
-        # Let's disable resource copy to /usr/local/bin to avoid clutter, 
-        # unless user specifies directory.
-        : # no-op
+        log "Installing resources to $SHARE_DIR/resources..."
+        sudo mkdir -p "$SHARE_DIR"
+        sudo cp -rf "$RES_DIR" "$SHARE_DIR/"
     fi
 else
     mv "$BINARY_PATH" "$INSTALL_DIR/$BINARY_NAME"
     chmod +x "$INSTALL_DIR/$BINARY_NAME"
+    
+    # Install resources
+    RES_DIR=$(find "$TMP_DIR" -type d -name "resources" | head -1)
+    SHARE_DIR="/usr/local/share/shuati-cli"
+    if [ ! -z "$RES_DIR" ]; then
+        log "Installing resources to $SHARE_DIR/resources..."
+        mkdir -p "$SHARE_DIR"
+        cp -rf "$RES_DIR" "$SHARE_DIR/"
+    fi
 fi
 
 success "Installed shuati to $INSTALL_DIR/$BINARY_NAME"

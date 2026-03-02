@@ -75,6 +75,10 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
 
     app.add_subcommand("clean", "清理临时文件")->callback([&](){ cmd_clean(ctx); });
 
+    auto login_cmd = app.add_subcommand("login", "配置平台登录凭据 (Cookie)");
+    login_cmd->add_option("platform", ctx.login_platform, "平台名, 例如: lanqiao")->required();
+    login_cmd->callback([&](){ cmd_login(ctx); });
+
     auto cfg = app.add_subcommand("config", "配置工具");
     cfg->add_flag("--show", ctx.cfg_show, "显示配置");
     cfg->add_option("--api-key", ctx.cfg_key, "设置 API Key");

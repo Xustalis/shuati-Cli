@@ -1,4 +1,5 @@
 #include "shuati/compiler_doctor.hpp"
+#include "shuati/resource_path.hpp"
 #include <regex>
 #include <fstream>
 #include <fmt/core.h>
@@ -68,18 +69,9 @@ Diagnosis CompilerDoctor::diagnose(const std::string& error_output) {
 
     // Load rules on first use if not already loaded
     if (!rules_loaded_) {
-        // Try to load from multiple possible locations
-        std::vector<std::string> possible_paths = {
-            "resources/rules/compiler_errors.json",
-            "../resources/rules/compiler_errors.json",
-            "../../resources/rules/compiler_errors.json"
-        };
-        
-        for (const auto& path : possible_paths) {
-            if (load_rules(path)) {
-                break;
-            }
-        }
+        // Use platform-aware resource path resolution
+        auto rules_path = get_resource_path("rules/compiler_errors.json");
+        load_rules(rules_path.string());
     }
 
     // Try to match against loaded rules

@@ -1,5 +1,6 @@
 #include "commands.hpp"
 #include "shuati/utils/encoding.hpp"
+#include "shuati/stream_filter.hpp"
 #include <string>
 #include <iostream>
 #include <fstream>
@@ -422,31 +423,16 @@ void cmd_test(CommandContext& ctx) {
 
              std::string desc = build_problem_text(prob);
              
-             // Streaming output callback with filtering (Reuse logic? Copy for now to be safe)
-             std::string buffer;
-             bool suppress = false;
-             auto print_chunk = [&](std::string chunk) {
-                if (suppress) return;
-                buffer += chunk;
-                size_t start_pos = buffer.find("<!-- SYSTEM_OP");
-                if (start_pos != std::string::npos) {
-                    std::cout << buffer.substr(0, start_pos) << std::flush;
-                    buffer.clear();
-                    suppress = true;
-                } else {
-                    if (buffer.size() > 20) {
-                        size_t print_len = buffer.size() - 20;
-                        std::cout << buffer.substr(0, print_len) << std::flush;
-                        buffer.erase(0, print_len);
-                    }
-                }
-             };
+             // Streaming output with robust tag filtering
+             StreamFilter filter([](const std::string& text) {
+                 std::cout << text << std::flush;
+             });
 
-             svc.ai->diagnose(desc, code, failure_info, "", print_chunk);
+             svc.ai->diagnose(desc, code, failure_info, "", [&filter](std::string chunk) {
+                 filter.feed(chunk);
+             });
              
-             if (!suppress && !buffer.empty() && buffer.find("<!--") == std::string::npos) {
-                 std::cout << buffer << std::flush;
-             }
+             filter.flush();
              std::cout << std::endl;
         }
 

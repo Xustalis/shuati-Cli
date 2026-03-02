@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(shuati-cli VERSION 0.0.2 LANGUAGES CXX)
+project(shuati-cli VERSION 0.0.3 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -98,11 +98,32 @@ target_link_libraries(shuati PRIVATE
     Threads::Threads
 )
 
-target_compile_definitions(shuati PRIVATE SHUATI_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(shuati PRIVATE
+    SHUATI_VERSION="${PROJECT_VERSION}"
+)
 
 if(WIN32)
     target_link_libraries(shuati PRIVATE Psapi Shell32)
 endif()
+
+# ── Install rules ──────────────────────────────────────
+include(GNUInstallDirs)
+install(TARGETS shuati RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(DIRECTORY resources/ DESTINATION ${CMAKE_INSTALL_DATADIR}/shuati-cli/resources)
+
+# ── CPack DEB configuration ───────────────────────────
+set(CPACK_PACKAGE_NAME "shuati-cli")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Shuati CLI - Terminal-based algorithm practice tool")
+set(CPACK_PACKAGE_CONTACT "Xustalis <admin@example.com>")
+
+set(CPACK_GENERATOR "DEB;TGZ")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Xustalis <admin@example.com>")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6 (>= 2.31), libgcc-s1, libstdc++6, libcurl4")
+set(CPACK_DEBIAN_PACKAGE_SECTION "education")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+include(CPack)
 
 # Copy resources to build directory
 add_custom_command(TARGET shuati POST_BUILD

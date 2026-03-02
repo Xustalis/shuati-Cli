@@ -46,6 +46,14 @@ jobs:
           echo "Checking code formatting..."
           clang-format -style=file --dry-run --Werror $files || true
 
+      - name: Static Analysis (cppcheck)
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y cppcheck
+          cppcheck --error-exitcode=0 --enable=warning,performance \
+            --suppress=missingIncludeSystem \
+            -I include/ src/ || true
+
   # ============================================
   # 阶段2: 构建和测试矩阵
   # ============================================

@@ -110,3 +110,7 @@ docs/_site/
 # Temp test scripts
 test_simple.bat
 test_simple_crawlers.py
+# Generated Analysis Reports
+shuati_analysis_report.md
+linux_diagnosis_report.md
+upgrade_plan_v0.0.2_to_v0.0.8.md

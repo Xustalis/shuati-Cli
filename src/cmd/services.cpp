@@ -66,7 +66,7 @@ Services Services::load(const fs::path& root) {
         s.pm->register_crawler(std::make_unique<LeetCodeCrawler>());
         s.pm->register_crawler(std::make_unique<CodeforcesCrawler>());
         s.pm->register_crawler(std::make_unique<LuoguCrawler>());
-        s.pm->register_crawler(std::make_unique<LanqiaoCrawler>());
+        s.pm->register_crawler(std::make_unique<LanqiaoCrawler>(nullptr, s.cfg.lanqiao_cookie));
         
         s.ma  = std::make_shared<MistakeAnalyzer>(s.db);
         s.mm  = std::make_unique<MemoryManager>(*s.db); // Database& constructor

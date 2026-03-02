@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.0.3] - 2026-03-02
+
+### 新增功能 (New Features)
+- **蓝桥云课交互式登录 (`shuati login`)**：新增了 `login` CLI 命令，用于直接在终端内交互式配置 Cookie。爬虫在拉取数据时会自动携带 Auth 凭据，并在令牌过期或未配置时提供极其友善的错误回退诊断与排查指引 (支持高达 9 种数据字段名的防弹级解析与跨层提取，解决蓝桥云课新旧 API 不兼容问题，确保成功抓取)。
+- **多平台安装包 (DEB / Tarball / Zip / EXE)**：CI/CD 现已不仅支持 Windows，新增了 Linux 的 `cpack -G DEB` 全自动打 Debian 安装包和 `tar.gz` 封包机制，全面兼容跨平台发行。由于 FHS 文件结构限制，程序已内建动态资源寻址引擎 (`resource_path.hpp`)。
+
+### 修复问题 (Bug Fixes)
+- **Linux 沙箱系统级稳定性重构**：修复了在 Linux / macOS / WSL2 下，原生进程沙箱通过 `kill` 命令导致在子进程 (TLE / MLE) 时引发的孤儿僵尸进程问题，全面改为了 `setpgid` (0,0) 的进程组硬隔离管控并以 `killpg` 兜底；此外将 `/proc` 的资源状态轮询间隔从高能耗的 10ms 调整为了 50ms。
+- **AI 解析标签泄漏修复**：彻底废弃了原先脆弱的 20 字符固定环形缓冲识别方案，引入了新的状态机标签剔除引擎 (`StreamFilter`) 解析底层 LLM 推理系统的 `<system_op>` 隐藏指令，防止界面 UI 控制台污染。
+- **配置文件防崩塌机制**：修复了通过 CLI 临时交互式配置某些零散项时，导致原 `config.json` 的不可见 / 元定义元数据（如 `version`）遭到意外覆盖和丢失的关键 Bug，统一使用了原样载入加软合并写入 (Merge Save)。
+- **资源相对定位修复**：修复了由于 `__FILE__` 编译期硬编码导致的生产环境、安装环境 (如 Linux 下的 `/usr/local/share`) 下无法寻找 `CompilerDoctor` 分析诊断规则引擎元数据的重大缺陷。
+- **CI 工作流修复与代码静态分析**：集成了 `cppcheck` C/C++ 静态代码分析检测，并在构建脚本中引入了防御性版本锁定策略 (Python Tag Validation)，强制要求 Github Release Tag、代码树内部版本与依赖清单配置严格三字头统一才能继续打包，最大程度规避了暗坑残余。
+
+### 破坏性变更 (Breaking Changes)
+- 无
+
+### 升级指引 (Upgrade Guide)
+- 请直接在客户端内通过 `update` 命令进行获取，或从本 Release 下载最新安装程序 (`shuati-setup-x64-v0.0.3.exe` 或 Linux `v0.0.3.deb`) 进行覆盖安装。
+
 ## [0.0.2] - 2026-03-01
 
 ### 新增功能 (New Features)
@@ -29,19 +48,11 @@ All notable changes to this project will be documented in this file.
 ### 新增
 
 - **引导程序**：初始项目设置，统一版本为 v0.0.1。
-
 - **构建**：修复了 CMake 配置和构建问题。
-
 - **持续集成**：修复了 GitHub Actions CI/CD 工作流程。
-
 - **核心功能**：
-
 - 多平台爬虫：LeetCode (GraphQL)、Codeforces、罗谷、蓝桥
-
 - 本地评判引擎：C++ 和 Python 的沙箱执行
-
 - AI 教练：集成 LLM 用于错误诊断
-
 - 记忆系统：SM2 算法用于间隔重复训练
-
 - 带自动补全功能的交互式 REPL 模式

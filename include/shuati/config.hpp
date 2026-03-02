@@ -19,6 +19,7 @@ struct Config {
     std::string editor;               // Editor command (e.g., "code", "vim")
     bool ai_enabled = true;           // Enable AI features
     bool template_enabled = true;     // Enable template generation
+    std::string lanqiao_cookie;       // Cookie for authenticated Lanqiao problem fetching
 
     static constexpr const char* DIR_NAME = ".shuati";
     static constexpr const char* DB_NAME = "shuati.db";
@@ -49,15 +50,26 @@ struct Config {
     }
 
     void save(const fs::path& path) const {
+        // Load existing JSON first so we don't destroy untracked fields (e.g. "version")
         nlohmann::json j;
-        j["api_key"] = api_key;
-        j["api_base"] = api_base;
-        j["model"] = model;
-        j["language"] = language;
-        j["max_tokens"] = max_tokens;
-        j["editor"] = editor;
-        j["ai_enabled"] = ai_enabled;
-        j["template_enabled"] = template_enabled;
+        {
+            std::ifstream in(path);
+            if (in.good()) {
+                try { in >> j; } catch (...) { j = nlohmann::json::object(); }
+            } else {
+                j = nlohmann::json::object();
+            }
+        }
+        // Merge / update only the fields we own
+        if (!api_key.empty())        j["api_key"]          = api_key;
+        if (!api_base.empty())       j["api_base"]         = api_base;
+        if (!model.empty())          j["model"]            = model;
+        if (!language.empty())       j["language"]         = language;
+        if (max_tokens != 4096)      j["max_tokens"]       = max_tokens;
+        if (!editor.empty())         j["editor"]           = editor;
+        j["ai_enabled"]              = ai_enabled;
+        j["template_enabled"]        = template_enabled;
+        if (!lanqiao_cookie.empty()) j["lanqiao_cookie"]   = lanqiao_cookie;
         std::ofstream(path) << j.dump(2);
     }
 
@@ -74,6 +86,7 @@ struct Config {
             if (j.contains("editor"))     c.editor     = j["editor"];
             if (j.contains("ai_enabled")) c.ai_enabled = j["ai_enabled"];
             if (j.contains("template_enabled")) c.template_enabled = j["template_enabled"];
+            if (j.contains("lanqiao_cookie")) c.lanqiao_cookie = j["lanqiao_cookie"];
         } catch (...) {}
         return c;
     }

@@ -37,6 +37,7 @@ struct CommandContext {
     bool test_ui = false;
     std::string list_filter; // "all", "ac", "failed", "unaudited"
     std::string view_export_dir; // Directory to save test cases
+    std::string login_platform;  // Platform for login command (e.g., "lanqiao")
 };
 
 // ─── Services ─────────────────────────────────────────
@@ -74,6 +75,7 @@ void cmd_submit(CommandContext& ctx);
 void cmd_hint(CommandContext& ctx);
 void cmd_clean(CommandContext& ctx);
 void cmd_view(CommandContext& ctx);
+void cmd_login(CommandContext& ctx);
 
 // Registers all commands to the App
 void setup_commands(CLI::App& app, CommandContext& ctx);

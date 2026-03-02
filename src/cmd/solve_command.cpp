@@ -1,6 +1,7 @@
 #include "commands.hpp"
 #include "commands.hpp"
 #include "shuati/utils/encoding.hpp"
+#include "shuati/stream_filter.hpp"
 #include <string>
 // #include <ftxui/component/component.hpp>
 // #include <ftxui/component/screen_interactive.hpp>
@@ -145,43 +146,16 @@ void cmd_hint(CommandContext& ctx) {
 
         std::cout << "[教练] 思考中 (按 Ctrl+C 中止)..." << std::endl << std::endl;
         
-        // Streaming output callback with filtering
-        std::string buffer;
-        bool suppress = false;
-        
-        auto print_chunk = [&](std::string chunk) {
-            if (suppress) return;
-            
-            buffer += chunk;
-            
-            // Check for start marker
-            size_t start_pos = buffer.find("<!-- SYSTEM_OP");
-            if (start_pos != std::string::npos) {
-                // Print pending valid text up to marker
-                std::cout << buffer.substr(0, start_pos) << std::flush;
-                buffer.clear(); // Clear printed
-                suppress = true; // Stop printing subsequent chunks
-            } else {
-                // To be safe against split markers (e.g. "<!-", "- SY"), 
-                // we should keep a small tail. 
-                // Simple heuristic: Keep last 20 chars in buffer, print the rest.
-                if (buffer.size() > 20) {
-                    size_t print_len = buffer.size() - 20;
-                    std::cout << buffer.substr(0, print_len) << std::flush;
-                    buffer.erase(0, print_len);
-                }
-            }
-        };
+        // Streaming output with robust tag filtering
+        StreamFilter filter([](const std::string& text) {
+            std::cout << text << std::flush;
+        });
 
-        svc.ai->analyze(desc, code, print_chunk);
+        svc.ai->analyze(desc, code, [&filter](std::string chunk) {
+            filter.feed(chunk);
+        });
         
-        // Print remaining buffer if not suppressed (and no partial marker found at very end)
-        if (!suppress && !buffer.empty()) {
-             // Double check if buffer looks like start of marker
-             if (buffer.find("<!--") == std::string::npos) {
-                 std::cout << buffer << std::flush;
-             }
-        }
+        filter.flush();
         std::cout << "\n\n";
     } catch (const std::exception& e) {
             std::cerr << "[!] 错误: " << e.what() << std::endl;

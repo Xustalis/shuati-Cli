@@ -11,7 +11,7 @@ class LanqiaoCrawlerImpl;
 
 class LanqiaoCrawler : public ICrawler {
 public:
-    explicit LanqiaoCrawler(std::shared_ptr<IHttpClient> client = nullptr);
+    explicit LanqiaoCrawler(std::shared_ptr<IHttpClient> client = nullptr, std::string cookie = "");
     ~LanqiaoCrawler();
 
     bool can_handle(const std::string& url) const override;
