@@ -36,7 +36,6 @@ Shuati CLI 是一款专为算法爱好者设计的命令行工具。它不仅能
 irm https://github.com/Xustalis/shuati-Cli/releases/latest/download/shuati-cli-setup.exe -OutFile shuati-cli-setup.exe
 .\shuati-cli-setup.exe
 ```
-*(Linux / macOS 用户请参阅[从源码编译](#从源码编译-linux--macos--windows))*
 
 ### 2️⃣ 初始化练习目录 (2分钟)
 
