@@ -10,22 +10,8 @@
 #include <iostream>
 #include <system_error>
 #include <cstdlib>
-
-#ifdef _WIN32
-#include <windows.h>
-#include <psapi.h>
-#else
-#include <unistd.h>
-#include <sys/wait.h>
-#include <signal.h>
-#include <fcntl.h>
-#include <poll.h>
-#include <algorithm>
-#include <cerrno>
-#include <cstring>
-#endif
-
 #include <random>
+
 
 namespace shuati {
 
