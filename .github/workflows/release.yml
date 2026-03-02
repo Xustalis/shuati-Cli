@@ -293,6 +293,13 @@ jobs:
             $py -c "import hashlib, pathlib; p=pathlib.Path(r'''$f'''); h=hashlib.sha256(p.read_bytes()).hexdigest(); pathlib.Path(str(p)+'.sha256').write_text(f\"{h}  {p.name}\n\"); print(h)"
           }
           sha_one "shuati-${{ runner.os }}-x64-${{ github.ref_name }}.tar.gz"
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            for deb in *.deb; do
+              if [[ -f "$deb" ]]; then
+                sha_one "$deb"
+              fi
+            done
+          fi
 
       - name: Upload Assets (Windows)
         if: runner.os == 'Windows'
@@ -381,6 +388,8 @@ jobs:
           linux_hash=$(ls shuati-Linux-x64-*.tar.gz.sha256 2>/dev/null | head -1)
           macos_tar=$(ls shuati-macOS-x64-*.tar.gz 2>/dev/null | head -1)
           macos_hash=$(ls shuati-macOS-x64-*.tar.gz.sha256 2>/dev/null | head -1)
+          linux_deb=$(ls *.deb 2>/dev/null | head -1)
+          linux_deb_hash=$(ls *.deb.sha256 2>/dev/null | head -1)
           
           # Build files array with only existing files
           files=()
@@ -392,6 +401,8 @@ jobs:
           [[ -f "$linux_hash" ]] && files+=("$linux_hash")
           [[ -f "$macos_tar" ]] && files+=("$macos_tar")
           [[ -f "$macos_hash" ]] && files+=("$macos_hash")
+          [[ -f "$linux_deb" ]] && files+=("$linux_deb")
+          [[ -f "$linux_deb_hash" ]] && files+=("$linux_deb_hash")
           [[ -f "checksums.sha256" ]] && files+=("checksums.sha256")
           
           echo "Files to upload:"
