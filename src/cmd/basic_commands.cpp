@@ -24,21 +24,33 @@ void cmd_init(CommandContext& ctx) {
         fs::create_directories(shuati_dir / "temp");
         fs::create_directories(shuati_dir / "logs");
 
-        // Default Config
-        nlohmann::json config;
-        config["version"] = current_version().to_string();
-        config["language"] = "cpp"; // default
-        config["editor"] = "code";  // default vscode
-        
-        std::ofstream o(shuati_dir / "config.json");
-        o << config.dump(4);
+        // Auto-detect best editor for this platform, then save config in one shot
+        Config cfg;
+        cfg.language = "cpp";
+        cfg.editor = Config::detect_editor();
+        cfg.autostart_repl = true;
 
-        // Database
+        // Write config once (also serialises version via raw JSON merge)
+        auto cfg_path = shuati_dir / "config.json";
+        cfg.save(cfg_path);
+        // Inject "version" field (not tracked in Config struct, kept as metadata)
+        {
+            nlohmann::json j;
+            { std::ifstream in(cfg_path); if (in.good()) in >> j; }
+            j["version"] = current_version().to_string();
+            std::ofstream out(cfg_path);
+            out << j.dump(4);
+        }
+
+        // Database initialisation
         Database db((shuati_dir / "shuati.db").string());
         db.init_schema();
 
         std::cout << "[+] 初始化成功!" << std::endl;
         std::cout << "    位置: " << shuati_dir.string() << std::endl;
+        std::cout << "    编辑器: " << cfg.editor << std::endl;
+        std::cout << "    自动启动 REPL: " << (cfg.autostart_repl ? "开启" : "关闭") << std::endl;
+        std::cout << "    (使用 'shuati config --editor <编辑器>' 可更改编辑器)" << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "[!] 初始化失败: " << e.what() << std::endl;
     }
@@ -65,46 +77,74 @@ void cmd_info(CommandContext& ctx) {
 
 void cmd_config(CommandContext& ctx) {
     try {
+        auto root = find_root_or_die();
+        
         if (ctx.cfg_show) {
-            auto root = find_root_or_die();
             std::ifstream i(root / ".shuati" / "config.json");
             std::cout << i.rdbuf() << std::endl;
             return;
         }
 
-        auto root = find_root_or_die();
-        // Load existing
-        nlohmann::json j;
-        {
-            std::ifstream i(root / ".shuati" / "config.json");
-            if (i.good()) i >> j;
-        }
-
+        // Load existing config
+        auto cfg_path = Config::config_path(root);
+        auto cfg = Config::load(cfg_path);
         bool changed = false;
+
         if (!ctx.cfg_key.empty()) {
-            j["api_key"] = ctx.cfg_key;
+            cfg.api_key = ctx.cfg_key;
             changed = true;
-            std::cout << "[+] API Key set." << std::endl;
+            std::cout << "[+] API Key 已设置。" << std::endl;
         }
         if (!ctx.cfg_model.empty()) {
-            j["model"] = ctx.cfg_model;
+            cfg.model = ctx.cfg_model;
             changed = true;
-            std::cout << "[+] Model set to: " << ctx.cfg_model << std::endl;
+            std::cout << "[+] 模型已设置为: " << ctx.cfg_model << std::endl;
         }
         if (!ctx.new_diff.empty() && (ctx.new_diff == "cpp" || ctx.new_diff == "python")) {
-            // Reusing new_diff field for language arg as per commands.cpp setup??
-            // commands.cpp: cfg->add_option("--language", ctx.new_diff, "设置语言");
-            // Yes, reusing variable.
-            j["language"] = ctx.new_diff;
+            cfg.language = ctx.new_diff;
             changed = true;
-            std::cout << "[+] Language set to: " << ctx.new_diff << std::endl;
+            std::cout << "[+] 语言已设置为: " << ctx.new_diff << std::endl;
+        }
+        // Editor config with auto-detect support
+        if (!ctx.cfg_editor.empty()) {
+            if (ctx.cfg_editor == "auto") {
+                cfg.editor = Config::detect_editor();
+                std::cout << "[+] 编辑器已自动检测并设置为: " << cfg.editor << std::endl;
+            } else {
+                cfg.editor = ctx.cfg_editor;
+                std::cout << "[+] 编辑器已设置为: " << cfg.editor << std::endl;
+            }
+            changed = true;
+        }
+        // Autostart REPL toggle
+        if (!ctx.cfg_autostart_repl.empty()) {
+            if (ctx.cfg_autostart_repl == "on" || ctx.cfg_autostart_repl == "true" || ctx.cfg_autostart_repl == "1") {
+                cfg.autostart_repl = true;
+                changed = true;
+                std::cout << "[+] 自动启动 REPL: 已开启。" << std::endl;
+                std::cout << "    (现在运行 'shuati' (无参数) 将自动进入交互模式)" << std::endl;
+            } else if (ctx.cfg_autostart_repl == "off" || ctx.cfg_autostart_repl == "false" || ctx.cfg_autostart_repl == "0") {
+                cfg.autostart_repl = false;
+                changed = true;
+                std::cout << "[+] 自动启动 REPL: 已关闭。" << std::endl;
+                std::cout << "    (运行 'shuati repl' 可手动进入交互模式)" << std::endl;
+            } else {
+                std::cerr << "[!] --autostart-repl 的值必须是 'on' 或 'off'" << std::endl;
+            }
         }
 
         if (changed) {
-            std::ofstream o(root / ".shuati" / "config.json");
-            o << j.dump(4);
+            cfg.save(cfg_path);
+            std::cout << "[+] 配置已保存。" << std::endl;
         } else {
-            std::cout << "No changes specified. Use --show to view config." << std::endl;
+            std::cout << "未指定任何更改。使用 --show 查看当前配置。" << std::endl;
+            std::cout << "\n可用选项:\n";
+            std::cout << "  --show                显示当前所有配置\n";
+            std::cout << "  --api-key <key>       设置 AI API Key\n";
+            std::cout << "  --model <model>       设置模型名称\n";
+            std::cout << "  --language <cpp|python> 设置默认编程语言\n";
+            std::cout << "  --editor <cmd|auto>   设置编辑器命令 (auto=自动检测)\n";
+            std::cout << "  --autostart-repl <on|off> 是否在无参数时自动启动 REPL\n";
         }
 
     } catch (const std::exception& e) {

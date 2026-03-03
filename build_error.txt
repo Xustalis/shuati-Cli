@@ -1,0 +1,7 @@
+适用于 .NET Framework MSBuild 版本 17.14.18+a338add32
+
+  crawler_tests.vcxproj -> G:\project\shuati-Cli\build\Release\crawler_tests.exe
+  list_command.cpp
+LINK : fatal error LNK1104: 无法打开文件“G:\project\shuati-Cli\build\Release\shuati.exe” [G:\project\shuati-Cli\build\shuati.vcxproj]
+  test_judge_complex.vcxproj -> G:\project\shuati-Cli\build\Release\test_judge_complex.exe
+  test_version.vcxproj -> G:\project\shuati-Cli\build\Release\test_version.exe

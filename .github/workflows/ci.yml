@@ -121,12 +121,9 @@ jobs:
       - name: Configure CMake (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
         run: |
-          # Install MinGW for g++ if not present (VS generator uses MSVC, but Judge might need g++)
-          # Actually, let's just ensure we use MSVC for everything and fix Judge if needed.
-          # But for "One-shot fix", installing MinGW is safer as Judge hardcodes "g++".
-          choco install mingw --force --no-progress
-          
           cmake -B build -S . `
             -G "Visual Studio 17 2022" `
             -A x64 `

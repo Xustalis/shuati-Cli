@@ -38,7 +38,7 @@ void run_repl() {
     // Set up completion
     rx.set_completion_callback([&](std::string const& input, int& contextLen) {
         std::vector<Replxx::Completion> completions;
-        std::vector<std::string> cmds = {"init", "info", "pull", "new", "solve", "list", "delete", "submit", "test", "hint", "config", "login", "exit", "view"};
+        std::vector<std::string> cmds = {"init", "info", "pull", "new", "solve", "list", "delete", "submit", "test", "hint", "config", "login", "repl", "exit", "view"};
         
         // Command completion
         size_t last_space = input.rfind(' ');
@@ -200,7 +200,10 @@ void run_repl() {
              fmt::print("{:<10} {:<35} {}\n", "test", "运行测试用例", "test <id>");
              fmt::print("{:<10} {:<35} {}\n", "hint", "获取 AI 提示", "hint <id>");
              fmt::print("{:<10} {:<35} {}\n", "config", "配置工具", "config [--show]");
+             fmt::print("{:<10} {:<40} {}\n", "", "  设置编辑器", "config --editor <cmd|auto>");
+             fmt::print("{:<10} {:<40} {}\n", "", "  自动启动 REPL 开关", "config --autostart-repl <on|off>");
              fmt::print("{:<10} {:<35} {}\n", "login", "配置平台登录 Cookie", "login lanqiao");
+             fmt::print("{:<10} {:<35} {}\n", "repl", "手动进入交互模式", "repl");
              fmt::print("{:<10} {:<35} {}\n", "exit", "退出", "exit");
              fmt::print("\n");
              continue; 
@@ -253,12 +256,31 @@ int main(int argc, char** argv) {
 
     // ─── Boot Guard: Smart Startup Check ───
     if (argc == 1) {
+        // Check autostart_repl setting from project config (if in a project)
+        auto boot_root = shuati::Config::find_root();
+        bool should_autostart = true;
+        if (!boot_root.empty()) {
+            try {
+                auto boot_cfg = shuati::Config::load(shuati::Config::config_path(boot_root));
+                should_autostart = boot_cfg.autostart_repl;
+            } catch (...) {}
+        }
+        if (!should_autostart) {
+            // Print brief usage and exit instead of launching REPL
+            fmt::print("Shuati CLI {}\n", shuati::current_version().to_string());
+            fmt::print("用法: shuati <命令> [选项]\n");
+            fmt::print("  运行 'shuati --help' 查看所有命令\n");
+            fmt::print("  运行 'shuati repl' 进入交互模式\n");
+            fmt::print("  (提示: 执行 'shuati config --autostart-repl on' 恢复自动启动)\n");
+            return 0;
+        }
+        // autostart is on: run BootGuard then REPL
         if (!shuati::BootGuard::check()) return 0;
+        shuati::cmd::run_repl();
+        return 0;
     }
 
-    if (argc == 1) {
-        shuati::cmd::run_repl();
-    } else {
+    {
         CLI::App app{"shuati CLI"};
         shuati::cmd::CommandContext ctx;
         shuati::cmd::setup_commands(app, ctx);

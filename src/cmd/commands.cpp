@@ -84,7 +84,13 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
     cfg->add_option("--api-key", ctx.cfg_key, "设置 API Key");
     cfg->add_option("--model", ctx.cfg_model, "设置模型");
     cfg->add_option("--language", ctx.new_diff, "设置语言");
+    cfg->add_option("--editor", ctx.cfg_editor, "设置编辑器命令 (auto=自动检测 vim/nvim/nano等)");
+    cfg->add_option("--autostart-repl", ctx.cfg_autostart_repl, "无参数时自动启动 REPL: on/off");
     cfg->callback([&](){ cmd_config(ctx); });
+
+    // repl: explicitly launch REPL (useful when autostart_repl=false)
+    app.add_subcommand("repl", "进入交互模式 (REPL)");
+    app.get_subcommand("repl")->callback([&](){ run_repl(); });
     
     app.add_subcommand("exit", "退出")->callback([](){ exit(0); });
 }

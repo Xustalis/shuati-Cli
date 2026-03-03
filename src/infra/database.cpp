@@ -67,6 +67,9 @@ Database::Database(const std::string& db_path) {
         std::filesystem::create_directories(p.parent_path());
 
     db_ = std::make_unique<SQLite::Database>(db_path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
+    // WAL mode: allows concurrent reads while writing (prevents "database is locked" in Companion thread)
+    db_->exec("PRAGMA journal_mode=WAL;");
+    db_->exec("PRAGMA synchronous=NORMAL;");
     db_->exec("PRAGMA foreign_keys = ON;");
     init_schema();
     this->init_indexes(); // 新增：初始化索引

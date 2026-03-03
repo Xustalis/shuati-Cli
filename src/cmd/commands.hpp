@@ -31,6 +31,8 @@ struct CommandContext {
     int submit_quality = -1;
     std::string hint_pid, hint_file;
     std::string cfg_key, cfg_model;
+    std::string cfg_editor;          // --editor flag for config command
+    std::string cfg_autostart_repl;  // "on" or "off" for --autostart-repl
     bool cfg_show = false;
     int test_max_cases = 30;
     std::string test_oracle = "auto";
@@ -79,6 +81,9 @@ void cmd_login(CommandContext& ctx);
 
 // Registers all commands to the App
 void setup_commands(CLI::App& app, CommandContext& ctx);
+
+// Run interactive REPL
+void run_repl();
 
 } // namespace cmd
 } // namespace shuati

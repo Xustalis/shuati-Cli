@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.0.5] - 2026-03-03
+
+### 新增特性 (New Features)
+* **Linux 编辑器自动检测 (`shuati init`)**：在 Linux/macOS 下初始化项目时，不再硬编码 `code` 为编辑器，而是自动探测 `$VISUAL` / `$EDITOR` 环境变量，或依次尝试路径中的 `nvim` → `vim` → `vi` → `nano` → `emacs`，确保 vim/nano 用户无需额外配置即可开箱即用。
+* **REPL 自动启动控制 (`autostart_repl`)**：在 `config.json` 中新增 `autostart_repl` 开关（默认 `true`）。通过 `shuati config --autostart-repl off` 可关闭无参数时自动进入 REPL 的行为，适合 Linux 脚本用户和 CI 场景；通过 `shuati repl` 可随时手动进入交互模式。
+* **`repl` 子命令**：新增 `shuati repl` 作为显式进入 REPL 的子命令，无论 `autostart_repl` 为何值都可强制打开。
+* **编辑器配置增强 (`config --editor`)**：`shuati config --editor auto` 自动重新检测并保存最优编辑器；`shuati config --editor vim` 可指定任意编辑器命令，支持 vim/nvim/nano/emacs/code/micro 等所有主流编辑器。
+
+### 修复问题 (Bug Fixes)
+* **数据库并发死锁修复**：在 SQLite 数据库初始化阶段加入 `PRAGMA journal_mode=WAL;` 和 `PRAGMA synchronous=NORMAL;`，解决了 Companion Server 监听线程并发写入时偶现的 `database is locked` 错误。
+* **配置保存重构**：`cmd_config` 现在通过 `Config::load()` + `Config::save()` 合并保存，不会意外覆盖 `version` 等元数据字段。
+
+### 下载安装
+- 待 CI 构建完成后从 Releases 页面下载。
+
+---
+
 ## [v0.0.4] - 2026-03-02
 
 ### 新增特性与安全升级
