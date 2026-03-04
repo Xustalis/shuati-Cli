@@ -46,7 +46,7 @@ namespace {
             j["cases"].push_back(to_json(c));
         }
         std::ofstream o(path);
-        o << j.dump(2);
+        o << j.dump(2, ' ', false, nlohmann::json::error_handler_t::replace);
     }
 }
 

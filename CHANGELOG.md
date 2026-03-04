@@ -22,6 +22,7 @@ All notable changes to this project will be documented in this file.
 - **空指针防护**：修复 `boot_guard.cpp` 中 `getenv("APPDATA")` 返回 `nullptr` 时的空指针解引用风险，增加 null 检查并回退至临时目录。
 - **中文路径防注入与白名单优化**：修复 `judge` 编译沙箱的安全检查 (`source_file.find_first_not_of`) 由于严格限制全英文字符导致新版中文题解文件被判定为非法文件（`Invalid source file path`）的错误。将基于 ASCII 的白名单判定重构为更加安全的 Shell 元字符黑名单（拦截 `&|;><$\n\r`），在防御命令注入的同时完美支持带有 UTF-8 字符的路径操作。
 - **深层路径传参乱码修复**：修复在 Windows 下 `std::filesystem::path::string()` 会自动按系统代码页（如 CP936）格式化而导致传递给执行命令时因编码混串引发 `g++: fatal error: no input files` 的深层错误。增补了 `path_to_utf8` 以规避此类环境耦合。
+- **评测机读取路径乱码（误判 WA 修复）**：修复了在此前升级中文路径 API 时，遗漏对 `read_text_file`/`TempFile` 环节中 `std::ifstream` 的字符编码进行保护，导致带有非 ASCII 字符的临时路径（例如中文系统用户名 `C:\Users\张三` 所处的 Temp 目录）无法被打开，使得原本完全正确的代码返回给评估算法的输出恒定为空（`""`），从而被误判为 `WA (Wrong Answer)` 的漏洞。
 - **防止 JSON 序列化时由于 GBK 字符引发宕机**：修复了在测试未通过或生成测试报告时，如果用户的 C++ 代码源文件包含系统本地编码的中文（例如使用 GBK 存盘），或者子进程报错信息输出了 ANSI 中文，会导致 `nlohmann::json` 报出 `[json.exception.type_error.316] invalid UTF-8 byte` 断言崩溃的问题。这主要是通过将收集给内部记录以及发往 AI API 的全部输入进行 `ensure_utf8_lossy` 无损清洗来进行防御。
 
 ### 破坏性变更 (Breaking Changes)

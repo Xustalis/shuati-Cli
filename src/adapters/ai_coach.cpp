@@ -34,7 +34,7 @@ std::string AICoach::call_api(const std::string& system_prompt, const std::strin
                 {"Content-Type", "application/json"},
                 {"Authorization", "Bearer " + cfg_.api_key}
             };
-            auto body_str = cpr::Body{body.dump()};
+            auto body_str = cpr::Body{body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace)};
             
             std::string buffer;
             
@@ -87,7 +87,7 @@ std::string AICoach::call_api(const std::string& system_prompt, const std::strin
                     {"Content-Type", "application/json"},
                     {"Authorization", "Bearer " + cfg_.api_key}
                 },
-                cpr::Body{body.dump()},
+                cpr::Body{body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace)},
                 cpr::Timeout{30000}
             );
 

@@ -49,7 +49,7 @@ private:
 };
 
 static std::string read_text_file(const std::string& path) {
-    std::ifstream in(path, std::ios::in | std::ios::binary);
+    std::ifstream in(shuati::utils::utf8_path(path), std::ios::in | std::ios::binary);
     if (!in) return "";
     std::ostringstream ss;
     ss << in.rdbuf();
