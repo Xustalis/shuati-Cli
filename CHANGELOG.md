@@ -5,28 +5,28 @@ All notable changes to this project will be documented in this file.
 ## [v0.0.6] - 2026-03-04
 
 ### 新增功能 (New Features)
-- **AI 协议标准化 (XML Protocol)**：AI 教练响应从脆弱的 HTML 注释解析升级为结构化 XML 流式协议。新增 `<cot>` (思考过程/隐藏)、`<hint>` (用户可见提示)、`<memory_op>` (记忆操作) 三种语义标签，支持跨 chunk 安全分裂的状态机解析引擎 (`xml_parser.hpp`)。
-- **SM2 自动评分**：`submit` 命令新增自动评分功能。系统会读取最近的测试报告，根据判题结果 (Verdict) 和执行时间自动计算 0-5 分的掌握程度评分：
-  - AC 快速 (≤30% 时限) → 5 分
-  - AC 中等 (≤70% 时限) → 4 分
-  - AC 较慢 (>70% 时限) → 3 分
-  - WA → 2 分 / TLE → 1 分 / RE/CE/MLE → 0 分
-  - 用户可按回车接受自动评分，也可手动输入覆盖。
-- **解题文件智能命名**：解决方案文件从不可读的 `solution_lq_3514.cpp` 格式升级为 `{序号}_{题目标题}.cpp`（如 `3_两数之和.cpp`），大幅提升多题目管理的可辨识度。完全向后兼容旧命名格式的文件发现。
+- **AI 协议标准化 (XML Protocol)**：AI 教练响应解析从 HTML 注释正则升级为结构化 XML 流式状态机（`xml_parser.hpp`）。新增 `<cot>`（思考过程）、`<hint>`（提示）、`<memory_op>`（记忆操作）三种语义标签，支持跨网络分包的安全切割。
+- **SM2 自动评分**：`submit` 命令根据判题结果与执行时间自动计算 0–5 分评分（AC 快速→5，WA→2，TLE→1，RE/CE/MLE→0）。用户可按回车接受或手动覆盖。
+- **解题文件智能命名**：新建解题文件从无意义的 `solution_lq_3514.cpp` 升级为 `{序号}_{题目标题}.cpp`（如 `10_LQ3512_接龙数列.cpp`）。完全兼容旧格式，无需迁移。
 
 ### 修复问题 (Bug Fixes)
-- **`--language` 配置冲突**：修复了 `shuati config --language cpp` 命令中 `--language` 选项错误绑定到 `--difficulty` 同一变量导致互相覆盖的严重 Bug。
-- **变量遮蔽**：修复 `test_command.cpp` 中局部变量 `fs` 遮蔽 `std::filesystem` 命名空间别名的问题。
-- **冗余代码清理**：删除了 3 处重复 `#include`、1 个未实现的 `get_hint()` 死代码声明、1 个未使用的 `trim_right()` 函数、`stream_file_diff()` 未使用实现及声明、20+ 行开发遗留注释。
-### 安全与体验修复 (Security & UX Fixes)
-- **空指针防护**：修复 `boot_guard.cpp` 中 `getenv("APPDATA")` 返回 `nullptr` 时的空指针解引用风险，增加 null 检查并回退至临时目录。
-- **中文路径防注入与白名单优化**：修复 `judge` 编译沙箱的安全检查 (`source_file.find_first_not_of`) 由于严格限制全英文字符导致新版中文题解文件被判定为非法文件（`Invalid source file path`）的错误。将基于 ASCII 的白名单判定重构为更加安全的 Shell 元字符黑名单（拦截 `&|;><$\n\r`），在防御命令注入的同时完美支持带有 UTF-8 字符的路径操作。
-- **深层路径传参乱码修复**：修复在 Windows 下 `std::filesystem::path::string()` 会自动按系统代码页（如 CP936）格式化而导致传递给执行命令时因编码混串引发 `g++: fatal error: no input files` 的深层错误。增补了 `path_to_utf8` 以规避此类环境耦合。
-- **评测机读取路径乱码（误判 WA 修复）**：修复了在此前升级中文路径 API 时，遗漏对 `read_text_file`/`TempFile` 环节中 `std::ifstream` 的字符编码进行保护，导致带有非 ASCII 字符的临时路径（例如中文系统用户名 `C:\Users\张三` 所处的 Temp 目录）无法被打开，使得原本完全正确的代码返回给评估算法的输出恒定为空（`""`），从而被误判为 `WA (Wrong Answer)` 的漏洞。
-- **防止 JSON 序列化时由于 GBK 字符引发宕机**：修复了在测试未通过或生成测试报告时，如果用户的 C++ 代码源文件包含系统本地编码的中文（例如使用 GBK 存盘），或者子进程报错信息输出了 ANSI 中文，会导致 `nlohmann::json` 报出 `[json.exception.type_error.316] invalid UTF-8 byte` 断言崩溃的问题。这主要是通过将收集给内部记录以及发往 AI API 的全部输入进行 `ensure_utf8_lossy` 无损清洗来进行防御。
+- 修复 `shuati config --language` 错误绑定到 `--difficulty` 变量的严重 Bug。
+- 删除未使用的 `trim_right()`、`stream_file_diff()` 及大量开发遗留注释。
+
+### 安全修复 (Security Fixes)
+修复 Windows 中文环境下的一系列路径编码问题（根因：标准库在 Windows 隐式按系统代码页 CP936 处理字符串，导致含中文的路径乱码）：
+
+| 问题 | 根因 | 修复 |
+|---|---|---|
+| 编译报错 `g++: no input files` | `fs::path::string()` 按 CP936 编码后传给 `_wsystem()` | 新增 `path_to_utf8()` + `utf8_system()`，统一经由宽字符 API |
+| 沙箱无法拉起含中文路径的可执行文件 | 底层使用 `CreateProcessA`/`CreateFileA` | 升级为 `CreateProcessW`/`CreateFileW` |
+| 正确代码误判 WA | 临时文件路径含中文（如 `C:\Users\张三\Temp`），`ifstream` 打开失败，输出恒为空 | 全链路改用 `utf8_path()` 构造路径 |
+| 测试报告/AI 诊断崩溃 | GBK 编码的代码注释或编译器报错触发 `json::type_error.316` | 序列化出口统一使用 `error_handler_t::replace` 和 `ensure_utf8_lossy` |
+| 潜在命令注入 | 编译路径校验为 ASCII 白名单，拦截了合法中文文件名 | 改为 Shell 元字符黑名单（拦截 `&\|;><$\n\r`） |
+| 空指针解引用 | `getenv("APPDATA")` 可能返回 `nullptr` | 增加 null 检查，回退至临时目录 |
 
 ### 破坏性变更 (Breaking Changes)
-- **解题文件命名格式变更**：新创建的解题文件将使用 `{序号}_{题目标题}.ext` 格式。**已有的 `solution_*.cpp/py` 文件不受影响**，系统会自动识别新旧两种命名格式。无需手动迁移。
+- 新建解题文件采用 `{序号}_{题目标题}.ext` 格式。**已有的 `solution_*.cpp/py` 文件不受影响**，系统自动识别两种格式。
 
 ### 升级指引 (Upgrade Guide)
 1. 从 [Releases](https://github.com/Xustalis/shuati-Cli/releases) 下载最新版本覆盖安装。
