@@ -6,7 +6,6 @@
 #include "shuati/utils/encoding.hpp"
 #include <fmt/core.h>
 #include <string_view>
-#include <regex>
 
 namespace shuati {
 
@@ -122,7 +121,7 @@ std::string AICoach::analyze(const std::string& problem_desc, const std::string&
         "## 🛠️ 修改建议\n"
         "(分步指导，包含代码片段)\n\n"
         "<!-- SYSTEM_OP: UPDATE_MEMORY\n"
-        "{ \"new_mistake\": \"...\", \"mastery_reinforce\": \"...\" }\n"
+        "{ \"new_mistake\": \"...\", \"reinforce_mastery\": \"...\" }\n"
         "-->";
 
     if (mm_) {
@@ -277,20 +276,23 @@ std::pair<std::string, std::string> AICoach::generate_test_scripts(const std::st
     result.second = extract_code(raw, "sol.py");
 
     // Fallback: Just grab first two blocks if named extraction fails
+    // NOTE: Avoid std::regex with [\s\S] — it causes stack overflow in libstdc++.
     if (result.first.empty() || result.second.empty()) {
-        // Regex to match ```python ... ``` or just ``` ... ```
-        // Captures content inside the block
-        std::regex re("```(?:python)?\\s*([\\s\\S]*?)```");
-        std::sregex_iterator next(raw.begin(), raw.end(), re);
-        std::sregex_iterator end;
-        
-        int count = 0;
-        while (next != end && count < 2) {
-            if (count == 0) result.first = next->str(1);
-            else result.second = next->str(1);
-            next++;
-            count++;
+        std::vector<std::string> blocks;
+        size_t search_pos = 0;
+        while (blocks.size() < 2) {
+            size_t fence_start = raw.find("```", search_pos);
+            if (fence_start == std::string::npos) break;
+            size_t code_start = raw.find('\n', fence_start);
+            if (code_start == std::string::npos) break;
+            code_start++; // skip the newline
+            size_t fence_end = raw.find("```", code_start);
+            if (fence_end == std::string::npos) break;
+            blocks.push_back(raw.substr(code_start, fence_end - code_start));
+            search_pos = fence_end + 3;
         }
+        if (blocks.size() >= 1) result.first = blocks[0];
+        if (blocks.size() >= 2) result.second = blocks[1];
     }
 
     return result;
@@ -313,7 +315,7 @@ AICoach::AIResponse AICoach::analyze_structured(const std::string& problem_desc,
         "请严格按以下 XML 结构回复（不要使用其他格式）：\n"
         "<cot>\n"
         "(你的思考过程，分析用户代码的逻辑，不会展示给用户)\n"
-        "</cot>\n"
+        "</cot>\n"  
         "<hint>\n"
         "## 💡 核心思路\n"
         "(简要点拨，不超过3点)\n\n"

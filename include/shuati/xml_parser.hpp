@@ -42,13 +42,16 @@ public:
      * @brief Flush remaining buffer after streaming is complete.
      */
     void flush() {
-        // If we're inside a tag that was never closed, emit what we have
-        if (current_tag_ != Tag::None && !tag_content_.empty()) {
-            emit_content(current_tag_, tag_content_);
-            tag_content_.clear();
-            current_tag_ = Tag::None;
+        // If we're inside a tag that was never closed, emit remaining buffer
+        if (current_tag_ != Tag::None && !buffer_.empty()) {
+            // buffer_ contains un-emitted residual (within the safety margin)
+            emit_content(current_tag_, buffer_);
+            tag_content_ += buffer_;
+            buffer_.clear();
         }
-        // Emit any remaining buffer as raw
+        current_tag_ = Tag::None;
+        tag_content_.clear();
+        // Emit any remaining buffer as raw (when not inside a tag)
         if (!buffer_.empty()) {
             if (cb_.on_raw) cb_.on_raw(buffer_);
             buffer_.clear();
@@ -127,18 +130,24 @@ private:
 
                 size_t close_pos = buffer_.find(close_tag);
                 if (close_pos != std::string::npos) {
-                    tag_content_ += buffer_.substr(0, close_pos);
-                    emit_content(current_tag_, tag_content_);
+                    // Emit the final chunk before the closing tag
+                    std::string final_chunk = buffer_.substr(0, close_pos);
+                    if (!final_chunk.empty()) {
+                        tag_content_ += final_chunk;
+                        emit_content(current_tag_, final_chunk);
+                    }
                     buffer_.erase(0, close_pos + close_tag.size());
                     tag_content_.clear();
                     current_tag_ = Tag::None;
                 } else {
-                    // Tag not closed yet, accumulate and wait
+                    // Tag not closed yet — emit safe portion progressively
                     // Keep safety margin for partial close tag
                     const size_t SAFETY = 14; // longest close tag is "</memory_op>" = 13
                     if (buffer_.size() > SAFETY) {
                         size_t accum_len = buffer_.size() - SAFETY;
-                        tag_content_ += buffer_.substr(0, accum_len);
+                        std::string chunk = buffer_.substr(0, accum_len);
+                        tag_content_ += chunk;
+                        emit_content(current_tag_, chunk);
                         buffer_.erase(0, accum_len);
                     }
                     break; // Need more data
