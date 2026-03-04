@@ -122,3 +122,11 @@ upgrade_plan_v0.0.2_to_v0.0.8.md
 *.ans
 build.log
 build_error.txt
+
+# Stray solution files
+*_蓝桥*.cpp
+*_luogu*.cpp
+*_codeforces*.cpp
+
+# Old release notes
+RELEASE_NOTES_*.md
