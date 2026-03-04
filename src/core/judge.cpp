@@ -121,7 +121,7 @@ std::string Judge::compile(const std::string& source_file, const std::string& la
                 return exe;
             }
 
-            std::string err_text = read_text_file(err.path());
+            std::string err_text = shuati::utils::ensure_utf8_lossy(shuati::read_text_file(err.path()));
             if (err_text.empty()) {
                 last_error = "Compilation failed";
                 continue;
@@ -236,7 +236,7 @@ JudgeResult Judge::run_case(const std::string& executable,
         res.verdict = Verdict::MLE;
     } else if (sb_res.status == shuati::sandbox::SandboxResultStatus::RuntimeError) {
         res.verdict = Verdict::RE;
-        res.error_output = shuati::read_text_file(err_file.path());
+        res.error_output = shuati::utils::ensure_utf8_lossy(shuati::read_text_file(err_file.path()));
         if (res.error_output.empty()) {
             res.error_output = fmt::format("Process exited with code {}", sb_res.exit_code);
         }
@@ -245,7 +245,7 @@ JudgeResult Judge::run_case(const std::string& executable,
         res.error_output = "Sandbox Internal Error: " + sb_res.internal_message;
     } else {
         // OK
-        res.output = shuati::read_text_file(out_file.path());
+        res.output = shuati::utils::ensure_utf8_lossy(shuati::read_text_file(out_file.path()));
         res.verdict = check_output(res.output, tc.output);
         
         if (res.verdict == Verdict::WA) {
@@ -308,7 +308,7 @@ JudgeResult Judge::run_process_redirect(const std::string& cmd,
         res.verdict = Verdict::MLE;
     } else if (sb_res.status == shuati::sandbox::SandboxResultStatus::RuntimeError) {
         res.verdict = Verdict::RE;
-        std::string err_output = shuati::read_text_file(err_file.path());
+        std::string err_output = shuati::utils::ensure_utf8_lossy(shuati::read_text_file(err_file.path()));
         res.message = err_output.empty() ? fmt::format("Exit code {}", sb_res.exit_code) : err_output;
     } else if (sb_res.status == shuati::sandbox::SandboxResultStatus::InternalError) {
         res.verdict = Verdict::RE;

@@ -3,6 +3,7 @@
 #include "shuati/xml_parser.hpp"
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
+#include "shuati/utils/encoding.hpp"
 #include <fmt/core.h>
 #include <string_view>
 #include <regex>
@@ -22,8 +23,8 @@ std::string AICoach::call_api(const std::string& system_prompt, const std::strin
     body["temperature"] = 0.3;
     body["stream"] = stream;
     body["messages"] = nlohmann::json::array({
-        {{"role", "system"}, {"content", system_prompt}},
-        {{"role", "user"},   {"content", user_prompt}}
+        {{"role", "system"}, {"content", shuati::utils::ensure_utf8_lossy(system_prompt)}},
+        {{"role", "user"},   {"content", shuati::utils::ensure_utf8_lossy(user_prompt)}}
     });
 
     try {
