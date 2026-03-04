@@ -159,10 +159,22 @@ void ProblemManager::delete_problem(const std::string& id) {
         std::filesystem::remove(p.content_path);
     }
 
-    // Delete solution file(s)
+    // Delete solution file(s) — both old and new naming formats
     for (const auto& ext : {".cpp", ".py"}) {
-        std::string sol = "solution_" + p.id + ext;
-        if (std::filesystem::exists(sol)) std::filesystem::remove(sol);
+        // Old format
+        std::string sol_old = "solution_" + p.id + ext;
+        if (std::filesystem::exists(sol_old)) std::filesystem::remove(sol_old);
+        // New format (TID_title.ext) — scan for files starting with "TID_"
+        std::string tid_prefix = std::to_string(p.display_id) + "_";
+        try {
+            for (const auto& entry : std::filesystem::directory_iterator(".")) {
+                std::string name = entry.path().filename().string();
+                if (name.rfind(tid_prefix, 0) == 0 && name.size() > 4 &&
+                    name.substr(name.size() - std::string(ext).size()) == ext) {
+                    std::filesystem::remove(entry.path());
+                }
+            }
+        } catch (...) {}
     }
 
     // Delete from DB

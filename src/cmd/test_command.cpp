@@ -156,8 +156,9 @@ void cmd_test(CommandContext& ctx) {
         fs::create_directories(prob_dir / "temp");
 
         std::string ext = svc.cfg.language == "python" ? ".py" : ".cpp";
-        std::string src_file = "solution_" + prob.id + ext; 
-        if (!fs::exists(src_file)) { std::cerr << "[!] 找不到代码文件: " << src_file << std::endl; return; }
+        std::string src_file = find_solution_file(prob, svc.cfg.language);
+        if (src_file.empty()) src_file = make_solution_filename(prob, svc.cfg.language);
+        if (!fs::exists(shuati::utils::utf8_path(src_file))) { std::cerr << "[!] 找不到代码文件: " << src_file << std::endl; return; }
 
         // Compile User Solution
         std::cout << "[*] 正在编译用户代码..." << std::endl;
@@ -361,7 +362,6 @@ void cmd_test(CommandContext& ctx) {
 
         report.pass_count = passed;
         report.verdict = all_ac ? "AC" : "WA";
-
         // Refine to specific verdict (TLE/RE) if all failed the same way
         if (!all_ac) {
              for (const auto& c : report.cases) {

@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include "shuati/utils/encoding.hpp"
 
 namespace shuati {
 namespace sandbox {
@@ -60,16 +61,19 @@ public:
         HANDLE hErr = INVALID_HANDLE_VALUE;
 
         if (!input_file.empty()) {
-            hIn = CreateFileA(input_file.c_str(), GENERIC_READ, FILE_SHARE_READ, &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+            std::wstring w = shuati::utils::utf8_to_wide(input_file);
+            hIn = CreateFileW(w.c_str(), GENERIC_READ, FILE_SHARE_READ, &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         }
         if (!output_file.empty()) {
-            hOut = CreateFileA(output_file.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+            std::wstring w = shuati::utils::utf8_to_wide(output_file);
+            hOut = CreateFileW(w.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
         }
         if (!error_file.empty()) {
-            hErr = CreateFileA(error_file.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+            std::wstring w = shuati::utils::utf8_to_wide(error_file);
+            hErr = CreateFileW(w.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
         }
 
-        STARTUPINFOA si = { sizeof(STARTUPINFOA) };
+        STARTUPINFOW si = { sizeof(STARTUPINFOW) };
         si.dwFlags |= STARTF_USESTDHANDLES;
         si.hStdInput = (hIn != INVALID_HANDLE_VALUE) ? hIn : GetStdHandle(STD_INPUT_HANDLE);
         si.hStdOutput = (hOut != INVALID_HANDLE_VALUE) ? hOut : GetStdHandle(STD_OUTPUT_HANDLE);
@@ -83,11 +87,12 @@ public:
             cmd +=(" \"" + arg + "\"");
         }
 
-        std::vector<char> cmd_buf(cmd.begin(), cmd.end());
-        cmd_buf.push_back('\0');
+        std::wstring w_cmd = shuati::utils::utf8_to_wide(cmd);
+        std::vector<wchar_t> cmd_buf(w_cmd.begin(), w_cmd.end());
+        cmd_buf.push_back(L'\0');
 
         // 5. Create Process SUSPENDED
-        BOOL cp_ret = CreateProcessA(
+        BOOL cp_ret = CreateProcessW(
             NULL,               // Application name
             cmd_buf.data(),     // Command line
             NULL,               // Process security attributes

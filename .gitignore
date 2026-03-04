@@ -121,3 +121,4 @@ upgrade_plan_v0.0.2_to_v0.0.8.md
 *.err
 *.ans
 build.log
+build_error.txt

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <filesystem>
 
 namespace shuati::utils {
 
@@ -18,6 +19,15 @@ std::string ensure_utf8_lossy(const std::string& s);
 
 // Convert wide string to UTF-8 (Windows)
 std::string wide_to_utf8(const std::wstring& w);
+
+// Convert UTF-8 to wide string (Windows)
+std::wstring utf8_to_wide(const std::string& u8str);
+
+// Convert UTF-8 string to a filesystem path reliably
+std::filesystem::path utf8_path(const std::string& u8str);
+
+// Execute a system command containing UTF-8 characters safely
+int utf8_system(const std::string& u8cmd);
 
 // Shorten a UTF-8 string to a maximum number of bytes, ensuring valid UTF-8 and appending "..." if truncated
 std::string shorten_utf8_lossy(const std::string& s, size_t max_bytes);

@@ -174,6 +174,7 @@ add_shuati_test(test_judge_complex
         src/core/judge.cpp 
         src/core/sandbox/sandbox_windows.cpp 
         src/core/sandbox/sandbox_linux.cpp
+        src/utils/encoding.cpp
     LINK_LIBS SQLiteCpp cpr::cpr nlohmann_json::nlohmann_json Threads::Threads
 )
 

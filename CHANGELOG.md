@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.0.6] - 2026-03-04
+
+### 新增功能 (New Features)
+- **AI 协议标准化 (XML Protocol)**：AI 教练响应从脆弱的 HTML 注释解析升级为结构化 XML 流式协议。新增 `<cot>` (思考过程/隐藏)、`<hint>` (用户可见提示)、`<memory_op>` (记忆操作) 三种语义标签，支持跨 chunk 安全分裂的状态机解析引擎 (`xml_parser.hpp`)。
+- **SM2 自动评分**：`submit` 命令新增自动评分功能。系统会读取最近的测试报告，根据判题结果 (Verdict) 和执行时间自动计算 0-5 分的掌握程度评分：
+  - AC 快速 (≤30% 时限) → 5 分
+  - AC 中等 (≤70% 时限) → 4 分
+  - AC 较慢 (>70% 时限) → 3 分
+  - WA → 2 分 / TLE → 1 分 / RE/CE/MLE → 0 分
+  - 用户可按回车接受自动评分，也可手动输入覆盖。
+- **解题文件智能命名**：解决方案文件从不可读的 `solution_lq_3514.cpp` 格式升级为 `{序号}_{题目标题}.cpp`（如 `3_两数之和.cpp`），大幅提升多题目管理的可辨识度。完全向后兼容旧命名格式的文件发现。
+
+### 修复问题 (Bug Fixes)
+- **`--language` 配置冲突**：修复了 `shuati config --language cpp` 命令中 `--language` 选项错误绑定到 `--difficulty` 同一变量导致互相覆盖的严重 Bug。
+- **变量遮蔽**：修复 `test_command.cpp` 中局部变量 `fs` 遮蔽 `std::filesystem` 命名空间别名的问题。
+- **冗余代码清理**：删除了 3 处重复 `#include`、1 个未实现的 `get_hint()` 死代码声明、1 个未使用的 `trim_right()` 函数、`stream_file_diff()` 未使用实现及声明、20+ 行开发遗留注释。
+- **循环性能优化**：`list` 命令中 `find_root_or_die()` 从循环内重复调用优化为循环外缓存。
+- **中文路径乱码修复**：彻底修复在 Windows 环境下由于 UTF-8 隐式转换为系统本地 ANSI (CP936) 导致的「解题文件命名出现乱码（如 `鎺ラ緳鏁板垪`）」以及后续因路径乱码引发的「无法拉起编辑器」或「编译报错找不到文件」等一系列严重缺陷。全链路使用 `std::filesystem::path (char8_t*)` 并在进程启动 (Sandbox) 环节升级为核心的 `CreateProcessW` 宽字符 API。
+
+### 安全修复 (Security Fixes)
+- **空指针防护**：修复 `boot_guard.cpp` 中 `getenv("APPDATA")` 返回 `nullptr` 时的空指针解引用风险，增加 null 检查并回退至临时目录。
+- **路径白名单扩展**：`judge.cpp` 编译命令的源文件路径白名单增加空格和冒号字符支持，兼容 Windows 路径（如 `C:\Users\My Name\file.cpp`）。
+
+### 破坏性变更 (Breaking Changes)
+- **解题文件命名格式变更**：新创建的解题文件将使用 `{序号}_{题目标题}.ext` 格式。**已有的 `solution_*.cpp/py` 文件不受影响**，系统会自动识别新旧两种命名格式。无需手动迁移。
+
+### 升级指引 (Upgrade Guide)
+1. 从 [Releases](https://github.com/Xustalis/shuati-Cli/releases) 下载最新版本覆盖安装。
+2. 已有的 `solution_*.cpp` 文件会继续被 `test`、`hint`、`solve` 命令自动识别，无需重命名。
+3. 若需统一文件命名，可删除旧文件后重新执行 `shuati solve <id>` 生成新格式文件。
+4. 建议运行 `shuati config --language cpp` 验证 language 配置是否正确。
+
+
+---
+
 ## [v0.0.5] - 2026-03-04
 
 ### 新增功能 (New Features)

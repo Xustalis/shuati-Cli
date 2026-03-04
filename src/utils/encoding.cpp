@@ -80,6 +80,29 @@ std::string wide_to_utf8(const std::wstring& w) {
     return out;
 }
 
+std::wstring utf8_to_wide(const std::string& u8str) {
+    if (u8str.empty()) return {};
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, u8str.data(), (int)u8str.size(), nullptr, 0);
+    if (wlen <= 0) return {};
+    std::wstring out((size_t)wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, u8str.data(), (int)u8str.size(), out.data(), wlen);
+    return out;
+}
+
+std::filesystem::path utf8_path(const std::string& u8str) {
+#if defined(__cpp_lib_char8_t)
+    return std::filesystem::path(reinterpret_cast<const char8_t*>(u8str.c_str()));
+#else
+    return std::filesystem::u8path(u8str);
+#endif
+}
+
+int utf8_system(const std::string& u8cmd) {
+    if (u8cmd.empty()) return 0;
+    std::wstring wcmd = utf8_to_wide(u8cmd);
+    return _wsystem(wcmd.c_str());
+}
+
 #else
 
 bool is_valid_utf8(const std::string& /*s*/) { return true; } // Assume Linux/macOS uses UTF-8 everywhere
@@ -87,6 +110,19 @@ std::string acp_to_utf8(const std::string& s) { return s; }
 std::string ensure_utf8(const std::string& s) { return s; }
 std::string ensure_utf8_lossy(const std::string& s) { return s; }
 std::string wide_to_utf8(const std::wstring& /*w*/) { return ""; } // Not needed on POSIX usually
+std::wstring utf8_to_wide(const std::string& /*u8str*/) { return L""; }
+
+std::filesystem::path utf8_path(const std::string& u8str) {
+#if defined(__cpp_lib_char8_t)
+    return std::filesystem::path(reinterpret_cast<const char8_t*>(u8str.c_str()));
+#else
+    return std::filesystem::u8path(u8str);
+#endif
+}
+
+int utf8_system(const std::string& u8cmd) {
+    return std::system(u8cmd.c_str());
+}
 
 #endif
 

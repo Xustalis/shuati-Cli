@@ -63,6 +63,22 @@ struct Services {
 std::filesystem::path find_root_or_die();
 std::string executable_path_utf8();
 
+/**
+ * @brief Generate human-readable solution filename
+ * @param prob The problem to generate filename for
+ * @param language "cpp" or "python"
+ * @return Filename like "3_两数之和.cpp" (TID + sanitized title)
+ */
+std::string make_solution_filename(const Problem& prob, const std::string& language);
+
+/**
+ * @brief Find existing solution file (supports both old and new naming)
+ * @param prob The problem to find solution for
+ * @param language "cpp" or "python"
+ * @return Path if found, empty string if not
+ */
+std::string find_solution_file(const Problem& prob, const std::string& language);
+
 // ─── Command Declarations ─────────────────────────────
 
 void cmd_test(CommandContext& ctx);

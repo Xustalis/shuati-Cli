@@ -57,9 +57,13 @@ void cmd_solve(CommandContext& ctx) {
         }
 
         std::string ext = svc.cfg.language == "python" ? ".py" : ".cpp";
-        std::string filename = "solution_" + prob.id + ext;
-        if (!fs::exists(filename)) {
-            std::ofstream out(filename, std::ios::out | std::ios::binary);
+        // Try to find existing solution file (supports old + new naming)
+        std::string filename = find_solution_file(prob, svc.cfg.language);
+        if (filename.empty()) {
+            filename = make_solution_filename(prob, svc.cfg.language);
+        }
+        if (!fs::exists(shuati::utils::utf8_path(filename))) {
+            std::ofstream out(shuati::utils::utf8_path(filename), std::ios::out | std::ios::binary);
             if (svc.cfg.language == "python") {
                 out << "import sys\n\n\ndef main():\n    pass\n\n\nif __name__ == \"__main__\":\n    main()\n";
             } else {
@@ -70,7 +74,7 @@ void cmd_solve(CommandContext& ctx) {
         
         if (!svc.cfg.editor.empty()) {
             std::string cmd = svc.cfg.editor + " \"" + filename + "\"";
-            if (std::system(cmd.c_str()) != 0) {}
+            if (shuati::utils::utf8_system(cmd) != 0) {}
         }
     } catch (const std::exception& e) {
         std::cerr << "[!] 错误: " << e.what() << std::endl;
@@ -166,10 +170,13 @@ void cmd_hint(CommandContext& ctx) {
             }
         }
         
-        if (ctx.hint_file.empty()) ctx.hint_file = "solution_" + prob.id + (svc.cfg.language == "python" ? ".py" : ".cpp");
+        if (ctx.hint_file.empty()) {
+            ctx.hint_file = find_solution_file(prob, svc.cfg.language);
+            if (ctx.hint_file.empty()) ctx.hint_file = make_solution_filename(prob, svc.cfg.language);
+        }
         std::string code = "";
-        if (fs::exists(ctx.hint_file)) {
-            std::ifstream f(ctx.hint_file);
+        if (fs::exists(shuati::utils::utf8_path(ctx.hint_file))) {
+            std::ifstream f(shuati::utils::utf8_path(ctx.hint_file));
             code.assign(std::istreambuf_iterator<char>(f), {});
         }
 
