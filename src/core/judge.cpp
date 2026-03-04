@@ -79,10 +79,10 @@ std::string Judge::compile(const std::string& source_file, const std::string& la
     }
 
     if (language == "cpp" || language == "c++") {
-        // Security check: Ensure source_file contains only safe characters
-        // Allow alphanumeric, dots, underscores, hyphens, slashes, backslashes, spaces, colons (Windows paths)
-        if (source_file.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-/\\ :") != std::string::npos) {
-            throw std::runtime_error("Invalid source file path: " + source_file);
+        // Security check: Reject shell metacharacters to prevent command injection
+        // Allow UTF-8 characters for Chinese filenames
+        if (source_file.find_first_of("&|;><$`\n\r") != std::string::npos) {
+            throw std::runtime_error("Invalid source file path (contains shell metacharacters): " + source_file);
         }
 
         fs::path src(source_file);

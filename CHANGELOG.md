@@ -18,12 +18,9 @@ All notable changes to this project will be documented in this file.
 - **`--language` 配置冲突**：修复了 `shuati config --language cpp` 命令中 `--language` 选项错误绑定到 `--difficulty` 同一变量导致互相覆盖的严重 Bug。
 - **变量遮蔽**：修复 `test_command.cpp` 中局部变量 `fs` 遮蔽 `std::filesystem` 命名空间别名的问题。
 - **冗余代码清理**：删除了 3 处重复 `#include`、1 个未实现的 `get_hint()` 死代码声明、1 个未使用的 `trim_right()` 函数、`stream_file_diff()` 未使用实现及声明、20+ 行开发遗留注释。
-- **循环性能优化**：`list` 命令中 `find_root_or_die()` 从循环内重复调用优化为循环外缓存。
-- **中文路径乱码修复**：彻底修复在 Windows 环境下由于 UTF-8 隐式转换为系统本地 ANSI (CP936) 导致的「解题文件命名出现乱码（如 `鎺ラ緳鏁板垪`）」以及后续因路径乱码引发的「无法拉起编辑器」或「编译报错找不到文件」等一系列严重缺陷。全链路使用 `std::filesystem::path (char8_t*)` 并在进程启动 (Sandbox) 环节升级为核心的 `CreateProcessW` 宽字符 API。
-
-### 安全修复 (Security Fixes)
+### 安全与体验修复 (Security & UX Fixes)
 - **空指针防护**：修复 `boot_guard.cpp` 中 `getenv("APPDATA")` 返回 `nullptr` 时的空指针解引用风险，增加 null 检查并回退至临时目录。
-- **路径白名单扩展**：`judge.cpp` 编译命令的源文件路径白名单增加空格和冒号字符支持，兼容 Windows 路径（如 `C:\Users\My Name\file.cpp`）。
+- **中文路径防注入与白名单优化**：修复 `judge` 编译沙箱的安全检查 (`source_file.find_first_not_of`) 由于严格限制全英文字符导致新版中文题解文件被判定为非法文件（`Invalid source file path`）的错误。将基于 ASCII 的白名单判定重构为更加安全的 Shell 元字符黑名单（拦截 `&|;><$\n\r`），在防御命令注入的同时完美支持带有 UTF-8 字符的路径操作。
 
 ### 破坏性变更 (Breaking Changes)
 - **解题文件命名格式变更**：新创建的解题文件将使用 `{序号}_{题目标题}.ext` 格式。**已有的 `solution_*.cpp/py` 文件不受影响**，系统会自动识别新旧两种命名格式。无需手动迁移。
