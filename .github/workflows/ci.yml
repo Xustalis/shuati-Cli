@@ -54,6 +54,11 @@ jobs:
             --suppress=missingIncludeSystem \
             -I include/ src/ || true
 
+      - name: Check Version Consistency
+        run: |
+          if command -v python3 >/dev/null 2>&1; then py=python3; else py=python; fi
+          $py scripts/check_version.py
+
   # ============================================
   # 阶段2: 构建和测试矩阵
   # ============================================

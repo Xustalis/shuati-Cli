@@ -41,7 +41,7 @@ jobs:
       - name: Validate Version Tag (vX.Y.Z matches CMakeLists)
         shell: bash
         run: |
-          if command -v python3 &>/dev/null; then py=python3; else py=python; fi
+          if command -v python3 >/dev/null 2>&1; then py=python3; else py=python; fi
           tag="${GITHUB_REF_NAME}"
           if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Tag must be vX.Y.Z, got: $tag"
@@ -298,7 +298,7 @@ jobs:
         run: |
           sha_one () {
             f="$1"
-            if command -v python3 &>/dev/null; then py=python3; else py=python; fi
+            if command -v python3 >/dev/null 2>&1; then py=python3; else py=python; fi
             $py -c "import hashlib, pathlib; p=pathlib.Path(r'''$f'''); h=hashlib.sha256(p.read_bytes()).hexdigest(); pathlib.Path(str(p)+'.sha256').write_text(f\"{h}  {p.name}\n\"); print(h)"
           }
           sha_one "shuati-${{ runner.os }}-x64-${{ github.ref_name }}.tar.gz"
