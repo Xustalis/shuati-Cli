@@ -11,7 +11,7 @@
 
 **Shuati CLI 专为 OIer 和 Coder 打造的本地化、智能化命令行刷题工具🚀**
 
-[![Version](https://img.shields.io/badge/version-0.0.4-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
+[![Version](https://img.shields.io/badge/version-0.0.6-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
 [![CI](https://github.com/Xustalis/shuati-Cli/actions/workflows/release.yml/badge.svg)](https://github.com/Xustalis/shuati-Cli/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![C++20](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
@@ -87,7 +87,7 @@ shuati test 1
 
 | 📊 进度追踪 (复习) | 💻 无缝快捷流 | ✔️ 精确安全 |
 | :--- | :--- | :--- |
-| • 自动记录每次 Verdict<br>• 实时统计通过率与成长线<br>• 错题分类统计 | • 现代终端 UI (FTXUI)<br>• 适配 VSCode/Vim<br>• 无缝命令行 Shell 体验 | • 一键拉取、编译、测试<br>• 高度可配置化<br>• 跨平台支持 |
+| • 自动记录每次 Verdict<br>• 实时统计通过率与成长线<br>• 错题分类统计<br>• 基于 SM2 的自动打分复盘机制 | • 沉浸式 REPL 交互模式<br>• 智能识别编辑器 (VSCode/Vim)<br>• 新解题文件自动智能命名规约 | • 跨平台硬沙箱防注入与内存超限拦截<br>• 全节点无损 UTF-8 文件名防乱码<br>• 高度解耦与可配置化 |
 
 </div>
 
@@ -107,10 +107,10 @@ graph LR
 ## 📥 安装指南
 
 ### 安装包
-**Windows** 下载最新的 Windows 安装包并执行：
+**Windows** 下载最新的 Windows 安装包并执行（请进入发布页面获取对应版本的 `.exe`）：
 ```powershell
-irm https://github.com/Xustalis/shuati-Cli/releases/latest/download/shuati-cli-setup.exe -OutFile shuati-cli-setup.exe
-.\shuati-cli-setup.exe
+irm https://github.com/Xustalis/shuati-Cli/releases/latest/download/shuati-setup-x64-Windows.exe -OutFile shuati-setup-x64-Windows.exe
+.\shuati-setup-x64-Windows.exe
 ```
 
 ### 从源码编译 (Linux / macOS / Windows)
@@ -197,6 +197,7 @@ shuati login lanqiao
 | 命令分类 | 具体命令                 | 作用介绍                                          | 命令示例                                     |
 | :------- | :----------------------- | :------------------------------------------------ | :------------------------------------------- |
 | **基础** | `shuati init`            | 在当前目录下创建数据库，初始化整个工作区环境      | `shuati init`                                |
+| **基础** | `shuati repl`            | 进入交互式沉浸命令行模式，支持长驻工作及命令补全      | `shuati repl`                                |
 | **基础** | `shuati list` / `ls`     | 列出当前本地题库所有题目的简略列表                | `shuati list`                                |
 | **开题** | `shuati pull <url>`      | 根据网址将 OJ 平台上的题目拉取到本地                | `shuati pull https://leetcode.cn/...`        |
 | **开题** | `shuati new <title>`     | 手动创建一道暂不在主流平台的自定义算法题            | `shuati new "01背包变形" --tags "dp"`        |
