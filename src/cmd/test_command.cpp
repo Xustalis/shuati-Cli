@@ -12,9 +12,6 @@
 #include <iomanip>
 #include <cstdlib>
 
-// Assuming these headers are available or we need to fix includes
-#include "shuati/utils/encoding.hpp"
-
 namespace shuati {
 namespace cmd {
 
@@ -266,7 +263,7 @@ void cmd_test(CommandContext& ctx) {
                              std::cerr << "[!] AI 生成脚本失败或格式无法解析。" << std::endl;
                          } else {
                              std::ofstream fg(gen_py); fg << scripts.first;
-                             std::ofstream fs(sol_py); fs << scripts.second;
+                             std::ofstream fs_sol(sol_py); fs_sol << scripts.second;
                              std::cout << "[+] 脚本已保存至 " << validator_dir.string() << std::endl;
                              has_scripts = true;
                          }
@@ -363,7 +360,7 @@ void cmd_test(CommandContext& ctx) {
         }
 
         report.pass_count = passed;
-        report.verdict = all_ac ? "AC" : (passed > 0 ? "WA" : "WA"); // WA if any failed
+        report.verdict = all_ac ? "AC" : "WA";
         // Refine verdict if TLE/RE?
         // Just use "WA" or specific if all failed same way?
         // Let's iterate report.cases to find first non-AC for the summary verdict if not AC

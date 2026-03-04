@@ -100,10 +100,10 @@ void cmd_config(CommandContext& ctx) {
             changed = true;
             std::cout << "[+] 模型已设置为: " << ctx.cfg_model << std::endl;
         }
-        if (!ctx.new_diff.empty() && (ctx.new_diff == "cpp" || ctx.new_diff == "python")) {
-            cfg.language = ctx.new_diff;
+        if (!ctx.cfg_language.empty() && (ctx.cfg_language == "cpp" || ctx.cfg_language == "python")) {
+            cfg.language = ctx.cfg_language;
             changed = true;
-            std::cout << "[+] 语言已设置为: " << ctx.new_diff << std::endl;
+            std::cout << "[+] 语言已设置为: " << ctx.cfg_language << std::endl;
         }
         // Editor config with auto-detect support
         if (!ctx.cfg_editor.empty()) {

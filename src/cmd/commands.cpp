@@ -5,19 +5,6 @@
 namespace shuati {
 namespace cmd {
 
-// Forward declarations of view command which I added to view_command.cpp but not commands.hpp yet?
-// Wait, I need to add `cmd_view` to `commands.hpp` first.
-// I will update commands.hpp later or rely on linker? No, declaration needed.
-// I'll add `void cmd_view(CommandContext& ctx);` to commands.hpp now via another tool or assume I'll do it.
-// Actually, I can just add it here and hope for the best, but better to follow up.
-// I'll update commands.hpp after this.
-
-// Placeholder implementations for missing file split
-
-
-// I will implement these in separate files in next steps to complete the task.
-// For `setup_commands`, I need to wire them up.
-
 void setup_commands(CLI::App& app, CommandContext& ctx) {
     app.require_subcommand(1);
     
@@ -83,7 +70,7 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
     cfg->add_flag("--show", ctx.cfg_show, "显示配置");
     cfg->add_option("--api-key", ctx.cfg_key, "设置 API Key");
     cfg->add_option("--model", ctx.cfg_model, "设置模型");
-    cfg->add_option("--language", ctx.new_diff, "设置语言");
+    cfg->add_option("--language", ctx.cfg_language, "设置语言 (cpp/python)");
     cfg->add_option("--editor", ctx.cfg_editor, "设置编辑器命令 (auto=自动检测 vim/nvim/nano等)");
     cfg->add_option("--autostart-repl", ctx.cfg_autostart_repl, "无参数时自动启动 REPL: on/off");
     cfg->callback([&](){ cmd_config(ctx); });

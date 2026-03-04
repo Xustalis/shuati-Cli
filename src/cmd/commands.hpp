@@ -31,6 +31,7 @@ struct CommandContext {
     int submit_quality = -1;
     std::string hint_pid, hint_file;
     std::string cfg_key, cfg_model;
+    std::string cfg_language;         // --language flag for config command
     std::string cfg_editor;          // --editor flag for config command
     std::string cfg_autostart_repl;  // "on" or "off" for --autostart-repl
     bool cfg_show = false;

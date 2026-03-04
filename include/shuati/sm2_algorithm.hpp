@@ -1,6 +1,7 @@
 #pragma once
 
 #include "shuati/database.hpp"
+#include <string>
 
 namespace shuati {
 
@@ -19,6 +20,15 @@ public:
      * @return Updated review item with new interval and ease factor
      */
     static ReviewItem update(ReviewItem item, int quality);
+
+    /**
+     * @brief Automatically compute quality score from judge verdict and time ratio
+     * @param verdict Verdict string: "AC", "WA", "TLE", "RE", "CE", "MLE"
+     * @param time_ms Actual execution time in milliseconds
+     * @param time_limit_ms Time limit in milliseconds
+     * @return Quality score (0-5)
+     */
+    static int auto_quality(const std::string& verdict, int time_ms, int time_limit_ms);
 
 private:
     static constexpr double MIN_EASE_FACTOR = 1.3;

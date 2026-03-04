@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(shuati-cli VERSION 0.0.5 LANGUAGES CXX)
+project(shuati-cli VERSION 0.0.6 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -175,6 +175,12 @@ add_shuati_test(test_judge_complex
         src/core/sandbox/sandbox_windows.cpp 
         src/core/sandbox/sandbox_linux.cpp
     LINK_LIBS SQLiteCpp cpr::cpr nlohmann_json::nlohmann_json Threads::Threads
+)
+
+# SM2 auto quality test
+add_shuati_test(test_sm2_auto_quality
+    src/tests/test_sm2_auto_quality.cpp
+    EXTRA_SOURCES src/core/sm2_algorithm.cpp
 )
 
 # Crawler unit tests

@@ -1,5 +1,6 @@
 #include "shuati/ai_coach.hpp"
 #include "shuati/memory_manager.hpp"
+#include "shuati/xml_parser.hpp"
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
 #include <fmt/core.h>
@@ -293,6 +294,87 @@ std::pair<std::string, std::string> AICoach::generate_test_scripts(const std::st
 
     return result;
 
+}
+
+AICoach::AIResponse AICoach::analyze_structured(const std::string& problem_desc,
+                                                 const std::string& user_code,
+                                                 std::function<void(std::string)> on_hint) {
+    AIResponse result;
+
+    std::string sys =
+        "你是一位严厉但负责的算法竞赛教练。你的目标是培养用户独立解决问题的能力。\n"
+        "【重中之重】\n"
+        "1. **绝不** 直接给出完整代码，只提供关键思路或局部代码片段（<10行）。\n"
+        "2. **绝不** 复述用户已提供的正确代码，只指出问题。\n"
+        "3. **必须** 检查用户代码的边界条件、数据范围匹配度和时间复杂度。\n"
+        "4. **必须** 识别用户是否已掌握某个知识点，如果是，则跳过基础讲解。\n"
+        "\n"
+        "请严格按以下 XML 结构回复（不要使用其他格式）：\n"
+        "<cot>\n"
+        "(你的思考过程，分析用户代码的逻辑，不会展示给用户)\n"
+        "</cot>\n"
+        "<hint>\n"
+        "## 💡 核心思路\n"
+        "(简要点拨，不超过3点)\n\n"
+        "## 🔍 问题诊断\n"
+        "(指出具体逻辑错误或潜在风险)\n\n"
+        "## 🛠️ 修改建议\n"
+        "(分步指导，包含代码片段)\n"
+        "</hint>\n"
+        "<memory_op>\n"
+        "{ \"new_mistake\": \"...\", \"reinforce_mastery\": \"...\" }\n"
+        "</memory_op>\n";
+
+    if (mm_) {
+        std::string memory_context = mm_->get_relevant_context("");
+        if (!memory_context.empty()) {
+            sys += "\n\n" + memory_context;
+        }
+    }
+
+    std::string user = fmt::format(
+        "题目信息：\n{}\n\n用户代码：\n```cpp\n{}\n```",
+        problem_desc.substr(0, 8000),
+        user_code.substr(0, 6000));
+
+    // Set up XML parser with callbacks
+    XmlStreamParser::Callbacks cbs;
+    cbs.on_hint = [&](const std::string& text) {
+        result.hint += text;
+        if (on_hint) on_hint(text);
+    };
+    cbs.on_cot = [&](const std::string& text) {
+        result.cot += text;
+    };
+    cbs.on_memory_op = [&](const std::string& text) {
+        result.memory_op += text;
+    };
+    cbs.on_raw = [&](const std::string& text) {
+        // Fallback: treat untagged content as hint
+        result.hint += text;
+        if (on_hint) on_hint(text);
+    };
+
+    XmlStreamParser parser(cbs);
+
+    std::string err = call_api(sys, user, true, [&parser](std::string chunk) {
+        parser.feed(chunk);
+    });
+
+    parser.flush();
+
+    // Process memory operations
+    if (err.empty() && mm_ && !result.memory_op.empty()) {
+        // Wrap in SYSTEM_OP format for compatibility with existing memory_manager
+        std::string wrapped = "<!-- SYSTEM_OP: UPDATE_MEMORY\n" + result.memory_op + "\n-->";
+        mm_->update_memory_from_response(wrapped);
+    }
+
+    if (!err.empty() && on_hint) {
+        on_hint(err);
+    }
+
+    return result;
 }
 
 } // namespace shuati

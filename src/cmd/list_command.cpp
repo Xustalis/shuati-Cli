@@ -80,6 +80,9 @@ void cmd_list(CommandContext& ctx) {
                   << pad_string("最后检查", 15) << std::endl;
         std::cout << std::string(95, '-') << std::endl;
 
+        // Cache root path for link generation
+        auto root_path = find_root_or_die();
+
         for (auto& p : problems) {
             std::string title = shorten_utf8_lossy(p.title, 24);
             
@@ -128,11 +131,11 @@ void cmd_list(CommandContext& ctx) {
             // User asked for "Click to view details". In a terminal, usually means opening a file or URL.
             // Maybe we can construct a command to run? No, OSC 8 doesn't run commands.
             // We can link to the test_report.json file.
-            std::string report_url = "file:///" + (find_root_or_die() / ".shuati" / "problems" / p.id / "test_report.json").string();
+            std::string report_url = "file:///" + (root_path / ".shuati" / "problems" / p.id / "test_report.json").string();
             // Escape backslashes for Windows? 
             // Actually std::filesystem::path::string() on Windows uses backslashes, which might break URI.
             // Need forward slashes for URI.
-            std::string uri_path = (find_root_or_die() / ".shuati" / "problems" / p.id / "test_report.json").string();
+            std::string uri_path = (root_path / ".shuati" / "problems" / p.id / "test_report.json").string();
             std::replace(uri_path.begin(), uri_path.end(), '\\', '/');
             report_url = "file:///" + uri_path;
 

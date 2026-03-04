@@ -1,7 +1,7 @@
 #include "commands.hpp"
-#include "commands.hpp"
 #include "shuati/utils/encoding.hpp"
 #include "shuati/stream_filter.hpp"
+#include <nlohmann/json.hpp>
 #include <string>
 // #include <ftxui/component/component.hpp>
 // #include <ftxui/component/screen_interactive.hpp>
@@ -81,10 +81,39 @@ void cmd_submit(CommandContext& ctx) {
     try {
         auto svc = Services::load(find_root_or_die());
         
+        // V0.0.6: Auto-quality from recent test report
         if (ctx.submit_quality < 0 || ctx.submit_quality > 5) {
-            std::cout << "掌握程度 (0=不会, 5=秒杀): ";
-            std::string val; std::getline(std::cin, val);
-            try { ctx.submit_quality = std::stoi(val); } catch (...) { ctx.submit_quality = 3; }
+            // Try to auto-compute from test report
+            fs::path report_path = fs::path(".shuati") / "problems" / ctx.submit_pid / "test_report.json";
+            int auto_q = -1;
+            if (fs::exists(report_path)) {
+                try {
+                    std::ifstream rf(report_path);
+                    auto j = nlohmann::json::parse(rf);
+                    std::string verdict = j.value("verdict", "");
+                    int time_ms = 0;
+                    if (j.contains("cases") && !j["cases"].empty()) {
+                        time_ms = j["cases"][0].value("time_ms", 0);
+                    }
+                    auto_q = SM2Algorithm::auto_quality(verdict, time_ms, 2000);
+                    std::cout << "[*] 根据最近测试结果自动评分: " << auto_q 
+                              << " (verdict=" << verdict << ", time=" << time_ms << "ms)" << std::endl;
+                } catch (...) {}
+            }
+
+            if (auto_q >= 0) {
+                std::cout << "按回车接受自动评分 [" << auto_q << "]，或输入 0-5 覆盖: ";
+                std::string val; std::getline(std::cin, val);
+                if (val.empty()) {
+                    ctx.submit_quality = auto_q;
+                } else {
+                    try { ctx.submit_quality = std::stoi(val); } catch (...) { ctx.submit_quality = auto_q; }
+                }
+            } else {
+                std::cout << "掌握程度 (0=不会, 5=秒杀): ";
+                std::string val; std::getline(std::cin, val);
+                try { ctx.submit_quality = std::stoi(val); } catch (...) { ctx.submit_quality = 3; }
+            }
         }
 
         if (ctx.submit_quality < 3) {
