@@ -31,7 +31,9 @@ fs::path BootGuard::get_history_file() {
     if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, path))) {
         data_dir = fs::path(path) / "shuati";
     } else {
-        data_dir = fs::path(std::getenv("APPDATA")) / "shuati";
+        const char* appdata = std::getenv("APPDATA");
+        data_dir = appdata ? fs::path(appdata) / "shuati" 
+                           : fs::temp_directory_path() / "shuati";
     }
 #else
     const char* home = std::getenv("HOME");

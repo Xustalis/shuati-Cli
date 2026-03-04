@@ -121,33 +121,14 @@ void cmd_list(CommandContext& ctx) {
                 time_str = buf;
             }
 
-            // Make ID clickable (View command)
-            // URL scheme: x-shuati-view://<id> -> handled by terminal? 
-            // Or just a file link? 
-            // OSC 8 is usually for http/https or file://. 
-            // Let's use a dummy scheme or just file:// if we had a web UI. 
-            // Actually VSCode handles file:// links well. 
-            // Let's just link to the problem verification file for now, or just leave it as text if no web UI.
-            // User asked for "Click to view details". In a terminal, usually means opening a file or URL.
-            // Maybe we can construct a command to run? No, OSC 8 doesn't run commands.
-            // We can link to the test_report.json file.
-            std::string report_url = "file:///" + (root_path / ".shuati" / "problems" / p.id / "test_report.json").string();
-            // Escape backslashes for Windows? 
-            // Actually std::filesystem::path::string() on Windows uses backslashes, which might break URI.
-            // Need forward slashes for URI.
+            // Generate OSC 8 hyperlink to test report file
             std::string uri_path = (root_path / ".shuati" / "problems" / p.id / "test_report.json").string();
             std::replace(uri_path.begin(), uri_path.end(), '\\', '/');
-            report_url = "file:///" + uri_path;
+            std::string report_url = "file:///" + uri_path;
 
             std::string id_display = link(ensure_utf8(p.id.substr(0, 18)), report_url);
 
-            // Print row
-            // Note: pad_string calculates visual width, so we shouldn't pad the ANSI strings directly if they contain invisible chars.
-            // We need to pad based on visible length, then append ANSI.
-            // For Status, we calculated status_display (clean text) for width, but we want to print colored status.
-            // pad_string currently takes string and returns string. 
-            // We need to manually pad.
-            
+            // Pad based on visible width (ANSI codes are invisible)
             size_t id_w = utf8_display_width(ensure_utf8(p.id.substr(0, 18)));
             std::string id_padding = (id_w < 20) ? std::string(20 - id_w, ' ') : "";
 

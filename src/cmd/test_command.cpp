@@ -361,9 +361,8 @@ void cmd_test(CommandContext& ctx) {
 
         report.pass_count = passed;
         report.verdict = all_ac ? "AC" : "WA";
-        // Refine verdict if TLE/RE?
-        // Just use "WA" or specific if all failed same way?
-        // Let's iterate report.cases to find first non-AC for the summary verdict if not AC
+
+        // Refine to specific verdict (TLE/RE) if all failed the same way
         if (!all_ac) {
              for (const auto& c : report.cases) {
                  if (c.verdict != Verdict::AC) {

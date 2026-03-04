@@ -47,12 +47,6 @@ private:
     fs::path path_;
 };
 
-// Helper to remove trailing whitespace
-std::string trim_right(const std::string& s) {
-    size_t end = s.find_last_not_of(" \t\n\r");
-    return (end == std::string::npos) ? "" : s.substr(0, end + 1);
-}
-
 static std::string read_text_file(const std::string& path) {
     std::ifstream in(path, std::ios::in | std::ios::binary);
     if (!in) return "";
@@ -60,7 +54,6 @@ static std::string read_text_file(const std::string& path) {
     ss << in.rdbuf();
     return ss.str();
 }
-
 
 
 std::string Judge::prepare(const std::string& source_file, const std::string& language) {
@@ -87,7 +80,8 @@ std::string Judge::compile(const std::string& source_file, const std::string& la
 
     if (language == "cpp" || language == "c++") {
         // Security check: Ensure source_file contains only safe characters
-        if (source_file.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-/\\") != std::string::npos) {
+        // Allow alphanumeric, dots, underscores, hyphens, slashes, backslashes, spaces, colons (Windows paths)
+        if (source_file.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-/\\ :") != std::string::npos) {
             throw std::runtime_error("Invalid source file path: " + source_file);
         }
 
@@ -323,24 +317,6 @@ JudgeResult Judge::run_process_redirect(const std::string& cmd,
     }
 
     return res;
-}
-
-
-bool Judge::stream_file_diff(const std::string& path1, const std::string& path2) {
-    std::ifstream f1(path1), f2(path2);
-    if (!f1 || !f2) return false;
-
-    std::string s1, s2;
-    // Token-based comparison ignores whitespace/newlines
-    while (true) {
-        bool b1 = (bool)(f1 >> s1);
-        bool b2 = (bool)(f2 >> s2);
-        
-        if (b1 != b2) return false; // One ended before other
-        if (!b1) break; // Both ended
-        if (s1 != s2) return false; // Mismatch
-    }
-    return true;
 }
 
 } // namespace shuati

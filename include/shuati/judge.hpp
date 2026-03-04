@@ -33,11 +33,6 @@ public:
                                      int time_limit_ms, 
                                      int memory_limit_kb);
 
-    // Efficiently compare two files (return true if identical, ignoring trailing whitespace)
-    bool stream_file_diff(const std::string& file1, const std::string& file2);
-
-
-
 private:
     std::string compile(const std::string& source_file, const std::string& language);
     JudgeResult run_case(const std::string& executable, 
