@@ -97,6 +97,15 @@ std::filesystem::path utf8_path(const std::string& u8str) {
 #endif
 }
 
+std::string path_to_utf8(const std::filesystem::path& p) {
+#if defined(__cpp_lib_char8_t)
+    auto u8 = p.u8string();
+    return std::string(u8.begin(), u8.end());
+#else
+    return p.u8string();
+#endif
+}
+
 int utf8_system(const std::string& u8cmd) {
     if (u8cmd.empty()) return 0;
     std::wstring wcmd = utf8_to_wide(u8cmd);
@@ -117,6 +126,15 @@ std::filesystem::path utf8_path(const std::string& u8str) {
     return std::filesystem::path(reinterpret_cast<const char8_t*>(u8str.c_str()));
 #else
     return std::filesystem::u8path(u8str);
+#endif
+}
+
+std::string path_to_utf8(const std::filesystem::path& p) {
+#if defined(__cpp_lib_char8_t)
+    auto u8 = p.u8string();
+    return std::string(u8.begin(), u8.end());
+#else
+    return p.u8string();
 #endif
 }
 

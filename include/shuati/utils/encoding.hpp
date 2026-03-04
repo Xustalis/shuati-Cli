@@ -26,6 +26,9 @@ std::wstring utf8_to_wide(const std::string& u8str);
 // Convert UTF-8 string to a filesystem path reliably
 std::filesystem::path utf8_path(const std::string& u8str);
 
+// Convert a filesystem path to a UTF-8 string reliably
+std::string path_to_utf8(const std::filesystem::path& p);
+
 // Execute a system command containing UTF-8 characters safely
 int utf8_system(const std::string& u8cmd);
 

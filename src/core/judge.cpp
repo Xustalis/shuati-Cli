@@ -11,6 +11,7 @@
 #include <system_error>
 #include <cstdlib>
 #include <random>
+#include "shuati/utils/encoding.hpp"
 
 
 namespace shuati {
@@ -36,7 +37,7 @@ public:
         }
     }
 
-    std::string path() const { return path_.string(); }
+    std::string path() const { return shuati::utils::path_to_utf8(path_); }
     
     void write(const std::string& content) {
         std::ofstream out(path_);
@@ -85,8 +86,8 @@ std::string Judge::compile(const std::string& source_file, const std::string& la
             throw std::runtime_error("Invalid source file path (contains shell metacharacters): " + source_file);
         }
 
-        fs::path src(source_file);
-        std::string exe = src.replace_extension(".exe").string();
+        fs::path src = shuati::utils::utf8_path(source_file);
+        std::string exe = shuati::utils::path_to_utf8(src.replace_extension(".exe"));
         
 #ifdef _WIN32
         const char* null_dev = "nul";
@@ -111,12 +112,12 @@ std::string Judge::compile(const std::string& source_file, const std::string& la
                 std_flag, source_file, exe, null_dev, err.path()
             );
 
-            if (fs::exists(exe)) {
-                try { fs::remove(exe); } catch(...) {}
+            if (fs::exists(shuati::utils::utf8_path(exe))) {
+                try { fs::remove(shuati::utils::utf8_path(exe)); } catch(...) {}
             }
 
-            int ret = std::system(cmd.c_str());
-            if (ret == 0 && fs::exists(exe)) {
+            int ret = shuati::utils::utf8_system(cmd);
+            if (ret == 0 && fs::exists(shuati::utils::utf8_path(exe))) {
                 return exe;
             }
 
