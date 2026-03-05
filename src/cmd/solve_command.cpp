@@ -62,7 +62,7 @@ void cmd_solve(CommandContext& ctx) {
 
                 auto renderer = Renderer(component, [&] {
                     return vbox({
-                        text("选择要练习的题目:") | bold,
+                        text("选择要练习的题目:") | ftxui::bold,
                         separator(),
                         menu->Render() | vscroll_indicator | frame | size(HEIGHT, LESS_THAN, 15),
                         separator(),

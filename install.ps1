@@ -1,4 +1,4 @@
-# Shuati CLI Installer v0.0.3
+# Shuati CLI Installer v0.0.7
 $ErrorActionPreference = "Stop"
 
 $InstallDir = "$env:LOCALAPPDATA\shuati-cli"

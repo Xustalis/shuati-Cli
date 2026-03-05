@@ -13,7 +13,7 @@
   #if EnvVersion != ""
     #define MyAppVersion EnvVersion
   #else
-    #define MyAppVersion "0.0.4"
+    #define MyAppVersion "0.0.7"
   #endif
 #endif
 
@@ -68,6 +68,10 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 LZMAUseSeparateProcess=yes
 LZMANumBlockThreads=4
+
+; Optimization settings
+ChangesEnvironment=yes
+SetupLogging=yes
 
 ; UI settings
 WizardStyle=modern

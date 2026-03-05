@@ -11,7 +11,7 @@
 
 **Shuati CLI 专为 OIer 和 Coder 打造的本地化、智能化命令行刷题工具🚀**
 
-[![Version](https://img.shields.io/badge/version-0.0.6-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
+[![Version](https://img.shields.io/badge/version-0.0.7-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
 [![CI](https://github.com/Xustalis/shuati-Cli/actions/workflows/release.yml/badge.svg)](https://github.com/Xustalis/shuati-Cli/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![C++20](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)

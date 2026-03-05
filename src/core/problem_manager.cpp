@@ -33,7 +33,7 @@ void ProblemManager::pull_problem(const std::string& url) {
     // Try crawlers first
     for (auto& crawler : crawlers_) {
         if (crawler->can_handle(url)) {
-            fmt::print(fg(fmt::color::cyan), "    使用适配器: {}\n", typeid(*crawler).name());
+            fmt::print(fg(fmt::color::cyan), "    使用适配器: {}\n", typeid(*crawler.get()).name());
             p = crawler->fetch_problem(url);
             if (p.id.empty() || utils::contains(p.id, "_error")) {
                 fmt::print(fg(fmt::color::red), "[!] 爬取失败: {}\n", p.title);

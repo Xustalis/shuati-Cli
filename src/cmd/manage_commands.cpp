@@ -75,6 +75,7 @@ void cmd_delete(CommandContext& ctx) {
 
 
 void cmd_clean(CommandContext& ctx) {
+    (void)ctx;
     try {
         fs::path root;
         try {

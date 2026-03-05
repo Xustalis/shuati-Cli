@@ -11,6 +11,7 @@ namespace cmd {
 namespace fs = std::filesystem;
 
 void cmd_init(CommandContext& ctx) {
+    (void)ctx;
     try {
         fs::path cwd = fs::current_path();
         fs::path shuati_dir = cwd / ".shuati";
@@ -57,6 +58,7 @@ void cmd_init(CommandContext& ctx) {
 }
 
 void cmd_info(CommandContext& ctx) {
+    (void)ctx;
     std::cout << "Shuati CLI " << current_version().to_string() << std::endl;
     std::cout << "Executable: " << executable_path_utf8() << std::endl;
     
