@@ -2,10 +2,11 @@
 #include "shuati/utils/encoding.hpp"
 #include "shuati/stream_filter.hpp"
 #include <nlohmann/json.hpp>
+#include <fmt/core.h>
 #include <string>
-// #include <ftxui/component/component.hpp>
-// #include <ftxui/component/screen_interactive.hpp>
-// #include <ftxui/dom/elements.hpp>
+#include <ftxui/component/component.hpp>
+#include <ftxui/component/screen_interactive.hpp>
+#include <ftxui/dom/elements.hpp>
 #include <iostream>
 #include <fstream>
 #include <algorithm>
@@ -23,19 +24,73 @@ void cmd_solve(CommandContext& ctx) {
         
         Problem prob;
         if (ctx.solve_pid.empty()) {
-            // Interactive Selection
-            // ftxui removed for build stability
-            std::cout << "请输入题目 ID: ";
-            std::cin >> ctx.solve_pid;
-            
+            // Interactive Selection via ftxui Menu
+            auto problems = svc.pm->list_problems();
+            if (problems.empty()) {
+                std::cout << "题库为空，请先使用 pull 或 new 添加题目。" << std::endl;
+                return;
+            }
+
             try {
-                if (std::all_of(ctx.solve_pid.begin(), ctx.solve_pid.end(), ::isdigit)) {
-                    int tid = std::stoi(ctx.solve_pid);
-                    prob = svc.db->get_problem_by_display_id(tid);
-                } else {
-                    prob = svc.db->get_problem(ctx.solve_pid);
+                using namespace ftxui;
+                std::vector<std::string> options;
+                for (const auto& p : problems) {
+                    std::string status = p.last_verdict.empty() ? "-" : p.last_verdict;
+                    options.push_back(fmt::format("{:>3}  {:<24}  [{}]  {}",
+                        p.display_id,
+                        ensure_utf8(p.title).substr(0, 24),
+                        ensure_utf8(p.difficulty),
+                        status));
                 }
-            } catch (...) {}
+
+                int selected = 0;
+                auto menu = Menu(&options, &selected);
+                auto screen = ScreenInteractive::TerminalOutput();
+
+                auto component = CatchEvent(menu, [&](Event event) {
+                    if (event == Event::Return) {
+                        screen.ExitLoopClosure()();
+                        return true;
+                    }
+                    if (event == Event::Escape || event == Event::Character('q')) {
+                        selected = -1;
+                        screen.ExitLoopClosure()();
+                        return true;
+                    }
+                    return false;
+                });
+
+                auto renderer = Renderer(component, [&] {
+                    return vbox({
+                        text("选择要练习的题目:") | bold,
+                        separator(),
+                        menu->Render() | vscroll_indicator | frame | size(HEIGHT, LESS_THAN, 15),
+                        separator(),
+                        text("↑/↓ 选择  Enter 确认  q/Esc 取消") | dim,
+                    }) | border;
+                });
+
+                screen.Loop(renderer);
+
+                if (selected < 0 || selected >= (int)problems.size()) {
+                    std::cout << "操作取消。" << std::endl;
+                    return;
+                }
+                prob = problems[selected];
+
+            } catch (...) {
+                // Fallback to plain stdin if ftxui fails (e.g. non-interactive terminal)
+                std::cout << "请输入题目 ID: ";
+                std::cin >> ctx.solve_pid;
+                try {
+                    if (std::all_of(ctx.solve_pid.begin(), ctx.solve_pid.end(), ::isdigit)) {
+                        int tid = std::stoi(ctx.solve_pid);
+                        prob = svc.db->get_problem_by_display_id(tid);
+                    } else {
+                        prob = svc.db->get_problem(ctx.solve_pid);
+                    }
+                } catch (...) {}
+            }
 
         } else {
             try {

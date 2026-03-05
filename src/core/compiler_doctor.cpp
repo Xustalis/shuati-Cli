@@ -2,10 +2,15 @@
 #include "shuati/resource_path.hpp"
 #include <regex>
 #include <fstream>
+#include <sstream>
+#include <filesystem>
+#include <cstdlib>
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
 
 namespace shuati {
+
+namespace fs = std::filesystem;
 
 // Static members
 std::vector<DiagnosticRule> CompilerDoctor::rules_;
@@ -99,26 +104,43 @@ Diagnosis CompilerDoctor::diagnose(const std::string& error_output) {
 bool CompilerDoctor::check_environment(std::vector<std::string>& missing_tools) {
     missing_tools.clear();
     
+    // Scan PATH directories for executables instead of spawning shells via std::system.
+    // This avoids antivirus false positives and is more portable.
+    auto find_in_path = [](const std::string& exe_name) -> bool {
+        const char* path_env = std::getenv("PATH");
+        if (!path_env) return false;
+        
+        std::string path_str(path_env);
 #ifdef _WIN32
-    const char* null_dev = "nul";
+        char delimiter = ';';
+        // On Windows, also check with .exe extension
+        std::vector<std::string> candidates = {exe_name, exe_name + ".exe"};
 #else
-    const char* null_dev = "/dev/null";
+        char delimiter = ':';
+        std::vector<std::string> candidates = {exe_name};
 #endif
+        
+        std::istringstream iss(path_str);
+        std::string dir;
+        while (std::getline(iss, dir, delimiter)) {
+            if (dir.empty()) continue;
+            for (const auto& name : candidates) {
+                auto full = fs::path(dir) / name;
+                std::error_code ec;
+                if (fs::exists(full, ec) && !fs::is_directory(full, ec)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
 
-    // Check g++
-    std::string cmd_cpp = fmt::format("g++ --version > {} 2>&1", null_dev);
-    if (std::system(cmd_cpp.c_str()) != 0) {
+    if (!find_in_path("g++")) {
         missing_tools.push_back("g++ (MinGW/GCC)");
     }
     
-    // Check python
-    std::string cmd_py = fmt::format("python --version > {} 2>&1", null_dev);
-    if (std::system(cmd_py.c_str()) != 0) {
-        // Try python3
-        std::string cmd_py3 = fmt::format("python3 --version > {} 2>&1", null_dev);
-        if (std::system(cmd_py3.c_str()) != 0) {
-            missing_tools.push_back("python");
-        }
+    if (!find_in_path("python") && !find_in_path("python3")) {
+        missing_tools.push_back("python");
     }
     
     return missing_tools.empty();

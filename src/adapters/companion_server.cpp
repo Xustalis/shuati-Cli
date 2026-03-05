@@ -68,6 +68,10 @@ void CompanionServer::handle_post(const httplib::Request& req, httplib::Response
         p.url = url;
         p.created_at = std::time(nullptr);
         
+        // All DB operations guarded by mutex to prevent "database is locked" from
+        // concurrent writes between this HTTP handler thread and the main thread.
+        std::lock_guard<std::mutex> lock(db_mutex_);
+
         // Check if exists
         try {
             auto existing = db_.get_problem(id);

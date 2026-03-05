@@ -5,6 +5,7 @@
 #include <memory>
 #include <thread>
 #include <atomic>
+#include <mutex>
 
 namespace shuati {
 
@@ -22,6 +23,7 @@ private:
     Database& db_;
     std::thread worker_;
     std::atomic<bool> running_{false};
+    std::mutex db_mutex_;  // Protects db_ writes from HTTP handler thread
 
     void handle_post(const httplib::Request& req, httplib::Response& res);
 };

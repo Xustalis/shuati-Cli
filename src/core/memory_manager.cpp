@@ -66,12 +66,11 @@ bool MemoryManager::update_memory_from_response(const std::string& ai_response) 
             
             if (j.contains("new_mistake") && j["new_mistake"].is_string()) {
                 std::string pattern = j["new_mistake"];
-                // Extract tags from where? For now, let's use a placeholder or empty
-                // In a perfect world, we'd pass current problem tags here too.
-                // For now, we rely on AI not providing tags in this JSON, or we assume global.
-                // Let's just use empty tags for now as the schema allows it.
+                // Extract tags and example_id from AI response if provided
+                std::string tags = j.value("tags", "");
+                std::string example_id = j.value("example_id", "");
                 if (!pattern.empty()) {
-                    db_.upsert_memory_mistake("", pattern, ""); 
+                    db_.upsert_memory_mistake(tags, pattern, example_id); 
                 }
             }
             
@@ -82,7 +81,11 @@ bool MemoryManager::update_memory_from_response(const std::string& ai_response) 
                      auto current = db_.get_mastery(skill);
                      double conf = 50.0;
                      if (current) {
-                         conf = std::min(100.0, current->confidence + 10.0);
+                         // Diminishing returns: the closer to 100, the smaller the gain.
+                         // This prevents trivial problems from instantly maxing out mastery.
+                         double gap = 100.0 - current->confidence;
+                         double gain = std::max(1.0, 5.0 * (gap / 100.0));
+                         conf = std::min(100.0, current->confidence + gain);
                      }
                     db_.upsert_mastery(skill, conf);
                 }

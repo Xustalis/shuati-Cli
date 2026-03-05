@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.0.7] - 2026-03-05
+
+### 新增功能 (New Features)
+- **SM2 记忆逻辑增强**：支持记录题目标签 (tags) 和示例 ID (example_id)，使错题分析更精准。
+- **Companion Server 端口自动轮询**：支持 3000-3005 端口自动尝试，优化了多实例并发运行时的端口冲突处理。
+- **编译诊断规则升级**：新增 GCC 15/C++23 专用诊断规则，支持识别现代 C++ 编译器的新型报错。
+
+### 修复问题 (Bug Fixes)
+- 优化了 `solve` 命令的交互式选题 UI，改善了长列表显示的流畅度。
+- 改进了解题文件的自动检测逻辑，精准识别旧版 `solution_*.cpp` 与新版 `{序号}_{标题}.cpp`。
+- 修复了 Companion Server 在某些环境下跨域资源共享 (CORS) 的预检请求处理。
+
+### 破坏性变更 (Breaking Changes)
+- 无。
+
+---
+
 ## [v0.0.6] - 2026-03-04
 
 ### 新增功能 (New Features)

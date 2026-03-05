@@ -122,26 +122,28 @@ void cmd_clean(CommandContext& ctx) {
             }
         }
 
-        // 3. Clean root directory artifacts (solution_*.exe, *.o, *.obj)
+        // 3. Clean root directory build artifacts only
+        // Strict policy: only remove files that are BOTH prefixed with "solution_"
+        // AND have a known build artifact extension. This prevents accidental deletion
+        // of user files that happen to start with "solution_".
+        const std::vector<std::string> artifact_exts = {".exe", ".o", ".obj", ".out"};
         for (const auto& entry : fs::directory_iterator(root)) {
             if (entry.is_directory()) continue;
             std::string name = entry.path().filename().string();
+            std::string ext = entry.path().extension().string();
             
-            bool is_garbage = false;
-            if (name.rfind("solution_", 0) == 0) { // starts with solution_
-                 if (name.length() > 4 && (name.substr(name.length()-4) == ".exe" || name.substr(name.length()-4) == ".obj")) {
-                     is_garbage = true;
-                 } else if (name.length() > 2 && name.substr(name.length()-2) == ".o") {
-                     is_garbage = true;
-                 }
-                 #ifndef _WIN32
-                 // If judge.cpp is ever fixed to not add .exe on Linux, we might have solution_ID (no ext).
-                 // For now, Judge adds .exe, so we are good.
-                 #endif
-            }
-
-            if (is_garbage) {
-                remove_file(entry.path());
+            // Must start with "solution_" AND have a recognized build artifact extension
+            if (name.rfind("solution_", 0) == 0) {
+                bool is_artifact = false;
+                for (const auto& allowed_ext : artifact_exts) {
+                    if (ext == allowed_ext) {
+                        is_artifact = true;
+                        break;
+                    }
+                }
+                if (is_artifact) {
+                    remove_file(entry.path());
+                }
             }
         }
 
