@@ -197,7 +197,11 @@ void cmd_hint(CommandContext& ctx) {
     try {
         auto svc = Services::load(find_root_or_die());
         auto prob = svc.pm->get_problem(ctx.hint_pid);
-        if (prob.id.empty()) { std::cerr << "[!] 题目不存在。" << std::endl; return; }
+        if (prob.id.empty()) {
+            if (ctx.stream_cb) ctx.stream_cb("[!] 题目不存在。\n");
+            else std::cerr << "[!] 题目不存在。" << std::endl;
+            return;
+        }
         
         std::string desc;
         desc += "题目: " + ensure_utf8(prob.title) + "\n";
@@ -235,11 +239,16 @@ void cmd_hint(CommandContext& ctx) {
             code.assign(std::istreambuf_iterator<char>(f), {});
         }
 
-        std::cout << "[教练] 思考中 (按 Ctrl+C 中止)..." << std::endl << std::endl;
+        if (ctx.stream_cb) {
+            ctx.stream_cb("[教练] 思考中...\n\n");
+        } else {
+            std::cout << "[教练] 思考中 (按 Ctrl+C 中止)..." << std::endl << std::endl;
+        }
         
         // Streaming output with robust tag filtering
-        StreamFilter filter([](const std::string& text) {
-            std::cout << text << std::flush;
+        StreamFilter filter([&ctx](const std::string& text) {
+            if (ctx.stream_cb) ctx.stream_cb(text);
+            else std::cout << text << std::flush;
         });
 
         svc.ai->analyze(desc, code, [&filter](std::string chunk) {
@@ -247,9 +256,10 @@ void cmd_hint(CommandContext& ctx) {
         });
         
         filter.flush();
-        std::cout << "\n\n";
+        if (!ctx.stream_cb) std::cout << "\n\n";
     } catch (const std::exception& e) {
-            std::cerr << "[!] 错误: " << e.what() << std::endl;
+        if (ctx.stream_cb) ctx.stream_cb(std::string("[!] 错误: ") + e.what() + "\n");
+        else std::cerr << "[!] 错误: " << e.what() << std::endl;
     }
 }
 

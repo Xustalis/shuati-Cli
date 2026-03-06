@@ -317,28 +317,32 @@ int TuiApp::run() {
             state.view_mode = ViewMode::HintView;
 
             std::thread([&screen, &state, args = std::move(args), base_cmd]() mutable {
-                std::string output = tui_execute_command_capture(args, base_cmd);
-                screen.Post([&state, output = std::move(output)] {
-                    state.hint_state.loading = false;
-                    if (output.empty()) {
-                        state.hint_state.error = "\xe6\x9c\xaa\xe8\x8e\xb7\xe5\x8f\x96\xe5\x88\xb0\xe6\x8f\x90\xe7\xa4\xba\xe5\x86\x85\xe5\xae\xb9\xe3\x80\x82";
-                        return;
-                    }
-                    if (is_error_output(output)) {
-                        state.hint_state.error = output;
-                        return;
-                    }
-                    std::string::size_type start = 0;
-                    while (start < output.size()) {
-                        auto nl = output.find('\n', start);
-                        if (nl == std::string::npos) {
-                            state.hint_state.lines.push_back(output.substr(start));
-                            break;
+                auto cb = [&screen, &state](const std::string& chunk) {
+                    screen.Post([&state, chunk]() {
+                        state.hint_state.loading = false;
+                        std::string::size_type start = 0;
+                        while (start < chunk.size()) {
+                            auto nl = chunk.find('\n', start);
+                            if (nl == std::string::npos) {
+                                if (state.hint_state.lines.empty()) state.hint_state.lines.push_back("");
+                                state.hint_state.lines.back() += chunk.substr(start);
+                                break;
+                            }
+                            if (state.hint_state.lines.empty()) state.hint_state.lines.push_back("");
+                            state.hint_state.lines.back() += chunk.substr(start, nl - start);
+                            state.hint_state.lines.push_back("");
+                            start = nl + 1;
                         }
-                        state.hint_state.lines.push_back(output.substr(start, nl - start));
-                        start = nl + 1;
+                        int max_scroll = std::max(0, static_cast<int>(state.hint_state.lines.size()) - 10);
+                        state.hint_state.scroll_offset = max_scroll;
+                    });
+                };
+                tui_execute_command_stream(args, base_cmd, cb);
+                screen.Post([&state] {
+                    state.hint_state.loading = false;
+                    if (state.hint_state.lines.empty() && state.hint_state.error.empty()) {
+                        state.hint_state.error = "\xe6\x9c\xaa\xe8\x8e\xb7\xe5\x8f\x96\xe5\x88\xb0\xe6\x8f\x90\xe7\xa4\xba\xe5\x86\x85\xe5\xae\xb9\xe3\x80\x82";
                     }
-                    state.hint_state.scroll_offset = 0;
                 });
             }).detach();
             return;

@@ -270,5 +270,25 @@ std::string tui_execute_command_capture(const std::vector<std::string>& args, co
     return normalize_text(capture.str());
 }
 
+void tui_execute_command_stream(const std::vector<std::string>& args, const std::string& base_cmd, std::function<void(const std::string&)> stream_cb) {
+    try {
+        CLI::App app{"TUI"};
+        app.allow_extras();
+        shuati::cmd::CommandContext cmd_ctx;
+        cmd_ctx.stream_cb = stream_cb;
+        shuati::cmd::setup_commands(app, cmd_ctx);
+        std::vector<const char*> argv;
+        argv.reserve(args.size());
+        for (const auto& a : args) argv.push_back(a.c_str());
+        try {
+            app.parse(static_cast<int>(argv.size()), const_cast<char**>(argv.data()));
+        } catch (const CLI::ParseError& e) {
+            app.exit(e);
+        }
+    } catch (const std::exception& e) {
+        if (stream_cb) stream_cb(std::string("[Error] ") + e.what() + "\n");
+    }
+}
+
 } // namespace tui
 } // namespace shuati

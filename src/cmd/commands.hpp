@@ -5,6 +5,7 @@
 #include <memory>
 #include <filesystem>
 #include <optional>
+#include <functional>
 #include <CLI/CLI.hpp>
 
 // Include service headers
@@ -42,6 +43,7 @@ struct CommandContext {
     std::string list_filter; // "all", "ac", "failed", "unaudited"
     std::string view_export_dir; // Directory to save test cases
     std::string login_platform;  // Platform for login command (e.g., "lanqiao")
+    std::function<void(const std::string&)> stream_cb; // Callback for streaming outputs
 };
 
 // 鈹€鈹€鈹€ Services 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€

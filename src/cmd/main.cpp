@@ -12,6 +12,23 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
+    
+    // Enable VT processing globally to fix Replxx rendering and backspace ghosting 
+    // on Windows Terminal and modern console hosts.
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hOut != INVALID_HANDLE_VALUE) {
+        DWORD dwMode = 0;
+        if (GetConsoleMode(hOut, &dwMode)) {
+            SetConsoleMode(hOut, dwMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        }
+    }
+    HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+    if (hIn != INVALID_HANDLE_VALUE) {
+        DWORD dwMode = 0;
+        if (GetConsoleMode(hIn, &dwMode)) {
+            SetConsoleMode(hIn, dwMode | ENABLE_VIRTUAL_TERMINAL_INPUT);
+        }
+    }
 #endif
 
     // Initialize Logger
