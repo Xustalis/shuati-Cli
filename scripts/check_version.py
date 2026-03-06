@@ -17,9 +17,7 @@ def get_vcpkg_version(txt):
         return None
 
 def get_readme_version(txt):
-    m = re.search(r'version-([0-9]+\.[0-9]+\.[0-9]+)-verde', txt)
-    if not m:
-        m = re.search(r'version-([0-9]+\.[0-9]+\.[0-9]+)-green', txt)
+    m = re.search(r'version-([0-9]+\.[0-9]+\.[0-9]+)-green', txt)
     return m.group(1) if m else None
 
 def main():

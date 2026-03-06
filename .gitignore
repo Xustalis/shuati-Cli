@@ -121,6 +121,10 @@ upgrade_plan*.md
 # Agent transcripts
 agent-transcripts/
 
+# Cursor IDE project data
+mcps/
+terminals/
+
 # Sandbox / Execution Data
 *.in
 *.out

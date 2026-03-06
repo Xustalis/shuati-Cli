@@ -2,76 +2,79 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v0.1.0] - 2026-03-06
+## [v0.1.0] - 2026-03-06 🎉 首个里程碑版本
 
-> **This is a major architectural release.** v0.1.0 marks the first milestone of the Shuati CLI project, introducing a ground-up TUI redesign, comprehensive CI/CD overhaul, installer refactoring, and deep code cleanup across the entire codebase.
+> **里程碑版本。** v0.1.0 标志着 Shuati CLI 从纯命令行工具正式迈入**终端图形界面时代**。本版本首次引入基于 FTXUI 的 TUI 设计界面，实现了沉浸式的全屏交互体验；同时对 CI/CD 管线、Windows 安装程序和整体代码架构进行了全面重构与深度清理。
 
-### Highlights
+### 核心亮点
 
-- Brand-new **FTXUI-based TUI** with static main menu, command catalog, auto-complete, and full-screen sub-views.
-- **Unified CI/CD pipeline** — merged redundant workflows, fixed critical release bugs, and streamlined three-platform builds.
-- **Inno Setup installer refactored** with environment variable overrides, component-based install types, and proper PATH management.
-- **Net reduction of ~151 lines** through aggressive dead code removal and architecture consolidation.
+- **🖥️ 首次引入 TUI 终端界面** — 基于 [FTXUI](https://github.com/ArthurSonzogni/FTXUI) 从零构建的生产级终端 UI，支持静态主菜单、命令自动补全、实时输入提示和三个全屏子视图（配置编辑器 / 题目浏览器 / AI 提示页），这是项目架构层面最大的一次跨越。
+- **🔀 路由层架构引入** — 新增 `AppRouter` 路由层，实现 CLI（传统 REPL）与 TUI 双入口解耦，为后续多模式扩展奠定基础。
+- **⚙️ CI/CD 管线统一** — 合并冗余工作流、修复关键发布 Bug、精简三平台构建矩阵。
+- **📦 Inno Setup 安装程序重构** — 支持环境变量注入、组件化安装和规范 PATH 管理。
+- **🧹 净减约 151 行代码** — 通过激进的死代码移除、废弃文件清理和架构整合完成。
 
-### New Features
+### 新增功能
 
-- **TUI Complete Redesign**: Replaced the previous prototype TUI with a production-ready terminal interface built on FTXUI. The new TUI features a static main menu with an ASCII panda mascot, a scrollable output panel, and a unified command input bar with real-time hint display.
-- **Full-Screen Sub-Views**: Three dedicated full-screen views accessible via slash commands:
-  - `/config` — Form-based configuration editor for API keys, language, editor preferences.
-  - `/list` — Interactive problem browser with table navigation and filtering.
-  - `/hint <id>` — Scrollable AI hint display with async loading, PageUp/PageDown/Arrow scroll, and Esc to return.
-- **Command Hint System**: Every slash command now displays a real-time usage hint (syntax + description) as the user types. Implemented with an O(1) `unordered_map` lookup table, replacing the previous O(n) if-else chain.
-- **Command History & Shortcuts**: Arrow Up/Down to browse command history, Ctrl+L to clear screen, Ctrl+U to clear current input line.
-- **Command Auto-Complete**: Tab-triggered auto-complete panel populated from a centralized command catalog (`tui_command_catalog.cpp`).
+#### TUI 终端界面
 
-### Architecture Refactoring
+- **全新 TUI 主界面**：以基于 FTXUI 的生产级终端界面替换了此前的原型 TUI。主界面包含带 ASCII 熊猫吉祥物的欢迎页、可滚动输出面板以及带实时提示的统一命令输入栏。运行 `shuati tui` 即可进入。
+- **三个全屏子视图**，通过斜杠命令进入：
+  - `/config` — 表单式配置编辑器，可设置 API Key、语言、编辑器偏好等。
+  - `/list` — 交互式题目浏览器，支持表格导航和 `f` 键切换筛选。
+  - `/hint <id>` — 可滚动的 AI 提示展示，支持异步加载、PageUp/PageDown/方向键滚动、Esc 返回。
+- **命令实时提示**：所有斜杠命令在用户输入时实时显示用法提示（语法 + 描述）。采用 O(1) `unordered_map` 查找表替代了原有的 O(n) if-else 链。
+- **命令历史与快捷键**：`↑↓` 浏览命令历史、`Ctrl+L` 清屏、`Ctrl+U` 清除当前输入行。
+- **Tab 自动补全**：Tab 键触发自动补全面板，候选项来自集中式命令目录 (`tui_command_catalog.cpp`)。
 
-- **New Router Layer** (`src/router/`): Introduced `AppRouter` to cleanly separate CLI and TUI entry points. The main entry (`src/cmd/main.cpp`) now delegates to the router, which decides whether to launch the legacy REPL or the new TUI based on configuration and arguments.
-- **Legacy REPL Extraction** (`src/cli/legacy_repl.cpp`): The original replxx-based REPL logic was extracted from `main.cpp` into a dedicated module, preserving backward compatibility while decoupling it from the new TUI path.
-- **New TUI Module** (`src/tui/`): A self-contained module with clear separation of concerns:
-  - `tui_app.cpp` — Application main loop, component tree, event handling, sub-view routing.
-  - `tui_views.cpp` — View rendering (welcome page, config/list/hint sub-views).
-  - `tui_command_engine.cpp` — Command parsing, execution, and output capture (including C-level fd redirection).
-  - `tui_command_catalog.cpp` — Auto-complete candidate list generation.
-  - `command_specs.cpp` — TUI command metadata definitions (slash name, usage, summary).
-  - `store/app_state.hpp` — Centralized TUI state management (ViewMode, BufferLine, History, sub-view states).
-- **Removed 9 Deprecated Files**: Cleaned up legacy TUI component files that were superseded by the new architecture.
+### 架构重构
 
-### Bug Fixes
+- **新增路由层** (`src/router/`)：引入 `AppRouter`，将 CLI 和 TUI 入口进行清晰解耦。程序主入口 (`src/cmd/main.cpp`) 现委托路由层根据配置和参数决定启动传统 REPL 还是新 TUI。
+- **传统 REPL 抽取** (`src/cli/legacy_repl.cpp`)：将原有基于 replxx 的 REPL 逻辑从 `main.cpp` 抽取为独立模块，保持向后兼容的同时与新 TUI 路径解耦。
+- **新增 TUI 模块** (`src/tui/`)：自包含模块，职责分离清晰：
+  - `tui_app.cpp` — 应用主循环、组件树、事件处理、子视图路由。
+  - `tui_views.cpp` — 视图渲染（欢迎页、Config/List/Hint 子视图）。
+  - `tui_command_engine.cpp` — 命令解析、执行、输出捕获（含 C 层 fd 重定向）。
+  - `tui_command_catalog.cpp` — 自动补全候选列表生成。
+  - `command_specs.cpp` — TUI 命令元数据定义（斜杠名称、用法、摘要）。
+  - `store/app_state.hpp` — 集中式 TUI 状态管理（ViewMode、BufferLine、History、子视图状态）。
+- **移除 9 个废弃文件**：清理了被新架构取代的旧 TUI 组件文件。
 
-- **Fixed TUI Input Deletion**: Resolved a critical bug where Backspace/Delete keys failed to delete characters in the FTXUI Input component. Root cause was cursor position desynchronization — fixed by explicitly tracking `cursor_position` and syncing it after history recall, auto-complete, and Ctrl+U operations.
-- **Fixed /test Output Capture**: The `ScopedStreamCapture` utility now performs C-level file descriptor redirection (`dup2`) in addition to C++ stream redirection. This ensures output from `fmt::print` and other functions that bypass `std::cout`/`std::cerr` is correctly captured in the TUI output panel.
-- **Fixed Carriage Return Handling**: `normalize_text` now correctly simulates terminal `\r` (carriage return) behavior, preventing progress bar output from duplicating lines in the TUI scrollback buffer.
-- **Fixed Version Display Double-v Bug**: Resolved an issue where the version string was displayed as `vv0.x.x` in certain TUI contexts.
+### 问题修复
 
-### CI/CD Overhaul
+- **修复 TUI 输入删除失效**：解决了 FTXUI Input 组件中 Backspace/Delete 键无法删除字符的严重 Bug。根因是光标位置失步 — 通过显式追踪 `cursor_position` 并在历史回溯、自动补全和 Ctrl+U 操作后同步光标位置来修复。
+- **修复 /test 输出捕获**：`ScopedStreamCapture` 工具类现在除 C++ 流重定向外还执行 C 层文件描述符重定向 (`dup2`)，确保 `fmt::print` 等绕过 `std::cout`/`std::cerr` 的函数输出能正确显示在 TUI 输出面板中。
+- **修复回车符处理**：`normalize_text` 现在正确模拟终端 `\r`（回车）行为，防止进度条输出在 TUI 滚动缓冲区中产生重复行。
+- **修复版本号双 v Bug**：解决了在某些 TUI 上下文中版本字符串显示为 `vv0.x.x` 的问题。
 
-- **Unified CI Pipeline**: Merged the redundant `crawler_ci.yml` into the main `ci.yml`. All crawler tests now run as part of the standard build matrix alongside other unit tests.
-- **Fixed Release Notes Generation**: Fixed a critical bug in `release.yml` where the release notes extraction used an undefined `VER` variable (`${VER#v}`) instead of the correct `${GITHUB_REF_NAME#v}`, causing empty release notes on every tag push.
-- **Streamlined Build Matrix**: Removed the `build_type` matrix dimension from CI (hardcoded to `Release`), eliminating redundant debug builds in the CI pipeline. Removed unnecessary `fetch-depth: 0` from CI checkout.
-- **Added Smoke Tests to Release**: The release workflow now includes a smoke test step that runs `shuati --help` and `shuati init` after build, verifying the binary is functional before packaging.
-- **Simplified Checksum Generation**: Replaced platform-specific PowerShell/Bash checksum scripts with a single cross-platform Python one-liner.
-- **Corrected CI Permissions**: Changed `ci.yml` permissions from `contents: write` to `contents: read` (CI should never need write access to repository contents).
-- **Removed Dead Code**: Removed the optional webhook notification step, verbose file listing steps, and redundant installer verification logic from `release.yml`.
+### CI/CD 全面检修
 
-### Installer Refactoring
+- **统一 CI 管线**：将冗余的 `crawler_ci.yml` 合并到主 `ci.yml` 中。所有爬虫测试现在与其他单元测试一起在标准构建矩阵中运行。
+- **修复发布说明生成**：修复了 `release.yml` 中发布说明提取使用未定义变量 `VER`（`${VER#v}`）而非正确的 `${GITHUB_REF_NAME#v}` 导致每次标签推送时发布说明为空的严重 Bug。
+- **精简构建矩阵**：从 CI 中移除 `build_type` 矩阵维度（硬编码为 `Release`），消除冗余的 debug 构建。移除不必要的 `fetch-depth: 0`。
+- **发布添加冒烟测试**：发布工作流现包含冒烟测试步骤，在打包前运行 `shuati --help` 和 `shuati init` 验证二进制可用性。
+- **简化校验和生成**：用单行跨平台 Python 脚本替换了平台特定的 PowerShell/Bash 校验和脚本。
+- **纠正 CI 权限**：将 `ci.yml` 权限从 `contents: write` 改为 `contents: read`（CI 不应需要仓库内容写权限）。
+- **移除死代码**：从 `release.yml` 中移除可选的 Webhook 通知步骤、冗长的文件列表步骤以及冗余的安装程序验证逻辑。
 
-- **Environment Variable Overrides**: The Inno Setup script (`shuati.iss`) now supports `SHUATI_VERSION`, `SHUATI_OUTPUT_NAME`, and `SHUATI_SOURCE_DIR` environment variables, enabling CI to inject build parameters without modifying the script.
-- **Component-Based Installation**: Users can now choose between Full, Compact, and Custom installation types. Components include: Main application (required), Resource files (compiler rules, templates), and Documentation.
-- **Proper PATH Management**: The `[Code]` section implements robust Pascal script for adding/removing the install directory from the user PATH, with `WM_SETTINGCHANGE` broadcast to notify other processes of the environment change.
-- **Multi-Language Support**: Added English and Simplified Chinese language support for the installer wizard.
-- **Upgrade Detection**: `InitializeSetup` logs the previous version when upgrading, enabling future migration logic.
-- **Modern Wizard**: Uses `WizardStyle=modern` with 120% size and resizable window.
+### 安装程序重构
 
-### Code Quality
+- **环境变量覆盖**：Inno Setup 脚本 (`shuati.iss`) 现支持 `SHUATI_VERSION`、`SHUATI_OUTPUT_NAME` 和 `SHUATI_SOURCE_DIR` 环境变量，使 CI 无需修改脚本即可注入构建参数。
+- **组件化安装**：用户现可选择完整安装、精简安装和自定义安装。组件包括：主程序（必选）、资源文件（编译器规则、模板）和文档。
+- **规范 PATH 管理**：`[Code]` 段实现了健壮的 Pascal 脚本，用于在用户 PATH 中添加/移除安装目录，并广播 `WM_SETTINGCHANGE` 通知其他进程环境变量变更。
+- **多语言支持**：为安装向导新增英文和简体中文语言支持。
+- **升级检测**：`InitializeSetup` 在升级时记录前一版本号，为后续迁移逻辑预留接口。
+- **现代向导**：使用 `WizardStyle=modern`，120% 尺寸且窗口可调整大小。
 
-- **Deep Code Cleanup**: Merged three separate Windows console configuration lambdas into a single unified `apply` function. Removed unused `awaiting_confirm`/`on_confirm` fields from `AppState`.
-- **Optimized Input Hint Lookup**: Replaced the linear O(n) if-else chain in `get_input_hint` with an O(1) `unordered_map` lookup table.
-- **Install Script Hardened**: The PowerShell `install.ps1` script now performs SHA-256 verification of downloaded archives, normalizes PATH entries before comparison, and broadcasts `WM_SETTINGCHANGE` after PATH updates.
+### 代码质量
 
-### Breaking Changes
+- **深度代码清理**：将三个独立的 Windows 控制台配置 lambda 合并为一个统一的 `apply` 函数。移除 `AppState` 中未使用的 `awaiting_confirm`/`on_confirm` 字段。
+- **优化输入提示查找**：用 O(1) `unordered_map` 查找表替换了 `get_input_hint` 中的线性 O(n) if-else 链。
+- **安装脚本加固**：PowerShell `install.ps1` 脚本现对下载的压缩包执行 SHA-256 校验，在比较前规范化 PATH 条目，并在 PATH 更新后广播 `WM_SETTINGCHANGE`。
 
-- None. This release is fully backward compatible with v0.0.x configurations and data.
+### 破坏性变更
+
+- 无。本版本与 v0.0.x 的配置和数据完全向后兼容。
 
 ---
 
@@ -124,7 +127,6 @@ All notable changes to this project will be documented in this file.
 3. 若需统一文件命名，可删除旧文件后重新执行 `shuati solve <id>` 生成新格式文件。
 4. 建议运行 `shuati config --language cpp` 验证 language 配置是否正确。
 
-
 ---
 
 ## [v0.0.5] - 2026-03-04
@@ -151,7 +153,6 @@ All notable changes to this project will be documented in this file.
 - **Windows**: 从 [Releases](https://github.com/Xustalis/shuati-Cli/releases) 页面下载最新的安装包。
 - **Linux/macOS**: 重新执行编译构建流程，或使用 CPack 生成的 `.deb` / `.tar.gz` 包进行覆盖。
 - **配置迁移**: 建议运行一次 `shuati config --editor auto` 以确保持续使用最优的编辑器配置。
-
 
 ---
 
@@ -189,7 +190,9 @@ All notable changes to this project will be documented in this file.
 ### 升级指引 (Upgrade Guide)
 - 请直接在客户端内通过 `update` 命令进行获取，或从本 Release 下载最新安装程序 (`shuati-setup-x64-v0.0.3.exe` 或 Linux `v0.0.3.deb`) 进行覆盖安装。
 
-## [0.0.2] - 2026-03-01
+---
+
+## [v0.0.2] - 2026-03-01
 
 ### 新增功能 (New Features)
 - **爬虫架构全面升级**：重构了全平台爬虫（Codeforces, LeetCode, 洛谷, 蓝桥云课），现已支持提取完整的题目结构化元数据（包含完整描述文本、测试用例、题目标签及难度等）。
@@ -211,7 +214,9 @@ All notable changes to this project will be documented in this file.
 ### 升级指引 (Upgrade Guide)
 - 请直接在客户端内通过 `update` 命令进行获取，或从本 Release 下载最新安装程序 (`shuati-setup-x64-v0.0.2.exe`) 进行覆盖安装。
 
-## [0.0.1] - 2026-02-26
+---
+
+## [v0.0.1] - 2026-02-26
 
 ### 新增
 

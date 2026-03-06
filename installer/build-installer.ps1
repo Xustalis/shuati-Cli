@@ -6,7 +6,7 @@
     This script builds the Windows installer for Shuati CLI using Inno Setup.
     It handles version detection, file preparation, and installer compilation.
 .PARAMETER Version
-    The version number for the installer. If not specified, uses the version from CMakeLists.txt or defaults to "0.0.7".
+    The version number for the installer. If not specified, uses the version from CMakeLists.txt or defaults to "0.1.0".
 .PARAMETER SourceDir
     The directory containing the built executable and resources. Defaults to "..\build\Release".
 .PARAMETER OutputDir
@@ -53,7 +53,7 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     }
     
     if ([string]::IsNullOrWhiteSpace($Version)) {
-        $Version = "0.0.7"
+        $Version = "0.1.0"
         Write-Host "  Using default version: $Version" -ForegroundColor Yellow
     }
 }

@@ -42,4 +42,4 @@ Examples:
 
 ## Reporting Issues
 
-If you find a bug or have a feature request, please open an [Issue](https://github.com/yhy/shuati-cli/issues).
+If you find a bug or have a feature request, please open an [Issue](https://github.com/Xustalis/shuati-Cli/issues).

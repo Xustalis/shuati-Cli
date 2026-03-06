@@ -45,7 +45,7 @@ cd installer
 
 ```cmd
 # 设置版本号 (可选，默认会尝试从CMakeLists.txt读取)
-set SHUATI_VERSION=0.0.7
+set SHUATI_VERSION=0.1.0
 set SHUATI_SOURCE_DIR=..\build\Release
 
 # 编译
@@ -101,16 +101,18 @@ ISS脚本支持以下环境变量：
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
-| `SHUATI_VERSION` | 版本号 | 从CMakeLists.txt读取或"0.0.7" |
+| `SHUATI_VERSION` | 版本号 | 从CMakeLists.txt读取或"0.1.0" |
 | `SHUATI_OUTPUT_NAME` | 输出文件名 | `shuati-cli-{version}-setup` |
 | `ISCC_PATH` | Inno Setup编译器路径 | 自动在常见安装路径下查找 |
 | `SHUATI_SOURCE_DIR` | 源文件目录 | `..\build\Release` |
 
 ## 自定义安装程序
 
-###3. 如果要修改默认的安装设置，可以编辑 `shuati.iss` 文件：
+### 修改默认安装设置
+
+如果要修改默认的安装设置，可以编辑 `shuati.iss` 文件：
    ```pascal
-   #define MyAppVersion "0.0.7"
+   #define MyAppVersion "0.1.0"
    #define DefaultInstallDir "{localappdata}\shuati"
    ```
 
