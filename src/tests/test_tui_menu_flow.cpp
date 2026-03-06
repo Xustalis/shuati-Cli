@@ -1,11 +1,11 @@
 #include <cassert>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <vector>
 
 #include "../tui/store/app_state.hpp"
-#include "../tui/tui_menu_model.hpp"
 
 static std::string read_all(const std::filesystem::path& p) {
     std::ifstream in(p, std::ios::binary);
@@ -25,32 +25,40 @@ static std::filesystem::path find_repo_root() {
 int main() {
     using namespace shuati::tui;
 
-    AppState app_state;
-    assert(app_state.current_page_index == static_cast<int>(PageID::SolveWorkspace));
-    assert(app_state.toast_message.empty());
+    // AppState buffer operations
+    AppState state;
+    assert(state.buffer.empty());
+    assert(!state.is_running);
+    assert(state.scroll_offset == 0);
 
-    MenuState menu_state;
-    process_menu_input(menu_state, "pull", [](const std::vector<std::string>&, const std::string&) { return std::string("x"); });
-    assert(menu_state.mode == MenuMode::Submenu);
-    assert(menu_state.prompt == "请输入题目链接：");
+    state.append(LineType::System, "hello");
+    assert(state.buffer.size() == 1);
+    assert(state.buffer[0].type == LineType::System);
+    assert(state.buffer[0].text == "hello");
 
-    process_menu_input(menu_state, "https://leetcode.com/problems/two-sum", [](const std::vector<std::string>& args, const std::string& cmd) {
-        assert(cmd == "pull");
-        assert(args.size() >= 3);
-        return std::string("pull finished");
-    });
-    assert(menu_state.mode == MenuMode::Main);
-    assert(menu_state.output == "pull finished");
+    state.append(LineType::Input, "/pull https://example.com");
+    assert(state.buffer.size() == 2);
+    assert(state.buffer[1].type == LineType::Input);
 
-    process_menu_input(menu_state, "help", [](const std::vector<std::string>&, const std::string&) {
-        return std::string("菜单输出UTF-8正常");
-    });
-    assert(menu_state.mode == MenuMode::Main);
-    assert(menu_state.output.find("UTF-8") != std::string::npos);
-    assert(menu_state.output.find("\x1b") == std::string::npos);
-    const std::string invalid_utf8_mark = std::string("\xEF\xBF\xBD");
-    assert(menu_state.output.find(invalid_utf8_mark) == std::string::npos);
+    state.append_output_lines("line1\nline2\nline3");
+    assert(state.buffer.size() == 5);
+    assert(state.buffer[2].text == "line1");
+    assert(state.buffer[3].text == "line2");
+    assert(state.buffer[4].text == "line3");
 
+    state.append(LineType::Error, "error msg");
+    assert(state.buffer.back().type == LineType::Error);
+
+    state.append(LineType::Heading, "heading");
+    assert(state.buffer.back().type == LineType::Heading);
+
+    // Empty string should not add lines
+    if (auto n = state.buffer.size(); true) {
+        state.append_output_lines("");
+        if (state.buffer.size() != n) { std::cerr << "Empty append_output_lines added lines!\n"; return 1; }
+    }
+
+    // Verify no forbidden strings in source
     auto root = find_repo_root();
     const std::vector<std::filesystem::path> scan_dirs = {
         root / "src",
@@ -72,5 +80,24 @@ int main() {
     const auto tui_app_content = read_all(root / "src" / "tui" / "tui_app.cpp");
     const std::string welcome = std::string("Welcome to ") + "Shuati TUI!";
     assert(tui_app_content.find(welcome) == std::string::npos);
+
+    // Command history
+    {
+        AppState hs;
+        assert(hs.command_history.empty());
+        assert(hs.history_index == -1);
+
+        hs.push_history("/pull https://example.com");
+        assert(hs.command_history.size() == 1);
+        assert(hs.history_index == -1);
+
+        hs.push_history("/list");
+        assert(hs.command_history.size() == 2);
+
+        // Duplicate should not add
+        hs.push_history("/list");
+        assert(hs.command_history.size() == 2);
+    }
+
     return 0;
 }

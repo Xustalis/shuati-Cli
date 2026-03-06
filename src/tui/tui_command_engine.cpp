@@ -4,11 +4,22 @@
 #include <CLI/CLI.hpp>
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <fmt/core.h>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <streambuf>
+#include <cstdio>
+
+#ifdef _WIN32
+#include <io.h>
+#include <fcntl.h>
+#include <share.h>
+#include <sys/stat.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace shuati {
 namespace tui {
@@ -17,32 +28,146 @@ namespace {
 
 class ScopedStreamCapture {
 public:
-    ScopedStreamCapture() : old_out_(std::cout.rdbuf()), old_err_(std::cerr.rdbuf()) {
-        std::cout.rdbuf(buffer_.rdbuf());
-        std::cerr.rdbuf(buffer_.rdbuf());
+    ScopedStreamCapture() : old_cout_(std::cout.rdbuf()), old_cerr_(std::cerr.rdbuf()) {
+        fflush(stdout);
+        fflush(stderr);
+
+#ifdef _WIN32
+        saved_fd1_ = _dup(1);
+        saved_fd2_ = _dup(2);
+#else
+        saved_fd1_ = dup(1);
+        saved_fd2_ = dup(2);
+#endif
+        tmp_path_ = (std::filesystem::temp_directory_path() / "shuati_capture.tmp").string();
+
+#ifdef _WIN32
+        int fd = -1;
+        _sopen_s(&fd, tmp_path_.c_str(),
+                  _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY,
+                  _SH_DENYNO, _S_IREAD | _S_IWRITE);
+        if (fd >= 0) {
+            _dup2(fd, 1);
+            _dup2(fd, 2);
+            _close(fd);
+        }
+#else
+        int fd = open(tmp_path_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd >= 0) {
+            dup2(fd, 1);
+            dup2(fd, 2);
+            close(fd);
+        }
+#endif
+        std::cout.rdbuf(cpp_buf_.rdbuf());
+        std::cerr.rdbuf(cpp_buf_.rdbuf());
     }
 
     ~ScopedStreamCapture() {
-        std::cout.rdbuf(old_out_);
-        std::cerr.rdbuf(old_err_);
+        std::cout.rdbuf(old_cout_);
+        std::cerr.rdbuf(old_cerr_);
+
+        fflush(stdout);
+        fflush(stderr);
+
+#ifdef _WIN32
+        _dup2(saved_fd1_, 1);
+        _dup2(saved_fd2_, 2);
+        _close(saved_fd1_);
+        _close(saved_fd2_);
+#else
+        dup2(saved_fd1_, 1);
+        dup2(saved_fd2_, 2);
+        close(saved_fd1_);
+        close(saved_fd2_);
+#endif
     }
 
-    std::string str() const {
-        return buffer_.str();
+    ScopedStreamCapture(const ScopedStreamCapture&) = delete;
+    ScopedStreamCapture& operator=(const ScopedStreamCapture&) = delete;
+
+    std::string str() {
+        fflush(stdout);
+        fflush(stderr);
+
+        std::string result = cpp_buf_.str();
+
+        std::ifstream f(tmp_path_, std::ios::binary);
+        if (f) {
+            std::string c_output((std::istreambuf_iterator<char>(f)), {});
+            if (!c_output.empty()) {
+                if (!result.empty() && result.back() != '\n') result += '\n';
+                result += c_output;
+            }
+        }
+
+        try { std::filesystem::remove(tmp_path_); } catch (...) {}
+        return result;
     }
 
 private:
-    std::ostringstream buffer_;
-    std::streambuf* old_out_;
-    std::streambuf* old_err_;
+    std::ostringstream cpp_buf_;
+    std::streambuf* old_cout_;
+    std::streambuf* old_cerr_;
+    int saved_fd1_ = -1;
+    int saved_fd2_ = -1;
+    std::string tmp_path_;
 };
 
-std::string normalize_text(std::string text) {
-    text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
-    while (!text.empty() && (text.back() == '\n' || text.back() == ' ' || text.back() == '\t')) {
-        text.pop_back();
+std::string strip_ansi_escapes(const std::string& input) {
+    std::string out;
+    out.reserve(input.size());
+    size_t i = 0;
+    while (i < input.size()) {
+        if (input[i] == '\x1B') {
+            i++;
+            if (i >= input.size()) break;
+            if (input[i] == '[') {
+                i++;
+                while (i < input.size() && (input[i] < 0x40 || input[i] > 0x7E)) i++;
+                if (i < input.size()) i++;
+            } else if (input[i] == ']') {
+                i++;
+                while (i < input.size()) {
+                    if (input[i] == '\x07') { i++; break; }
+                    if (input[i] == '\x1B' && i + 1 < input.size() && input[i + 1] == '\\') { i += 2; break; }
+                    i++;
+                }
+            } else {
+                i++;
+            }
+        } else {
+            out.push_back(input[i]);
+            i++;
+        }
     }
-    return text;
+    return out;
+}
+
+std::string normalize_text(const std::string& text) {
+    // Simulate terminal \r: discard current line content and restart from column 0
+    std::string resolved;
+    resolved.reserve(text.size());
+    std::string line;
+    for (char c : text) {
+        if (c == '\r') {
+            line.clear();
+        } else if (c == '\n') {
+            resolved += line;
+            resolved += '\n';
+            line.clear();
+        } else {
+            line += c;
+        }
+    }
+    if (!line.empty()) resolved += line;
+
+    resolved = strip_ansi_escapes(resolved);
+    while (!resolved.empty() &&
+           (resolved.back() == '\n' || resolved.back() == ' ' || resolved.back() == '\t')) {
+        resolved.pop_back();
+    }
+    return resolved;
 }
 
 std::string execute_shell_command(const std::vector<std::string>& args, const std::string& base_cmd) {
@@ -51,7 +176,7 @@ std::string execute_shell_command(const std::vector<std::string>& args, const st
     if (base_cmd == "ls" || base_cmd == "dir") {
         try {
             auto cwd = std::filesystem::current_path();
-            out << "目录: " << cwd.string() << "\n\n";
+            out << "\xe5\xbd\x93\xe5\x89\x8d\xe7\x9b\xae\xe5\xbd\x95: " << cwd.string() << "\n\n";
             std::vector<std::filesystem::directory_entry> entries;
             for (const auto& entry : std::filesystem::directory_iterator(cwd)) {
                 entries.push_back(entry);
@@ -63,37 +188,37 @@ std::string execute_shell_command(const std::vector<std::string>& args, const st
             for (const auto& entry : entries) {
                 std::string name = entry.path().filename().string();
                 if (entry.is_directory()) {
-                    out << "  [DIR]  " << name << "/\n";
+                    out << "  [\xe7\x9b\xae\xe5\xbd\x95]  " << name << "/\n";
                 } else {
                     auto size = entry.file_size();
                     std::string size_str;
                     if (size < 1024) size_str = std::to_string(size) + " B";
                     else if (size < 1024 * 1024) size_str = fmt::format("{:.1f} KB", size / 1024.0);
                     else size_str = fmt::format("{:.1f} MB", size / (1024.0 * 1024.0));
-                    out << "  [FILE] " << std::left << std::setw(40) << name << " " << size_str << "\n";
+                    out << "  [\xe6\x96\x87\xe4\xbb\xb6] " << std::left << std::setw(40) << name << " " << size_str << "\n";
                 }
             }
         } catch (const std::exception& e) {
-            out << "[!] 错误: " << e.what() << "\n";
+            out << "[Error] " << e.what() << "\n";
         }
         return out.str();
     }
 
     if (base_cmd == "cd") {
         if (args.size() < 3) {
-            out << "用法: cd <目录>\n";
+            out << "\xe7\x94\xa8\xe6\xb3\x95: cd <\xe7\x9b\xae\xe5\xbd\x95>\n";
             return out.str();
         }
         try {
             std::filesystem::path target = args[2];
             if (std::filesystem::exists(target) && std::filesystem::is_directory(target)) {
                 std::filesystem::current_path(target);
-                out << "[+] 已切换到: " << std::filesystem::current_path().string() << "\n";
+                out << "\xe5\xb7\xb2\xe5\x88\x87\xe6\x8d\xa2\xe5\x88\xb0: " << std::filesystem::current_path().string() << "\n";
             } else {
-                out << "[!] 目录不存在: " << target.string() << "\n";
+                out << "[Error] \xe7\x9b\xae\xe5\xbd\x95\xe4\xb8\x8d\xe5\xad\x98\xe5\x9c\xa8: " << target.string() << "\n";
             }
         } catch (const std::exception& e) {
-            out << "[!] 错误: " << e.what() << "\n";
+            out << "[Error] " << e.what() << "\n";
         }
         return out.str();
     }
@@ -103,45 +228,20 @@ std::string execute_shell_command(const std::vector<std::string>& args, const st
         return out.str();
     }
 
-    if (base_cmd == "help") {
-        out << "Shuati CLI TUI 模式工作区\n\n";
-        out << "Shell 命令:\n";
-        out << "  ls/dir, cd, pwd, clear, exit\n\n";
-        out << "Shuati 命令:\n";
-        for (const auto& cmd : tui_cli_command_candidates()) {
-            out << "  " << cmd << "\n";
-        }
-        return out.str();
-    }
-
     return "";
 }
 
 } // namespace
 
-bool tui_prepare_selection(AppState& state, const std::string& base_cmd) {
-    try {
-        auto root = shuati::cmd::find_root_or_die();
-        auto svc = shuati::cmd::Services::load(root, true);
-        auto problems = svc.pm->list_problems();
-        if (problems.empty()) {
-            state.history.push_back({MessageRole::Error, "题库目前为空，请先使用 pull 拉取题目。"});
-            return false;
-        }
-        state.view_state = AppState::ViewState::Selection;
-        state.selection_title = (base_cmd == "solve") ? "选择要解决的题目" : "请选择题目";
-        state.selection_options.clear();
-        state.selection_options.reserve(problems.size());
-        for (const auto& p : problems) {
-            state.selection_options.push_back(std::to_string(p.display_id) + " | " + p.title);
-        }
-        state.selection_selected = 0;
-        state.selection_pending_command = "/" + base_cmd;
-        return true;
-    } catch (const std::exception& e) {
-        state.history.push_back({MessageRole::Error, e.what()});
-        return false;
+std::vector<std::string> parse_command_line(const std::string& line) {
+    std::stringstream ss(line);
+    std::string part;
+    std::vector<std::string> args;
+    args.push_back("shuati");
+    while (ss >> part) {
+        args.push_back(part);
     }
+    return args;
 }
 
 std::string tui_execute_command_capture(const std::vector<std::string>& args, const std::string& base_cmd) {
@@ -164,7 +264,7 @@ std::string tui_execute_command_capture(const std::vector<std::string>& args, co
             app.exit(e);
         }
     } catch (const std::exception& e) {
-        std::cout << "[!] 运行时错误: " << e.what() << "\n";
+        std::cout << "[Error] " << e.what() << "\n";
     }
 
     return normalize_text(capture.str());

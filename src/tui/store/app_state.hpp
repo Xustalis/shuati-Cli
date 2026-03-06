@@ -80,11 +80,11 @@ struct AppState {
     bool is_running = false;
     std::string active_command;
 
-    bool awaiting_confirm = false;
-    std::string confirm_prompt;
-    std::function<void(bool)> on_confirm;
-
     std::function<void(std::function<void()>)> post_task = [](std::function<void()>) {};
+
+    std::vector<std::string> command_history;
+    int history_index = -1;
+    std::string history_stash;
 
     ConfigState config_state;
     ListState list_state;
@@ -108,6 +108,14 @@ struct AppState {
             start = nl + 1;
         }
         scroll_offset = 0;
+    }
+
+    void push_history(const std::string& cmd) {
+        if (!cmd.empty() && (command_history.empty() || command_history.back() != cmd)) {
+            command_history.push_back(cmd);
+        }
+        history_index = -1;
+        history_stash.clear();
     }
 };
 

@@ -79,10 +79,11 @@ Hope this helps!
             exit(1);
         }
         
-        // Check mastery update (50 -> 60)
+        // Check mastery update: diminishing returns formula
+        // gap = 100.0 - 50.0 = 50.0, gain = max(1.0, 5.0 * 0.5) = 2.5, result = 52.5
         mastery = db.get_all_mastery();
-        if (std::abs(mastery[0].confidence - 60.0) > 0.001) {
-             std::cerr << "Mastery confidence mismatch (2nd). Expected 60.0, got " << mastery[0].confidence << "\n";
+        if (std::abs(mastery[0].confidence - 52.5) > 0.001) {
+             std::cerr << "Mastery confidence mismatch (2nd). Expected 52.5, got " << mastery[0].confidence << "\n";
              exit(1);
         }
         

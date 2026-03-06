@@ -85,7 +85,7 @@ static void test_config_view() {
         render_to_string(view, 100, 30);
     }
 
-    state.config_state.status_msg = "Configuration saved.";
+    state.config_state.status_msg = "\xe9\x85\x8d\xe7\xbd\xae\xe5\xb7\xb2\xe4\xbf\x9d\xe5\xad\x98\xe3\x80\x82";
     auto view = render_config_view(state, theme);
     render_to_string(view, 100, 30);
 }
@@ -128,7 +128,7 @@ static void test_hint_view() {
 
     // Error state
     shuati::tui::AppState err_state;
-    err_state.hint_state.error = "Failed to get hint.";
+    err_state.hint_state.error = "\xe8\x8e\xb7\xe5\x8f\x96\xe6\x8f\x90\xe7\xa4\xba\xe5\xa4\xb1\xe8\xb4\xa5\xe3\x80\x82";
     view = render_hint_view(err_state, theme);
     render_to_string(view, 100, 20);
 
@@ -141,7 +141,7 @@ static void test_hint_view() {
 static void test_list_view_empty() {
     AppState state;
     TuiTheme theme;
-    state.list_state.error = "Not in a shuati project.";
+    state.list_state.error = "\xe6\x9c\xaa\xe6\x89\xbe\xe5\x88\xb0 .shuati \xe9\xa1\xb9\xe7\x9b\xae";
     auto view = render_list_view(state, theme);
     render_to_string(view, 100, 20);
 }
