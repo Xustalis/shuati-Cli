@@ -97,12 +97,13 @@ temp/
 tmp/
 temp_*.txt
 
-# Test outputs  
+# Test outputs & benchmark reports
 test-results/
 coverage/
 *.gcov
 *.gcda
 *.gcno
+*-benchmark-report.txt
 
 # Documentation build
 docs/_build/

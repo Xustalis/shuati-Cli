@@ -2,8 +2,7 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: [ 'v*' ]
   workflow_dispatch:
     inputs:
       publish:
@@ -12,7 +11,7 @@ on:
         required: false
         default: true
       dry_run:
-        description: Build artifacts only (skip release publish & notifications)
+        description: Build artifacts only (skip release publish)
         type: boolean
         required: false
         default: false
@@ -20,6 +19,10 @@ on:
 permissions:
   contents: write
   actions: write
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 4
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
 jobs:
   build_assets:
@@ -30,69 +33,30 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
 
-    env:
-      CMAKE_BUILD_PARALLEL_LEVEL: 4
-      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
-      INSTALLER_NAME: "shuati-setup-x64-${{ github.ref_name }}.exe"
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate Version Tag (vX.Y.Z matches CMakeLists)
+      - name: Validate Version Tag
         shell: bash
         run: |
-          if command -v python3 >/dev/null 2>&1; then py=python3; else py=python; fi
           tag="${GITHUB_REF_NAME}"
           if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Tag must be vX.Y.Z, got: $tag"
+            echo "::error::Tag must be vX.Y.Z, got: $tag"
             exit 1
           fi
-          
-          # Extract version from CMakeLists.txt using a robust python script
+          py=python3; command -v python3 >/dev/null 2>&1 || py=python
           cmake_ver="$($py -c "
-          import re, pathlib, sys
-          try:
-              txt = pathlib.Path('CMakeLists.txt').read_text(encoding='utf-8', errors='ignore')
-              # Match: project(shuati-cli VERSION 1.4.2 ...)
-              m = re.search(r'project\(shuati-cli\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)', txt)
-              if m:
-                  print(m.group(1))
-              else:
-                  print('')
-          except Exception:
-              print('')
+          import re, pathlib
+          txt = pathlib.Path('CMakeLists.txt').read_text(encoding='utf-8', errors='ignore')
+          m = re.search(r'project\(shuati-cli\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)', txt)
+          print(m.group(1) if m else '')
           " | tr -d '\r')"
-
-          if [[ -z "$cmake_ver" ]]; then
-            echo "Failed to parse version from CMakeLists.txt"
-            exit 1
-          fi
-          
-          if [[ "v$cmake_ver" != "$tag" ]]; then
-            echo "Tag ($tag) does not match CMakeLists.txt version ($cmake_ver)"
-            exit 1
-          fi
-          
-          # Extract version from vcpkg.json
           vcpkg_ver="$($py -c "
-          import json, pathlib, sys
-          try:
-              content = pathlib.Path('vcpkg.json').read_text(encoding='utf-8', errors='ignore')
-              obj = json.loads(content)
-              print(obj.get('version-string', ''))
-          except Exception:
-              print('')
+          import json, pathlib
+          print(json.loads(pathlib.Path('vcpkg.json').read_text())['version-string'])
           " | tr -d '\r')"
-
-          if [[ -z "$vcpkg_ver" ]]; then
-            echo "Failed to parse version-string from vcpkg.json"
-            exit 1
-          fi
-          
-          if [[ "$vcpkg_ver" != "$cmake_ver" ]]; then
-            echo "vcpkg.json version ($vcpkg_ver) does not match CMakeLists.txt version ($cmake_ver)"
-            exit 1
-          fi
+          [[ "v$cmake_ver" == "$tag" ]] || { echo "::error::Tag $tag != CMake $cmake_ver"; exit 1; }
+          [[ "$vcpkg_ver" == "$cmake_ver" ]] || { echo "::error::vcpkg $vcpkg_ver != CMake $cmake_ver"; exit 1; }
 
       - name: Install Linux Dependencies
         if: runner.os == 'Linux'
@@ -102,10 +66,9 @@ jobs:
 
       - name: Install macOS Dependencies
         if: runner.os == 'macOS'
-        run: |
-          brew install ninja
+        run: brew install ninja
 
-      - name: Set up CMake
+      - name: Setup CMake
         uses: jwlawson/actions-setup-cmake@v2
         with:
           cmake-version: '3.31'
@@ -115,95 +78,78 @@ jobs:
         with:
           vcpkgJsonGlob: 'vcpkg.json'
 
-      - name: Configure CMake (Windows)
+      - name: Configure (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: >
-          cmake -B build -S .
-          -G "Visual Studio 17 2022"
-          -A x64
-          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
+        run: |
+          cmake -B build -S . `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
 
-      - name: Configure CMake (Linux/macOS)
+      - name: Configure (Unix)
         if: runner.os != 'Windows'
         shell: bash
-        run: >
-          cmake -B build -S .
-          -G Ninja
-          -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake"
-          -DCMAKE_BUILD_TYPE=Release
+        run: |
+          cmake -B build -S . -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: cmake --build build --config Release --parallel
-
-      - name: Build (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Build
         shell: bash
-        run: cmake --build build --parallel
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cmake --build build --config Release --parallel 4
+          else
+            cmake --build build --parallel 4
+          fi
 
-      - name: Test (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
+      - name: Test
+        shell: bash
         run: ctest --test-dir build -C Release --output-on-failure
 
-      - name: Test (Linux/macOS)
-        if: runner.os != 'Windows'
-        continue-on-error: true
-        shell: bash
-        run: ctest --test-dir build --output-on-failure
-
-      - name: Verify Binary (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          # Add vcpkg DLLs to PATH so the executable can run
-          $vcpkgBin = Resolve-Path "build/vcpkg_installed/*/bin" | Select-Object -First 1 -ExpandProperty Path
-          if ($vcpkgBin) {
-            Write-Host "Adding vcpkg bin to PATH: $vcpkgBin"
-            $env:PATH = "$vcpkgBin;$env:PATH"
-          }
-          
-          & "build/Release/shuati.exe" --help
-          
-          New-Item -ItemType Directory -Force -Path smoke | Out-Null
-          Push-Location smoke
-          & "..\build\Release\shuati.exe" init
-          Pop-Location
-
-      - name: Verify Binary (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Smoke Test
         shell: bash
         run: |
-          ./build/shuati --help
-          mkdir -p smoke
-          (cd smoke && ../build/shuati init)
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            vcpkg_bin="$(find build/vcpkg_installed -path '*/bin' -type d 2>/dev/null | head -1)"
+            [ -n "$vcpkg_bin" ] && export PATH="$vcpkg_bin:$PATH"
+            build/Release/shuati.exe --help
+            mkdir -p smoke && (cd smoke && ../build/Release/shuati.exe init)
+          else
+            ./build/shuati --help
+            mkdir -p smoke && (cd smoke && ../build/shuati init)
+          fi
 
       - name: Stage (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $dist = "dist"
-          New-Item -ItemType Directory -Force -Path $dist | Out-Null
-          Copy-Item -Force "build/Release/shuati.exe" "$dist/"
-          Copy-Item -Force "install.ps1" "$dist/"
-          Copy-Item -Force "README.md" "$dist/"
-          Copy-Item -Force "CHANGELOG.md" "$dist/"
-          Copy-Item -Force -Recurse "build/vcpkg_installed/x64-windows/bin/*" "$dist/"
-          # Copy resources folder for JSON rules
-          if (Test-Path "resources") {
-            Copy-Item -Force -Recurse "resources" "$dist/"
-          }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item -Force "build/Release/shuati.exe" dist/
+          Copy-Item -Force "install.ps1" dist/
+          Copy-Item -Force "README.md" dist/
+          Copy-Item -Force "CHANGELOG.md" dist/
+          Copy-Item -Force -Recurse "build/vcpkg_installed/x64-windows/bin/*" dist/ -ErrorAction SilentlyContinue
+          if (Test-Path resources) { Copy-Item -Force -Recurse resources dist/ }
 
-      - name: Pack (Windows .zip)
+      - name: Stage (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp -f build/shuati dist/
+          cp -f README.md CHANGELOG.md dist/ 2>/dev/null || true
+          [ -d resources ] && cp -rf resources dist/
+          cp -f install.sh dist/ 2>/dev/null || true
+
+      - name: Pack Windows ZIP
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           cd dist
-          7z a ../shuati-windows-x64-${{ github.ref_name }}.zip *
+          7z a "../shuati-windows-x64-${{ github.ref_name }}.zip" *
 
-      - name: Pack (Windows Installer .exe)
+      - name: Pack Windows Installer
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -212,103 +158,40 @@ jobs:
           $env:SHUATI_VERSION = $ver
           $env:SHUATI_OUTPUT_NAME = "shuati-setup-x64-${{ github.ref_name }}"
           $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
-          if (!(Test-Path $iscc)) { throw "ISCC.exe not found: $iscc" }
+          if (!(Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
           & $iscc "installer\shuati.iss"
-          
-          # Verify installer was created and rename to consistent name
-          $expectedInstaller = "${{ env.INSTALLER_NAME }}"
-          if (Test-Path $expectedInstaller) {
-            Write-Host "Installer created: $expectedInstaller"
-          } else {
-            # Try to find the installer
-            $exeFile = Get-ChildItem -Recurse -Filter "*.exe" | Where-Object { $_.Name -match "shuati.*setup|setup.*shuati|installer" } | Select-Object -First 1
-            if (-not $exeFile) {
-              $exeFile = Get-ChildItem -Recurse -Filter "*.exe" | Select-Object -First 1
-            }
-            if ($exeFile) {
-              Write-Host "Found installer at: $($exeFile.FullName), renaming to $expectedInstaller"
-              Copy-Item $exeFile.FullName $expectedInstaller
-            } else {
-              Write-Error "No installer exe found!"
-              Get-ChildItem -Recurse -Filter "*.exe"
-              exit 1
-            }
+          $expected = "shuati-setup-x64-${{ github.ref_name }}.exe"
+          if (!(Test-Path $expected)) {
+            throw "Installer not found: $expected"
           }
+          Write-Host "Installer created: $expected"
 
-      - name: Stage (Linux/macOS)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          mkdir -p dist
-          cp -f build/shuati dist/
-          cp -f install.ps1 dist/ || true
-          cp -f README.md dist/ || true
-          cp -f CHANGELOG.md dist/ || true
-          # Copy resources folder for JSON rules
-          if [ -d "resources" ]; then
-            cp -rf resources dist/
-          fi
-          cp -f install.sh dist/ || true
-
-      - name: Pack (Linux .deb)
+      - name: Pack Linux DEB
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          cd build
-          cpack -G DEB
-          cp *.deb ../ || echo "No .deb files generated"
-          cd ..
+          cd build && cpack -G DEB
+          cp *.deb ../ 2>/dev/null || echo "No .deb generated"
 
-      - name: Pack (Linux/macOS .tar.gz)
+      - name: Pack Unix Tarball
         if: runner.os != 'Windows'
         shell: bash
-        run: |
-          tar -czf "shuati-${{ runner.os }}-x64-${{ github.ref_name }}.tar.gz" -C dist .
+        run: tar -czf "shuati-${{ runner.os }}-x64-${{ github.ref_name }}.tar.gz" -C dist .
 
-      - name: Checksums (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          # Hash ZIP file
-          $zipFile = "shuati-windows-x64-${{ github.ref_name }}.zip"
-          if (Test-Path $zipFile) {
-            $hash = (Get-FileHash -Algorithm SHA256 $zipFile).Hash
-            "$hash  $zipFile" | Out-File -FilePath "$zipFile.sha256" -Encoding utf8
-            Write-Host "$zipFile`: $hash"
-          } else {
-            Write-Error "ZIP file not found: $zipFile"
-            exit 1
-          }
-          
-          # Hash installer exe
-          $exeFile = "${{ env.INSTALLER_NAME }}"
-          if (Test-Path $exeFile) {
-            $hash = (Get-FileHash -Algorithm SHA256 $exeFile).Hash
-            "$hash  $exeFile" | Out-File -FilePath "$exeFile.sha256" -Encoding utf8
-            Write-Host "$exeFile`: $hash"
-          } else {
-            Write-Error "Installer exe not found: $exeFile"
-            Get-ChildItem -Recurse -Filter "*.exe"
-            exit 1
-          }
-
-      - name: Checksums (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Generate Checksums
         shell: bash
         run: |
-          sha_one () {
-            f="$1"
-            if command -v python3 >/dev/null 2>&1; then py=python3; else py=python; fi
-            $py -c "import hashlib, pathlib; p=pathlib.Path(r'''$f'''); h=hashlib.sha256(p.read_bytes()).hexdigest(); pathlib.Path(str(p)+'.sha256').write_text(f\"{h}  {p.name}\n\"); print(h)"
-          }
-          sha_one "shuati-${{ runner.os }}-x64-${{ github.ref_name }}.tar.gz"
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            for deb in *.deb; do
-              if [[ -f "$deb" ]]; then
-                sha_one "$deb"
-              fi
-            done
-          fi
+          py=python3; command -v python3 >/dev/null 2>&1 || py=python
+          for f in shuati-*.zip shuati-*.tar.gz shuati-setup-*.exe *.deb; do
+            [ -f "$f" ] || continue
+            $py -c "
+          import hashlib, pathlib, sys
+          f = pathlib.Path(sys.argv[1])
+          h = hashlib.sha256(f.read_bytes()).hexdigest()
+          pathlib.Path(str(f) + '.sha256').write_text(f'{h}  {f.name}\n')
+          print(f'{h}  {f.name}')
+          " "$f"
+          done
 
       - name: Upload Assets (Windows)
         if: runner.os == 'Windows'
@@ -318,8 +201,8 @@ jobs:
           path: |
             shuati-windows-x64-${{ github.ref_name }}.zip
             shuati-windows-x64-${{ github.ref_name }}.zip.sha256
-            ${{ env.INSTALLER_NAME }}
-            ${{ env.INSTALLER_NAME }}.sha256
+            shuati-setup-x64-${{ github.ref_name }}.exe
+            shuati-setup-x64-${{ github.ref_name }}.exe.sha256
 
       - name: Upload Assets (Linux)
         if: runner.os == 'Linux'
@@ -341,15 +224,18 @@ jobs:
             shuati-macOS-x64-${{ github.ref_name }}.tar.gz.sha256
 
   release:
-    name: Create GitHub Release
+    name: Publish Release
     needs: build_assets
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') && (github.event_name != 'workflow_dispatch' || github.event.inputs.publish == 'true') && (github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true')
+    if: >-
+      startsWith(github.ref, 'refs/tags/')
+      && (github.event_name != 'workflow_dispatch' || github.event.inputs.publish == 'true')
+      && (github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true')
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download Assets
+      - name: Download All Assets
         uses: actions/download-artifact@v4
         with:
           pattern: assets-*
@@ -358,7 +244,7 @@ jobs:
       - name: Build Release Notes
         shell: bash
         run: |
-          ver="${VER#v}"
+          ver="${GITHUB_REF_NAME#v}"
           if [[ ! -f CHANGELOG.md ]]; then
             printf "## %s\n\n(CHANGELOG.md not found)\n" "$ver" > RELEASE_NOTES.md
             exit 0
@@ -366,80 +252,43 @@ jobs:
           {
             printf "## %s\n\n" "$ver"
             awk -v ver="$ver" '
-              $0 ~ "^## \\[" ver "\\]" {found=1; next}
-              found && $0 ~ "^## \\[" {exit}
+              $0 ~ "^## \\[" ver "\\]" || $0 ~ "^## \\[v" ver "\\]" {found=1; next}
+              found && /^## \[/ {exit}
               found {print}
-            ' CHANGELOG.md | sed -e 's/[[:space:]]*$//' | awk 'NF{p=1} p{print}'
+            ' CHANGELOG.md | sed 's/[[:space:]]*$//' | awk 'NF{p=1} p{print}'
             echo ""
           } > RELEASE_NOTES.md
-        env:
-          VER: ${{ github.ref_name }}
 
       - name: Combine Checksums
         shell: bash
-        run: |
-          cat *.sha256 > checksums.sha256
+        run: cat *.sha256 > checksums.sha256
 
-      - name: Create/Upload Release (with retry)
+      - name: Create Release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="${GITHUB_REF_NAME}"
-          title="$tag"
-          
-          # Find all files to upload safely without triggering set -e on missing globs
           shopt -s nullglob
-          
-          zip_file=(shuati-windows-x64-*.zip)
-          zip_hash=(shuati-windows-x64-*.zip.sha256)
-          installer=(shuati-setup-x64-*.exe)
-          installer_hash=(shuati-setup-x64-*.exe.sha256)
-          linux_tar=(shuati-Linux-x64-*.tar.gz)
-          linux_hash=(shuati-Linux-x64-*.tar.gz.sha256)
-          macos_tar=(shuati-macOS-x64-*.tar.gz)
-          macos_hash=(shuati-macOS-x64-*.tar.gz.sha256)
-          linux_deb=(*.deb)
-          linux_deb_hash=(*.deb.sha256)
-          
-          # Build files array with only existing files
           files=()
-          [[ ${#zip_file[@]} -gt 0 ]] && files+=("${zip_file[0]}")
-          [[ ${#zip_hash[@]} -gt 0 ]] && files+=("${zip_hash[0]}")
-          [[ ${#installer[@]} -gt 0 ]] && files+=("${installer[0]}")
-          [[ ${#installer_hash[@]} -gt 0 ]] && files+=("${installer_hash[0]}")
-          [[ ${#linux_tar[@]} -gt 0 ]] && files+=("${linux_tar[0]}")
-          [[ ${#linux_hash[@]} -gt 0 ]] && files+=("${linux_hash[0]}")
-          [[ ${#macos_tar[@]} -gt 0 ]] && files+=("${macos_tar[0]}")
-          [[ ${#macos_hash[@]} -gt 0 ]] && files+=("${macos_hash[0]}")
-          [[ ${#linux_deb[@]} -gt 0 ]] && files+=("${linux_deb[0]}")
-          [[ ${#linux_deb_hash[@]} -gt 0 ]] && files+=("${linux_deb_hash[0]}")
-          [[ -f "checksums.sha256" ]] && files+=("checksums.sha256")
-          
+          for f in shuati-*.zip shuati-*.zip.sha256 \
+                   shuati-setup-*.exe shuati-setup-*.exe.sha256 \
+                   shuati-*-x64-*.tar.gz shuati-*-x64-*.tar.gz.sha256 \
+                   *.deb checksums.sha256; do
+            [ -f "$f" ] && files+=("$f")
+          done
+
           echo "Files to upload:"
-          printf '%s\n' "${files[@]}"
-          
-          # Verify installer exists
-          if [[ ${#installer[@]} -eq 0 ]]; then
-            echo "ERROR: Windows installer not found!"
-            echo "Available files:"
-            ls -la *.exe 2>/dev/null || echo "No .exe files found"
-            ls -la
-            exit 1
-          fi
+          printf '  %s\n' "${files[@]}"
 
           for i in 1 2 3; do
             if gh release view "$tag" >/dev/null 2>&1; then
-              echo "Release exists: $tag"
               gh release edit "$tag" --notes-file RELEASE_NOTES.md
             else
-              gh release create "$tag" --title "$title" --notes-file RELEASE_NOTES.md
+              gh release create "$tag" --title "$tag" --notes-file RELEASE_NOTES.md
             fi
-
-            if gh release upload "$tag" "${files[@]}" --clobber; then
-              exit 0
-            fi
-            echo "Upload failed (attempt $i). Retrying..."
+            gh release upload "$tag" "${files[@]}" --clobber && exit 0
+            echo "Upload attempt $i failed, retrying..."
             sleep $((i * 5))
           done
           exit 1
@@ -448,30 +297,12 @@ jobs:
         shell: bash
         run: |
           tag="${GITHUB_REF_NAME}"
-          repo="${GITHUB_REPOSITORY}"
           {
             echo "### Release $tag"
             echo ""
-            echo "- https://github.com/${repo}/releases/tag/${tag}"
-            echo ""
-            echo "### Checksums"
+            echo "- https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}"
             echo ""
             echo '```'
             cat checksums.sha256
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Notify (optional)
-        shell: bash
-        env:
-          WEBHOOK: ${{ secrets.RELEASE_WEBHOOK_URL }}
-        run: |
-          if [[ -z "${WEBHOOK:-}" ]]; then
-            exit 0
-          fi
-          tag="${GITHUB_REF_NAME}"
-          repo="${GITHUB_REPOSITORY}"
-          export TAG="$tag"
-          export REPO="$repo"
-          payload="$(python3 -c "import json, os; tag=os.environ['TAG']; repo=os.environ['REPO']; print(json.dumps({'text': f'✅ {repo} 发布完成: {tag}\nhttps://github.com/{repo}/releases/tag/{tag}'}))")"
-          curl -sS -X POST -H "Content-Type: application/json" -d "$payload" "$WEBHOOK"

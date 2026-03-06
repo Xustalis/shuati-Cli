@@ -2,6 +2,79 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.1.0] - 2026-03-06
+
+> **This is a major architectural release.** v0.1.0 marks the first milestone of the Shuati CLI project, introducing a ground-up TUI redesign, comprehensive CI/CD overhaul, installer refactoring, and deep code cleanup across the entire codebase.
+
+### Highlights
+
+- Brand-new **FTXUI-based TUI** with static main menu, command catalog, auto-complete, and full-screen sub-views.
+- **Unified CI/CD pipeline** — merged redundant workflows, fixed critical release bugs, and streamlined three-platform builds.
+- **Inno Setup installer refactored** with environment variable overrides, component-based install types, and proper PATH management.
+- **Net reduction of ~151 lines** through aggressive dead code removal and architecture consolidation.
+
+### New Features
+
+- **TUI Complete Redesign**: Replaced the previous prototype TUI with a production-ready terminal interface built on FTXUI. The new TUI features a static main menu with an ASCII panda mascot, a scrollable output panel, and a unified command input bar with real-time hint display.
+- **Full-Screen Sub-Views**: Three dedicated full-screen views accessible via slash commands:
+  - `/config` — Form-based configuration editor for API keys, language, editor preferences.
+  - `/list` — Interactive problem browser with table navigation and filtering.
+  - `/hint <id>` — Scrollable AI hint display with async loading, PageUp/PageDown/Arrow scroll, and Esc to return.
+- **Command Hint System**: Every slash command now displays a real-time usage hint (syntax + description) as the user types. Implemented with an O(1) `unordered_map` lookup table, replacing the previous O(n) if-else chain.
+- **Command History & Shortcuts**: Arrow Up/Down to browse command history, Ctrl+L to clear screen, Ctrl+U to clear current input line.
+- **Command Auto-Complete**: Tab-triggered auto-complete panel populated from a centralized command catalog (`tui_command_catalog.cpp`).
+
+### Architecture Refactoring
+
+- **New Router Layer** (`src/router/`): Introduced `AppRouter` to cleanly separate CLI and TUI entry points. The main entry (`src/cmd/main.cpp`) now delegates to the router, which decides whether to launch the legacy REPL or the new TUI based on configuration and arguments.
+- **Legacy REPL Extraction** (`src/cli/legacy_repl.cpp`): The original replxx-based REPL logic was extracted from `main.cpp` into a dedicated module, preserving backward compatibility while decoupling it from the new TUI path.
+- **New TUI Module** (`src/tui/`): A self-contained module with clear separation of concerns:
+  - `tui_app.cpp` — Application main loop, component tree, event handling, sub-view routing.
+  - `tui_views.cpp` — View rendering (welcome page, config/list/hint sub-views).
+  - `tui_command_engine.cpp` — Command parsing, execution, and output capture (including C-level fd redirection).
+  - `tui_command_catalog.cpp` — Auto-complete candidate list generation.
+  - `command_specs.cpp` — TUI command metadata definitions (slash name, usage, summary).
+  - `store/app_state.hpp` — Centralized TUI state management (ViewMode, BufferLine, History, sub-view states).
+- **Removed 9 Deprecated Files**: Cleaned up legacy TUI component files that were superseded by the new architecture.
+
+### Bug Fixes
+
+- **Fixed TUI Input Deletion**: Resolved a critical bug where Backspace/Delete keys failed to delete characters in the FTXUI Input component. Root cause was cursor position desynchronization — fixed by explicitly tracking `cursor_position` and syncing it after history recall, auto-complete, and Ctrl+U operations.
+- **Fixed /test Output Capture**: The `ScopedStreamCapture` utility now performs C-level file descriptor redirection (`dup2`) in addition to C++ stream redirection. This ensures output from `fmt::print` and other functions that bypass `std::cout`/`std::cerr` is correctly captured in the TUI output panel.
+- **Fixed Carriage Return Handling**: `normalize_text` now correctly simulates terminal `\r` (carriage return) behavior, preventing progress bar output from duplicating lines in the TUI scrollback buffer.
+- **Fixed Version Display Double-v Bug**: Resolved an issue where the version string was displayed as `vv0.x.x` in certain TUI contexts.
+
+### CI/CD Overhaul
+
+- **Unified CI Pipeline**: Merged the redundant `crawler_ci.yml` into the main `ci.yml`. All crawler tests now run as part of the standard build matrix alongside other unit tests.
+- **Fixed Release Notes Generation**: Fixed a critical bug in `release.yml` where the release notes extraction used an undefined `VER` variable (`${VER#v}`) instead of the correct `${GITHUB_REF_NAME#v}`, causing empty release notes on every tag push.
+- **Streamlined Build Matrix**: Removed the `build_type` matrix dimension from CI (hardcoded to `Release`), eliminating redundant debug builds in the CI pipeline. Removed unnecessary `fetch-depth: 0` from CI checkout.
+- **Added Smoke Tests to Release**: The release workflow now includes a smoke test step that runs `shuati --help` and `shuati init` after build, verifying the binary is functional before packaging.
+- **Simplified Checksum Generation**: Replaced platform-specific PowerShell/Bash checksum scripts with a single cross-platform Python one-liner.
+- **Corrected CI Permissions**: Changed `ci.yml` permissions from `contents: write` to `contents: read` (CI should never need write access to repository contents).
+- **Removed Dead Code**: Removed the optional webhook notification step, verbose file listing steps, and redundant installer verification logic from `release.yml`.
+
+### Installer Refactoring
+
+- **Environment Variable Overrides**: The Inno Setup script (`shuati.iss`) now supports `SHUATI_VERSION`, `SHUATI_OUTPUT_NAME`, and `SHUATI_SOURCE_DIR` environment variables, enabling CI to inject build parameters without modifying the script.
+- **Component-Based Installation**: Users can now choose between Full, Compact, and Custom installation types. Components include: Main application (required), Resource files (compiler rules, templates), and Documentation.
+- **Proper PATH Management**: The `[Code]` section implements robust Pascal script for adding/removing the install directory from the user PATH, with `WM_SETTINGCHANGE` broadcast to notify other processes of the environment change.
+- **Multi-Language Support**: Added English and Simplified Chinese language support for the installer wizard.
+- **Upgrade Detection**: `InitializeSetup` logs the previous version when upgrading, enabling future migration logic.
+- **Modern Wizard**: Uses `WizardStyle=modern` with 120% size and resizable window.
+
+### Code Quality
+
+- **Deep Code Cleanup**: Merged three separate Windows console configuration lambdas into a single unified `apply` function. Removed unused `awaiting_confirm`/`on_confirm` fields from `AppState`.
+- **Optimized Input Hint Lookup**: Replaced the linear O(n) if-else chain in `get_input_hint` with an O(1) `unordered_map` lookup table.
+- **Install Script Hardened**: The PowerShell `install.ps1` script now performs SHA-256 verification of downloaded archives, normalizes PATH entries before comparison, and broadcasts `WM_SETTINGCHANGE` after PATH updates.
+
+### Breaking Changes
+
+- None. This release is fully backward compatible with v0.0.x configurations and data.
+
+---
+
 ## [v0.0.7] - 2026-03-05
 
 ### 新增功能 (New Features)

@@ -1,7 +1,7 @@
 # Shuati CLI 项目结构说明
 
 > 更新日期: 2026-03-06
-> 项目版本: v0.0.8
+> 项目版本: v0.1.0
 > 架构目标: 高内聚、低耦合、跨平台、易扩展
 
 ## 目录结构概览
@@ -25,6 +25,7 @@ shuati-Cli/
 │   ├── router/              # 路由层 (CLI/TUI 入口分发)
 │   └── tests/               # 单元测试
 ├── tools/                   # 工具脚本 (发布流程)
+├── scripts/                 # CI 辅助脚本
 ├── CMakeLists.txt           # CMake 构建配置
 ├── vcpkg.json               # vcpkg 依赖配置
 ├── README.md                # 项目说明
@@ -104,10 +105,10 @@ shuati-Cli/
 |---------|---------|---------|
 | [src/tui/tui_app.cpp](src/tui/tui_app.cpp) | TUI 应用主循环，组件树，事件处理，子视图路由 | ftxui, config, database, version |
 | [src/tui/tui_views.cpp](src/tui/tui_views.cpp) | 视图渲染 (欢迎页/Config/List/Hint 子视图) | ftxui |
-| [src/tui/tui_command_engine.cpp](src/tui/tui_command_engine.cpp) | 命令解析、执行、输出捕获 | CLI11 |
+| [src/tui/tui_command_engine.cpp](src/tui/tui_command_engine.cpp) | 命令解析、执行、输出捕获 (含 C 级 fd 重定向) | CLI11 |
 | [src/tui/tui_command_catalog.cpp](src/tui/tui_command_catalog.cpp) | 命令自动补全候选列表 | - |
 | [src/tui/command_specs.cpp](src/tui/command_specs.cpp) | TUI 命令元数据定义 (slash/usage/summary) | - |
-| [src/tui/store/app_state.hpp](src/tui/store/app_state.hpp) | TUI 状态 (ViewMode, BufferLine, Config/List/HintState) | - |
+| [src/tui/store/app_state.hpp](src/tui/store/app_state.hpp) | TUI 状态 (ViewMode, BufferLine, Config/List/HintState, History) | - |
 | [src/tui/tui_command_engine.hpp](src/tui/tui_command_engine.hpp) | 命令引擎接口 | - |
 | [src/tui/command_specs.hpp](src/tui/command_specs.hpp) | CommandSpec 结构定义 | - |
 
@@ -191,7 +192,7 @@ shuati-Cli/
 
 1. **CLI 层** (`src/cmd/`): 命令行接口，处理用户输入
 2. **TUI 层** (`src/tui/`): 终端交互界面，基于 FTXUI 的单面板 + 全屏子视图架构
-   - **Main 视图**: 命令行滚动面板 + 自动补全 + ASCII 欢迎页
+   - **Main 视图**: 命令行滚动面板 + 自动补全 + 命令提示 + ASCII 欢迎页
    - **ConfigView**: 全屏配置编辑器 (表单式)
    - **ListView**: 全屏题目浏览器 (交互式表格)
    - **HintView**: 全屏 AI 提示滚动页 (异步加载)
@@ -221,11 +222,11 @@ shuati-Cli/
 
 | 文件路径 | 功能说明 |
 |---------|---------|
-| [.github/workflows/ci.yml](.github/workflows/ci.yml) | 持续集成工作流 (构建、测试、静态分析) |
-| [.github/workflows/release.yml](.github/workflows/release.yml) | 发布工作流 (构建、打包、发布) |
-| [.github/workflows/prepare-release.yml](.github/workflows/prepare-release.yml) | 发布准备工作流 (版本更新、标签) |
-| [.github/workflows/rollback-release.yml](.github/workflows/rollback-release.yml) | 发布回滚工作流 |
-| [.github/workflows/workflow-tests.yml](.github/workflows/workflow-tests.yml) | 工作流测试 |
+| [.github/workflows/ci.yml](.github/workflows/ci.yml) | 持续集成 (质量检查 + 三平台构建 + 测试) |
+| [.github/workflows/release.yml](.github/workflows/release.yml) | 发布 (构建 + 打包 + 安装包 + GitHub Release) |
+| [.github/workflows/prepare-release.yml](.github/workflows/prepare-release.yml) | 发布准备 (版本更新 + 标签 + 触发发布) |
+| [.github/workflows/rollback-release.yml](.github/workflows/rollback-release.yml) | 发布回滚 |
+| [.github/workflows/workflow-tests.yml](.github/workflows/workflow-tests.yml) | 工作流自检 (actionlint + 发布工具验证) |
 
 ---
 
@@ -248,6 +249,9 @@ shuati-Cli/
 
 | 文件路径 | 功能说明 |
 |---------|---------|
+| [scripts/check_version.py](scripts/check_version.py) | CI 版本一致性校验 |
+| [scripts/benchmark_tui.ps1](scripts/benchmark_tui.ps1) | TUI 渲染性能基准测试 |
+| [scripts/run_tui_regression.ps1](scripts/run_tui_regression.ps1) | TUI 回归测试运行脚本 |
 | [tools/release/plan_release.py](tools/release/plan_release.py) | 发布计划生成脚本 |
 | [tools/release/update_versions.py](tools/release/update_versions.py) | 版本号更新脚本 |
 | [tools/release/verify_release_logic.py](tools/release/verify_release_logic.py) | 发布逻辑验证脚本 |
