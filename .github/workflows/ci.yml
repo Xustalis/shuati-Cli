@@ -66,6 +66,7 @@ jobs:
     name: Build (${{ matrix.os }} / ${{ matrix.build_type }})
     runs-on: ${{ matrix.os }}
     needs: quality
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -156,7 +157,7 @@ jobs:
 
       # ---------- 运行测试 ----------
       - name: Run Tests
-        continue-on-error: true
+        continue-on-error: false
         shell: bash
         run: |
           ctest --test-dir build -C ${{ matrix.build_type }} \

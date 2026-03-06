@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(shuati-cli VERSION 0.0.7 LANGUAGES CXX)
+project(shuati-cli VERSION 0.0.8 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -85,14 +85,9 @@ set(UTIL_SOURCES
 set(TUI_SOURCES
     src/tui/tui_app.cpp
     src/tui/tui_views.cpp
+    src/tui/command_specs.cpp
     src/tui/tui_command_catalog.cpp
     src/tui/tui_command_engine.cpp
-    src/tui/tui_menu_model.cpp
-    src/tui/root_component.cpp
-    src/tui/components/dialogs.cpp
-    src/tui/pages/page_components.cpp
-    src/tui/pages/solve_workspace_page.cpp
-    src/tui/pages/problem_list_page.cpp
 )
 
 # Main executable
@@ -227,8 +222,33 @@ add_shuati_test(test_tui_performance
 
 add_shuati_test(test_tui_menu_flow
     src/tests/test_tui_menu_flow.cpp
+)
+
+add_shuati_test(test_tui_command_specs
+    src/tests/test_tui_command_specs.cpp
     EXTRA_SOURCES
-        src/tui/tui_menu_model.cpp
+        src/tui/command_specs.cpp
+)
+
+# Judge security test
+add_shuati_test(test_judge_security
+    src/tests/test_judge_security.cpp
+    EXTRA_SOURCES
+        src/core/judge.cpp
+        src/core/sandbox/sandbox_windows.cpp
+        src/core/sandbox/sandbox_linux.cpp
+        src/utils/encoding.cpp
+    LINK_LIBS SQLiteCpp cpr::cpr nlohmann_json::nlohmann_json Threads::Threads
+)
+
+# Memory test
+add_shuati_test(test_memory
+    src/tests/test_memory.cpp
+    EXTRA_SOURCES
+        src/core/memory_manager.cpp
+        src/infra/database.cpp
+        src/utils/encoding.cpp
+    LINK_LIBS SQLiteCpp nlohmann_json::nlohmann_json
 )
 
 # Crawler unit tests

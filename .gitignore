@@ -34,6 +34,7 @@ __pycache__/
 .vscode/
 .idea/
 .trae/
+.cursor/
 *.user
 *.suo
 *.sln.docstates
@@ -113,7 +114,11 @@ test_simple_crawlers.py
 # Generated Analysis Reports
 shuati_analysis_report.md
 linux_diagnosis_report.md
-upgrade_plan_v0.0.2_to_v0.0.8.md
+upgrade_plan*.md
+*.plan.md
+
+# Agent transcripts
+agent-transcripts/
 
 # Sandbox / Execution Data
 *.in

@@ -11,7 +11,7 @@
 
 **Shuati CLI 专为 OIer 和 Coder 打造的本地化、智能化命令行刷题工具🚀**
 
-[![Version](https://img.shields.io/badge/version-0.0.7-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
+[![Version](https://img.shields.io/badge/version-0.0.8-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
 [![CI](https://github.com/Xustalis/shuati-Cli/actions/workflows/release.yml/badge.svg)](https://github.com/Xustalis/shuati-Cli/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![C++20](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
@@ -210,32 +210,23 @@ shuati login lanqiao
 | **维护** | `shuati delete <id>`     | 从此刷题练习库中彻底剔除这道题目记录和原文件          | `shuati delete 1`                            |
 | **维护** | `shuati clean`           | 一键清理由于编译过程或者动态对拍产生的垃圾临时文件    | `shuati clean`                               |
 
-## 📥 从源码手动编译 (Linux / macOS / Windows)
+## 🖥️ TUI 交互模式
 
-如果你不是通过提供的一键安装包，而是偏好源码构建：
-
-**前置系统依赖需要有：**
-- **CMake** (>= 3.20)
-- **vcpkg** (C++ 跨平台包管理器)
-- **支持 C++20 的主流编译器** (GCC 10+ / Clang 10+ / MSVC 2022)
-
-**编译步骤：**
+除了传统命令行用法，Shuati 还提供了基于 FTXUI 的沉浸式终端界面：
 
 ```bash
-# 1. 把仓库克隆下来
-git clone https://github.com/Xustalis/shuati-Cli.git
-cd shuati-Cli
-
-# 2. 告诉 CMake 你的 vcpkg 在什么地方（请将下面路径替换为真实路径）
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=[你机器上的vcpkg路径]/scripts/buildsystems/vcpkg.cmake
-
-# 3. 开始执行构建和编译
-cmake --build build --config Release
-
-# 4. 可选测试和安装到系统目录
-ctest --test-dir build -C Release
-cmake --install build
+shuati tui
 ```
+
+进入 TUI 后，你可以直接输入 `/` 开头的命令（支持自动补全），也可以使用以下全屏子视图：
+
+| 命令 | 子视图 | 说明 |
+| :--- | :--- | :--- |
+| `/config` | 配置编辑器 | 表单式编辑 API Key、语言、编辑器等设置 |
+| `/list` | 题目浏览器 | 交互式表格，方向键导航，按 `f` 切换筛选 |
+| `/hint <id>` | AI 提示页 | 全屏滚动查看 AI 生成的解题提示 |
+
+在任意子视图中按 `Esc` 返回主面板。主面板支持 `PageUp/PageDown` 滚动历史输出，首次进入时显示 ASCII 欢迎页。
 
 ## 🤝 贡献指南
 
