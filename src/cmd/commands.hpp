@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <string>
 #include <vector>
@@ -21,7 +21,7 @@
 namespace shuati {
 namespace cmd {
 
-// ─── Command Context ──────────────────────────────────
+// 鈹€鈹€鈹€ Command Context 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 struct CommandContext {
     std::string pull_url;
@@ -34,6 +34,7 @@ struct CommandContext {
     std::string cfg_language;         // --language flag for config command
     std::string cfg_editor;          // --editor flag for config command
     std::string cfg_autostart_repl;  // "on" or "off" for --autostart-repl
+    std::string cfg_ui_mode;         // "tui" or "legacy" for --ui-mode
     bool cfg_show = false;
     int test_max_cases = 30;
     std::string test_oracle = "auto";
@@ -43,7 +44,7 @@ struct CommandContext {
     std::string login_platform;  // Platform for login command (e.g., "lanqiao")
 };
 
-// ─── Services ─────────────────────────────────────────
+// 鈹€鈹€鈹€ Services 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 struct Services {
     std::shared_ptr<Database>       db;
@@ -55,10 +56,10 @@ struct Services {
     std::unique_ptr<Judge>          judge;
     Config                          cfg;
 
-    static Services load(const std::filesystem::path& root);
+    static Services load(const std::filesystem::path& root, bool skip_doctor = false);
 };
 
-// ─── Utils ────────────────────────────────────────────
+// 鈹€鈹€鈹€ Utils 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 std::filesystem::path find_root_or_die();
 std::string executable_path_utf8();
@@ -67,7 +68,7 @@ std::string executable_path_utf8();
  * @brief Generate human-readable solution filename
  * @param prob The problem to generate filename for
  * @param language "cpp" or "python"
- * @return Filename like "3_两数之和.cpp" (TID + sanitized title)
+ * @return Filename like "3_涓ゆ暟涔嬪拰.cpp" (TID + sanitized title)
  */
 std::string make_solution_filename(const Problem& prob, const std::string& language);
 
@@ -79,7 +80,7 @@ std::string make_solution_filename(const Problem& prob, const std::string& langu
  */
 std::string find_solution_file(const Problem& prob, const std::string& language);
 
-// ─── Command Declarations ─────────────────────────────
+// 鈹€鈹€鈹€ Command Declarations 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 void cmd_test(CommandContext& ctx);
 void cmd_list(CommandContext& ctx);

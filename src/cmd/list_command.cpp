@@ -92,17 +92,12 @@ void cmd_list(CommandContext& ctx) {
             
             if (!p.last_verdict.empty()) {
                 if (p.last_verdict == "AC") {
-                    status = "\033[32mAC\033[0m"; // Green
+                    status = "AC";
                     status_display = "AC";
                 } else {
                     std::string v = p.last_verdict;
-                    if (v == "WA") v = "\033[31mWA\033[0m"; // Red
-                    else if (v == "TLE") v = "\033[33mTLE\033[0m"; // Yellow
-                    else if (v == "CE") v = "\033[33mCE\033[0m"; // Yellow
-                    else v = "\033[35m" + v + "\033[0m"; // Magenta for others
-
                     status = v + " " + std::to_string(p.pass_count) + "/" + std::to_string(p.total_count);
-                    status_display = p.last_verdict + " " + std::to_string(p.pass_count) + "/" + std::to_string(p.total_count);
+                    status_display = status;
                 }
             }
             

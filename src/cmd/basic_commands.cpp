@@ -134,6 +134,15 @@ void cmd_config(CommandContext& ctx) {
                 std::cerr << "[!] --autostart-repl 的值必须是 'on' 或 'off'" << std::endl;
             }
         }
+        if (!ctx.cfg_ui_mode.empty()) {
+            if (ctx.cfg_ui_mode == "tui" || ctx.cfg_ui_mode == "legacy") {
+                cfg.ui_mode = ctx.cfg_ui_mode;
+                changed = true;
+                std::cout << "[+] UI 模式已设置为: " << ctx.cfg_ui_mode << std::endl;
+            } else {
+                std::cerr << "[!] --ui-mode 的值必须是 'tui' 或 'legacy'" << std::endl;
+            }
+        }
 
         if (changed) {
             cfg.save(cfg_path);
@@ -147,6 +156,7 @@ void cmd_config(CommandContext& ctx) {
             std::cout << "  --language <cpp|python> 设置默认编程语言\n";
             std::cout << "  --editor <cmd|auto>   设置编辑器命令 (auto=自动检测)\n";
             std::cout << "  --autostart-repl <on|off> 是否在无参数时自动启动 REPL\n";
+            std::cout << "  --ui-mode <tui|legacy> 启动 UI 模式\n";
         }
 
     } catch (const std::exception& e) {

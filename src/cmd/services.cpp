@@ -42,7 +42,7 @@ std::string executable_path_utf8() {
 }
 #endif
 
-Services Services::load(const fs::path& root) {
+Services Services::load(const fs::path& root, bool skip_doctor) {
     Services s;
     try {
         s.cfg = Config::load(Config::config_path(root));
@@ -78,14 +78,16 @@ Services Services::load(const fs::path& root) {
         throw;
     }
 
-    // Environment Check
-    std::vector<std::string> missing;
-    if (!CompilerDoctor::check_environment(missing)) {
-         fmt::print(fg(fmt::color::yellow), "[!] 警告: 未检测到以下环境工具，可能无法运行代码:\n");
-         for (const auto& t : missing) {
-             fmt::print("    - {}\n", t);
-         }
-         fmt::print("\n");
+    // Environment Check (skip if requested, since it can be very slow)
+    if (!skip_doctor) {
+        std::vector<std::string> missing;
+        if (!CompilerDoctor::check_environment(missing)) {
+             fmt::print(fg(fmt::color::yellow), "[!] 警告: 未检测到以下环境工具，可能无法运行代码:\n");
+             for (const auto& t : missing) {
+                 fmt::print("    - {}\n", t);
+             }
+             fmt::print("\n");
+        }
     }
     
     return s;

@@ -31,6 +31,9 @@ find_package(Threads REQUIRED)
 
 # Include directories
 include_directories(include)
+include_directories(src/cmd)
+include_directories(src/cli)
+include_directories(src/router)
 
 # Source file groups
 set(CMD_SOURCES
@@ -43,6 +46,8 @@ set(CMD_SOURCES
     src/cmd/list_command.cpp
     src/cmd/view_command.cpp
     src/cmd/test_command.cpp
+    src/cli/legacy_repl.cpp
+    src/router/app_router.cpp
 )
 
 set(CORE_SOURCES
@@ -77,6 +82,19 @@ set(UTIL_SOURCES
     src/utils/encoding.cpp
 )
 
+set(TUI_SOURCES
+    src/tui/tui_app.cpp
+    src/tui/tui_views.cpp
+    src/tui/tui_command_catalog.cpp
+    src/tui/tui_command_engine.cpp
+    src/tui/tui_menu_model.cpp
+    src/tui/root_component.cpp
+    src/tui/components/dialogs.cpp
+    src/tui/pages/page_components.cpp
+    src/tui/pages/solve_workspace_page.cpp
+    src/tui/pages/problem_list_page.cpp
+)
+
 # Main executable
 add_executable(shuati
     ${CMD_SOURCES}
@@ -84,6 +102,7 @@ add_executable(shuati
     ${ADAPTER_SOURCES}
     ${INFRA_SOURCES}
     ${UTIL_SOURCES}
+    ${TUI_SOURCES}
 )
 
 target_link_libraries(shuati PRIVATE
@@ -182,6 +201,34 @@ add_shuati_test(test_judge_complex
 add_shuati_test(test_sm2_auto_quality
     src/tests/test_sm2_auto_quality.cpp
     EXTRA_SOURCES src/core/sm2_algorithm.cpp
+)
+
+# TUI render tests
+add_shuati_test(test_tui_render
+    src/tests/test_tui_render.cpp
+    EXTRA_SOURCES
+        src/tui/tui_views.cpp
+    LINK_LIBS ftxui::screen ftxui::dom
+)
+
+add_shuati_test(test_tui_cli_parity
+    src/tests/test_tui_cli_parity.cpp
+    EXTRA_SOURCES
+        src/tui/tui_command_catalog.cpp
+)
+
+add_shuati_test(test_tui_performance
+    src/tests/test_tui_performance.cpp
+    EXTRA_SOURCES
+        src/tui/tui_views.cpp
+        src/tui/tui_command_catalog.cpp
+    LINK_LIBS ftxui::screen ftxui::dom
+)
+
+add_shuati_test(test_tui_menu_flow
+    src/tests/test_tui_menu_flow.cpp
+    EXTRA_SOURCES
+        src/tui/tui_menu_model.cpp
 )
 
 # Crawler unit tests

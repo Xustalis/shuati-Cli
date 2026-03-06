@@ -26,6 +26,7 @@ struct Config {
     bool template_enabled = true;     // Enable template generation
     std::string lanqiao_cookie;       // Cookie for authenticated Lanqiao problem fetching
     bool autostart_repl = true;       // Auto-start REPL when running 'shuati' with no args
+    std::string ui_mode = "legacy";
 
     // --- Linux / cross-platform editor detection ---
     // Returns a best-guess editor command, checking $VISUAL, $EDITOR, then common editors in PATH.
@@ -116,6 +117,7 @@ struct Config {
         j["template_enabled"]        = template_enabled;
         if (!lanqiao_cookie.empty()) j["lanqiao_cookie"]   = lanqiao_cookie;
         j["autostart_repl"]          = autostart_repl;
+        if (!ui_mode.empty())        j["ui_mode"]          = ui_mode;
         std::ofstream(path) << j.dump(2);
     }
 
@@ -134,6 +136,7 @@ struct Config {
             if (j.contains("template_enabled")) c.template_enabled = j["template_enabled"];
             if (j.contains("lanqiao_cookie")) c.lanqiao_cookie = j["lanqiao_cookie"];
             if (j.contains("autostart_repl")) c.autostart_repl = j["autostart_repl"];
+            if (j.contains("ui_mode"))        c.ui_mode        = j["ui_mode"];
         } catch (...) {}
         return c;
     }

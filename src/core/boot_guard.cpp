@@ -188,7 +188,7 @@ bool BootGuard::check() {
             menu->Render() | vscroll_indicator | frame | size(HEIGHT, LESS_THAN, 10),
             separator(),
             text("使用 ↑/↓ 选择，Enter 确认") | dim
-        }) | border | size(WIDTH, GREATER_THAN, 60);
+        }) | border | size(WIDTH, LESS_THAN, 60) | center;
     });
 
     screen.Loop(renderer);
