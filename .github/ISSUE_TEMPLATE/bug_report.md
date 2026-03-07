@@ -8,7 +8,7 @@ assignees: ''
 ---
 
 **描述 (Description)**
-简要描述这个 Bug 是什么。
+请你简要描述这个 Bug 是什么。
 
 **复现步骤 (To Reproduce)**
 1. 运行命令 '...'

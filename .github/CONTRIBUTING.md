@@ -60,3 +60,11 @@
 - 变量命名使用 `snake_case`，类名使用 `PascalCase`。
 
 感谢你的贡献！🚀
+
+
+### macOS Support
+
+The maintainers do not currently have access to macOS machines.
+
+macOS support is welcome through community contributions.  
+If you are a macOS user, PRs improving build, packaging, or runtime compatibility are highly appreciated.
