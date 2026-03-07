@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v0.1.0] - 2026-03-06 🎉 首个里程碑版本
+## [v0.1.0] - 2026-03-07 🎉 首个里程碑版本
 
 > **里程碑版本。** v0.1.0 标志着 Shuati CLI 从纯命令行工具正式迈入**终端图形界面时代**。本版本首次引入基于 FTXUI 的 TUI 设计界面，实现了沉浸式的全屏交互体验；同时对 CI/CD 管线、Windows 安装程序和整体代码架构进行了全面重构与深度清理。
 
@@ -42,6 +42,7 @@ All notable changes to this project will be documented in this file.
 
 ### 问题修复
 
+- **Linux 沙箱 MLE 判定修复**：修正了 `sandbox_linux.cpp` 中内存超限 (Memory Limit Exceeded) 被误判为 Runtime Error 的系统环境差异问题。新增了触碰分页内存强制提升 Resident Set Size (RSS) 的逻辑，并为 Linux 添加了 -5MB 的宽容度判定，使 CI (Ubuntu) 能够正确捕获和断言沙箱超限异常并使所有判断链路恢复绿灯通过。
 - **修复 TUI 输入删除失效**：解决了 FTXUI Input 组件中 Backspace/Delete 键无法删除字符的严重 Bug。根因是光标位置失步 — 通过显式追踪 `cursor_position` 并在历史回溯、自动补全和 Ctrl+U 操作后同步光标位置来修复。
 - **修复 /test 输出捕获**：`ScopedStreamCapture` 工具类现在除 C++ 流重定向外还执行 C 层文件描述符重定向 (`dup2`)，确保 `fmt::print` 等绕过 `std::cout`/`std::cerr` 的函数输出能正确显示在 TUI 输出面板中。
 - **修复回车符处理**：`normalize_text` 现在正确模拟终端 `\r`（回车）行为，防止进度条输出在 TUI 滚动缓冲区中产生重复行。

@@ -90,7 +90,14 @@ void test_mle() {
 int main() {
     std::vector<char*> ptrs;
     while(true) {
-        ptrs.push_back(new char[10 * 1024 * 1024]);
+        // Allocate smaller chunks (1MB) to ensure we hit the 90% threshold
+        // before std::bad_alloc is thrown prematurely
+        char* p = new char[1 * 1024 * 1024];
+        // Touch memory to force page allocation (increasing RSS on Linux)
+        for (int i = 0; i < 1 * 1024 * 1024; i += 4096) {
+            p[i] = 1;
+        }
+        ptrs.push_back(p);
     }
     return 0;
 }

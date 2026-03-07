@@ -162,14 +162,18 @@ public:
                             } else {
                                 // Likely OOM or hard crash
                                 result.status = SandboxResultStatus::RuntimeError;
-                                if (result.memory_mb >= limits.memory_mb) {
+                                int threshold = limits.memory_mb - (limits.memory_mb / 10);
+                                if (threshold < limits.memory_mb - 5) threshold = limits.memory_mb - 5;
+                                if (result.memory_mb >= threshold) {
                                      result.status = SandboxResultStatus::MemoryLimitExceeded;
                                 }
                             }
                         } else if (sig == SIGSEGV || sig == SIGABRT) {
                             result.status = SandboxResultStatus::RuntimeError;
                             // Check for MLE disguised as SEGFAULT
-                            if (result.memory_mb >= limits.memory_mb) {
+                            int threshold = limits.memory_mb - (limits.memory_mb / 10);
+                            if (threshold < limits.memory_mb - 5) threshold = limits.memory_mb - 5;
+                            if (result.memory_mb >= threshold) {
                                 result.status = SandboxResultStatus::MemoryLimitExceeded;
                             }
                         } else {
