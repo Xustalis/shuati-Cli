@@ -132,14 +132,36 @@ public:
             auto start_time = std::chrono::steady_clock::now();
             int wstatus;
             struct rusage usage;
+            long peak_memory_kb = 0;
 
             while (true) {
+                // Poll memory via /proc/<pid>/status VmPeak or VmHWM
+                char status_path[64];
+                snprintf(status_path, sizeof(status_path), "/proc/%d/status", pid);
+                std::ifstream status_file(status_path);
+                if (status_file) {
+                    std::string line;
+                    while (std::getline(status_file, line)) {
+                        if (line.rfind("VmPeak:", 0) == 0 || line.rfind("VmHWM:", 0) == 0) {
+                            long val = 0;
+                            if (sscanf(line.c_str() + 7, "%ld", &val) == 1) {
+                                if (val > peak_memory_kb) peak_memory_kb = val;
+                            }
+                        }
+                    }
+                }
+
                 int ret = wait4(pid, &wstatus, WNOHANG, &usage);
                 if (ret == pid) {
                     // Process exited
                     result.cpu_time_ms = usage.ru_utime.tv_sec * 1000 + usage.ru_utime.tv_usec / 1000 +
                                          usage.ru_stime.tv_sec * 1000 + usage.ru_stime.tv_usec / 1000;
-                    result.memory_mb = usage.ru_maxrss / 1024; // ru_maxrss is in KB on Linux
+                    
+                    // Fallback to maxrss if polling missed it (though maxrss is often unreliable on SIGKILL)
+                    if (usage.ru_maxrss > peak_memory_kb) {
+                        peak_memory_kb = usage.ru_maxrss;
+                    }
+                    result.memory_mb = peak_memory_kb / 1024;
 
                     if (WIFEXITED(wstatus)) {
                         result.exit_code = WEXITSTATUS(wstatus);
@@ -154,7 +176,6 @@ public:
                         if (sig == SIGXCPU || sig == SIGKILL) {
                             // SIGXCPU triggered by RLIMIT_CPU.
                             // SIGKILL often triggered by OOM killer or us manually killing.
-                            // We need to distinguish based on elapsed time vs limit.
                             auto now = std::chrono::steady_clock::now();
                             auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
                             if (elapsed_ms >= limits.cpu_time_ms) {
@@ -164,7 +185,7 @@ public:
                                 result.status = SandboxResultStatus::RuntimeError;
                                 int threshold = limits.memory_mb - (limits.memory_mb / 10);
                                 if (threshold < limits.memory_mb - 5) threshold = limits.memory_mb - 5;
-                                if (result.memory_mb >= threshold) {
+                                if (result.memory_mb >= threshold || sig == SIGKILL) {
                                      result.status = SandboxResultStatus::MemoryLimitExceeded;
                                 }
                             }
@@ -194,8 +215,8 @@ public:
                         break;
                     }
 
-                    // Poll every 50ms
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    // Poll every 10ms (faster for memory tracking accuracy)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 } else {
                     result.internal_message = "wait4 failed";
                     break;

@@ -13,9 +13,11 @@ namespace fs = std::filesystem;
 void cmd_pull(CommandContext& ctx) {
     try {
         auto svc = Services::load(find_root_or_die());
+        std::cout << "[*] 正在拉取题目: " << ctx.pull_url << std::endl;
         svc.pm->pull_problem(ctx.pull_url);
+        std::cout << "[+] 拉取完成。" << std::endl;
     } catch (const std::exception& e) {
-        std::cerr << "[!] Error: " << e.what() << std::endl;
+        std::cerr << "[!] 拉取失败: " << e.what() << std::endl;
     }
 }
 
@@ -48,17 +50,23 @@ void cmd_delete(CommandContext& ctx) {
         auto svc = Services::load(find_root_or_die());
         
         if (ctx.solve_pid.empty()) {
+            if (ctx.is_tui) {
+                std::cout << "[用法] /delete <ID> — 请直接提供题目 ID" << std::endl;
+                return;
+            }
             std::cout << "请输入要删除的题目 ID: ";
             std::cin >> ctx.solve_pid;
             if (ctx.solve_pid.empty()) return;
         }
 
-        // Confirm deletion
-        std::cout << "确定要删除题目 '" << ctx.solve_pid << "' 吗? [y/N] ";
-        char confirm; std::cin >> confirm;
-        if (confirm != 'y' && confirm != 'Y') {
-            std::cout << "操作取消。" << std::endl;
-            return;
+        // Confirm deletion (skip in TUI — no stdin available)
+        if (!ctx.is_tui) {
+            std::cout << "确定要删除题目 '" << ctx.solve_pid << "' 吗? [y/N] ";
+            char confirm; std::cin >> confirm;
+            if (confirm != 'y' && confirm != 'Y') {
+                std::cout << "操作取消。" << std::endl;
+                return;
+            }
         }
 
         try {

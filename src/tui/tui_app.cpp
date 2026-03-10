@@ -250,7 +250,8 @@ int TuiApp::run() {
     TuiTheme theme;
     AppState state;
 
-    std::string version = "v" + current_version().to_string();
+    // current_version().to_string() already returns "v0.1.0" — do NOT add another 'v'.
+    std::string version = current_version().to_string();
     auto specs = tui_command_specs();
 
     std::string project_path;
@@ -348,19 +349,46 @@ int TuiApp::run() {
             return;
         }
 
+        // Block commands that would spawn a nested TUI or REPL inside the TUI.
+        if (base_cmd == "tui" || base_cmd == "repl") {
+            state.append(LineType::System,
+                base_cmd == "tui"
+                    ? "\xe5\xbd\x93\xe5\x89\x8d\xe5\xb7\xb2\xe5\x9c\xa8 TUI 模\xe5\xbc\x8f\xe4\xb8\xad\xef\xbc\x9b\xe6\x97\xa0\xe9\x9c\x80\xe9\x87\x8d\xe5\xa4\x8d\xe5\x90\xaf\xe5\x8a\xa8\xe3\x80\x82"
+                    : "\xe5\xbd\x93\xe5\x89\x8d\xe5\xb7\xb2\xe5\x9c\xa8 TUI 模\xe5\xbc\x8f\xe4\xb8\xad\xef\xbc\x9b\xe8\xaf\xb7\xe7\x9b\xb4\xe6\x8e\xa5\xe8\xbe\x93\xe5\x85\xa5\xe6\x8c\x87\xe4\xbb\xa4\xe3\x80\x82");
+            return;
+        }
+
         state.is_running = true;
         state.active_command = base_cmd;
 
         std::thread([&screen, &state, args = std::move(args), base_cmd]() mutable {
-            std::string output = tui_execute_command_capture(args, base_cmd);
-            screen.Post([&state, output = std::move(output), base_cmd] {
-                if (!output.empty()) {
-                    if (is_error_output(output)) {
-                        state.append(LineType::Error, output);
-                    } else {
-                        state.append_output_lines(output);
+            // Use streaming for all real commands so output appears incrementally.
+            std::string accumulated;
+            auto cb = [&screen, &state, &accumulated](const std::string& chunk) {
+                accumulated += chunk;
+                // Post each chunk to TUI for live update
+                screen.Post([&state, chunk]() {
+                    auto lines = chunk;
+                    // Split and append each line
+                    std::string::size_type start = 0;
+                    while (start < lines.size()) {
+                        auto nl = lines.find('\n', start);
+                        std::string seg = (nl == std::string::npos)
+                            ? lines.substr(start)
+                            : lines.substr(start, nl - start);
+                        if (!seg.empty() || nl != std::string::npos) {
+                            state.buffer.push_back({LineType::Output, seg});
+                        }
+                        if (nl == std::string::npos) break;
+                        start = nl + 1;
                     }
-                }
+                    state.scroll_offset = 0;
+                });
+            };
+
+            tui_execute_command_stream(args, base_cmd, cb);
+
+            screen.Post([&state]() {
                 state.is_running = false;
                 state.active_command.clear();
             });

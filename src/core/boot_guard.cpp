@@ -137,7 +137,7 @@ void BootGuard::record_history(const std::string& path) {
     save_history(history);
 }
 
-bool BootGuard::check() {
+bool BootGuard::check(int argc) {
     // 1. Check if valid project
     auto root = Config::find_root();
     if (!root.empty()) {
@@ -145,7 +145,13 @@ bool BootGuard::check() {
         return true; // Already good
     }
 
-    // 2. Not valid, show TUI
+    // If there are arguments (e.g. `shuati init`, `shuati help`), skip the interactive TUI
+    // and let the CLI parser or AppRouter handle it normally.
+    if (argc > 1) {
+        return true;
+    }
+
+    // 2. Not valid and no arguments, show TUI
     using namespace ftxui;
     auto history = load_history();
     

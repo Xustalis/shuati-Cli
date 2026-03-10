@@ -24,7 +24,14 @@ void cmd_solve(CommandContext& ctx) {
         
         Problem prob;
         if (ctx.solve_pid.empty()) {
-            // Interactive Selection via ftxui Menu
+            // In TUI mode: cannot launch nested FTXUI menu or read stdin.
+            if (ctx.is_tui) {
+                std::cout << "[提示] 请通过 /list 选择题目后使用 /solve <ID> 开始练习。\n"
+                          << "      例如: /solve 1" << std::endl;
+                return;
+            }
+
+            // Interactive Selection via ftxui Menu (CLI-only)
             auto problems = svc.pm->list_problems();
             if (problems.empty()) {
                 std::cout << "题库为空，请先使用 pull 或 new 添加题目。" << std::endl;
@@ -79,7 +86,11 @@ void cmd_solve(CommandContext& ctx) {
                 prob = problems[selected];
 
             } catch (...) {
-                // Fallback to plain stdin if ftxui fails (e.g. non-interactive terminal)
+                if (ctx.is_tui) {
+                    std::cout << "[!] 请直接提供题目 ID: /solve <ID>" << std::endl;
+                    return;
+                }
+                // Fallback to plain stdin
                 std::cout << "请输入题目 ID: ";
                 std::cin >> ctx.solve_pid;
                 try {
@@ -127,9 +138,13 @@ void cmd_solve(CommandContext& ctx) {
             std::cout << "[+] 代码文件已就绪: " << filename << std::endl;
         }
         
-        if (!svc.cfg.editor.empty()) {
+        // Do not launch editor from TUI — it would overwrite the full-screen interface.
+        if (!ctx.is_tui && !svc.cfg.editor.empty()) {
             std::string cmd = svc.cfg.editor + " \"" + filename + "\"";
             if (shuati::utils::utf8_system(cmd) != 0) {}
+        } else if (ctx.is_tui) {
+            std::cout << "[提示] 代码文件: " << filename << "\n"
+                      << "      编辑器未在 TUI 内自动打开，请另开终端编辑。" << std::endl;
         }
     } catch (const std::exception& e) {
         std::cerr << "[!] 错误: " << e.what() << std::endl;
@@ -160,7 +175,12 @@ void cmd_submit(CommandContext& ctx) {
                 } catch (...) {}
             }
 
-            if (auto_q >= 0) {
+            if (ctx.is_tui) {
+                // In TUI mode: cannot use stdin; just accept auto_q or default to 3.
+                ctx.submit_quality = (auto_q >= 0) ? auto_q : 3;
+                std::cout << "[TUI] 自动采用评分: " << ctx.submit_quality
+                          << "。如需覆盖请使用 /submit <id> -q <0-5>" << std::endl;
+            } else if (auto_q >= 0) {
                 std::cout << "按回车接受自动评分 [" << auto_q << "]，或输入 0-5 覆盖: ";
                 std::string val; std::getline(std::cin, val);
                 if (val.empty()) {

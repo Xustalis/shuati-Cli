@@ -44,6 +44,9 @@ struct CommandContext {
     std::string view_export_dir; // Directory to save test cases
     std::string login_platform;  // Platform for login command (e.g., "lanqiao")
     std::function<void(const std::string&)> stream_cb; // Callback for streaming outputs
+    // Set to true when command is dispatched from the TUI - suppresses stdin reads,
+    // FTXUI interactive menus, and editor launch to avoid TUI corruption.
+    bool is_tui = false;
 };
 
 // 鈹€鈹€鈹€ Services 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€

@@ -260,6 +260,13 @@ add_executable(crawler_tests
     ${UTIL_SOURCES}
 )
 
+target_include_directories(crawler_tests PRIVATE
+    include
+    src/cmd
+    src/cli
+    src/router
+)
+
 target_link_libraries(crawler_tests PRIVATE
     CLI11::CLI11
     nlohmann_json::nlohmann_json
@@ -273,5 +280,9 @@ target_link_libraries(crawler_tests PRIVATE
     httplib::httplib
     Threads::Threads
 )
+
+if(WIN32)
+    target_link_libraries(crawler_tests PRIVATE Psapi Shell32)
+endif()
 
 add_test(NAME test_crawlers COMMAND $<TARGET_FILE:crawler_tests>)

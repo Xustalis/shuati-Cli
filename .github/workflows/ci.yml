@@ -58,8 +58,6 @@ jobs:
             artifact_name: shuati-windows
           - os: ubuntu-latest
             artifact_name: shuati-linux
-          - os: macos-latest
-            artifact_name: shuati-macos
 
     steps:
       - uses: actions/checkout@v4
@@ -71,10 +69,6 @@ jobs:
           sudo apt-get install -y \
             libcurl4-openssl-dev libx11-dev libxt-dev \
             libgl1-mesa-dev xorg-dev ninja-build
-
-      - name: Install macOS Dependencies
-        if: runner.os == 'macOS'
-        run: brew install ninja
 
       - name: Setup CMake
         uses: jwlawson/actions-setup-cmake@v2

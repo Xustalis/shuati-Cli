@@ -65,7 +65,6 @@ SetupLogging=yes
 
 WizardStyle=modern
 WizardSizePercent=120
-WizardResizable=yes
 
 VersionInfoVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
@@ -154,7 +153,6 @@ var
   OldPath, NewPath, Part: string;
   P: Integer;
   NDir: string;
-  R: DWORD;
 begin
   if not RegQueryStringValue(HKCU, 'Environment', 'Path', OldPath) then
     OldPath := '';

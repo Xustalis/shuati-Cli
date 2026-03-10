@@ -240,6 +240,15 @@ JudgeResult Judge::run_case(const std::string& executable,
         if (res.error_output.empty()) {
             res.error_output = fmt::format("Process exited with code {}", sb_res.exit_code);
         }
+        
+        // Fallback for MLE detection if stderr mentions bad_alloc
+        if (res.error_output.find("std::bad_alloc") != std::string::npos ||
+            res.error_output.find("Memory limit exceeded") != std::string::npos) {
+            res.verdict = Verdict::MLE;
+            if (res.memory_kb == 0 && limits.memory_mb > 0) {
+                res.memory_kb = limits.memory_mb * 1024;
+            }
+        }
     } else if (sb_res.status == shuati::sandbox::SandboxResultStatus::InternalError) {
         res.verdict = Verdict::RE;
         res.error_output = "Sandbox Internal Error: " + sb_res.internal_message;
@@ -310,6 +319,15 @@ JudgeResult Judge::run_process_redirect(const std::string& cmd,
         res.verdict = Verdict::RE;
         std::string err_output = shuati::utils::ensure_utf8_lossy(shuati::read_text_file(err_file.path()));
         res.message = err_output.empty() ? fmt::format("Exit code {}", sb_res.exit_code) : err_output;
+        
+        // Fallback checking for MLE
+        if (res.message.find("std::bad_alloc") != std::string::npos ||
+            res.message.find("Memory limit exceeded") != std::string::npos) {
+            res.verdict = Verdict::MLE;
+            if (res.memory_kb == 0 && limits.memory_mb > 0) {
+                res.memory_kb = limits.memory_mb * 1024;
+            }
+        }
     } else if (sb_res.status == shuati::sandbox::SandboxResultStatus::InternalError) {
         res.verdict = Verdict::RE;
         res.message = "Sandbox Internal Error: " + sb_res.internal_message;

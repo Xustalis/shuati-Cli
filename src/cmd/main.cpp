@@ -13,20 +13,15 @@ int main(int argc, char** argv) {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
     
-    // Enable VT processing globally to fix Replxx rendering and backspace ghosting 
-    // on Windows Terminal and modern console hosts.
+    // Enable VT output processing for ANSI color rendering (Windows Terminal).
+    // NOTE: Do NOT set ENABLE_VIRTUAL_TERMINAL_INPUT on stdin — replxx handles
+    // raw keyboard input itself, and setting that flag causes backspace to emit
+    // ^H instead of being processed correctly.
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
     if (hOut != INVALID_HANDLE_VALUE) {
         DWORD dwMode = 0;
         if (GetConsoleMode(hOut, &dwMode)) {
             SetConsoleMode(hOut, dwMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
-        }
-    }
-    HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
-    if (hIn != INVALID_HANDLE_VALUE) {
-        DWORD dwMode = 0;
-        if (GetConsoleMode(hIn, &dwMode)) {
-            SetConsoleMode(hIn, dwMode | ENABLE_VIRTUAL_TERMINAL_INPUT);
         }
     }
 #endif
@@ -39,7 +34,7 @@ int main(int argc, char** argv) {
     
     shuati::Logger::instance().info("Session started. Version: {}", shuati::current_version().to_string());
 
-    if (!shuati::BootGuard::check()) return 0;
+    if (!shuati::BootGuard::check(argc)) return 0;
 
     auto config = root.empty() ? shuati::Config() : shuati::Config::load(shuati::Config::config_path(root));
     shuati::router::AppRouter router(config);

@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        os: [windows-latest, ubuntu-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -63,10 +63,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libcurl4-openssl-dev libx11-dev libxt-dev libgl1-mesa-dev xorg-dev ninja-build
-
-      - name: Install macOS Dependencies
-        if: runner.os == 'macOS'
-        run: brew install ninja
 
       - name: Setup CMake
         uses: jwlawson/actions-setup-cmake@v2
@@ -159,7 +155,7 @@ jobs:
           $env:SHUATI_OUTPUT_NAME = "shuati-setup-x64-${{ github.ref_name }}"
           $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
           if (!(Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
-          & $iscc "installer\shuati.iss"
+          & $iscc "installer\shuati.iss" "/O."
           $expected = "shuati-setup-x64-${{ github.ref_name }}.exe"
           if (!(Test-Path $expected)) {
             throw "Installer not found: $expected"
@@ -213,15 +209,6 @@ jobs:
             shuati-Linux-x64-${{ github.ref_name }}.tar.gz
             shuati-Linux-x64-${{ github.ref_name }}.tar.gz.sha256
             *.deb
-
-      - name: Upload Assets (macOS)
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: assets-macOS
-          path: |
-            shuati-macOS-x64-${{ github.ref_name }}.tar.gz
-            shuati-macOS-x64-${{ github.ref_name }}.tar.gz.sha256
 
   release:
     name: Publish Release

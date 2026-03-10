@@ -17,7 +17,7 @@ public:
 
     // Main entry point: checks if CWD is valid, if not shows TUI
     // Returns true if we are in a valid project (possibly after navigation), false if user chose to exit
-    static bool check();
+    static bool check(int argc = 1);
 
     // Records a successful project load
     static void record_history(const std::string& path);
