@@ -22,8 +22,6 @@
 namespace shuati {
 namespace cmd {
 
-// 鈹€鈹€鈹€ Command Context 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-
 struct CommandContext {
     std::string pull_url;
     std::string new_title, new_tags, new_diff = "medium";
@@ -40,7 +38,7 @@ struct CommandContext {
     int test_max_cases = 30;
     std::string test_oracle = "auto";
     bool test_ui = false;
-    std::string list_filter; // "all", "ac", "failed", "unaudited"
+    std::string list_filter; // "all", "ac", "failed", "unaudited", "review"
     std::string view_export_dir; // Directory to save test cases
     std::string login_platform;  // Platform for login command (e.g., "lanqiao")
     std::function<void(const std::string&)> stream_cb; // Callback for streaming outputs
@@ -49,7 +47,6 @@ struct CommandContext {
     bool is_tui = false;
 };
 
-// 鈹€鈹€鈹€ Services 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 struct Services {
     std::shared_ptr<Database>       db;
@@ -64,7 +61,6 @@ struct Services {
     static Services load(const std::filesystem::path& root, bool skip_doctor = false);
 };
 
-// 鈹€鈹€鈹€ Utils 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 std::filesystem::path find_root_or_die();
 std::string executable_path_utf8();
@@ -73,7 +69,7 @@ std::string executable_path_utf8();
  * @brief Generate human-readable solution filename
  * @param prob The problem to generate filename for
  * @param language "cpp" or "python"
- * @return Filename like "3_涓ゆ暟涔嬪拰.cpp" (TID + sanitized title)
+ * @return Generated filename
  */
 std::string make_solution_filename(const Problem& prob, const std::string& language);
 
@@ -84,8 +80,6 @@ std::string make_solution_filename(const Problem& prob, const std::string& langu
  * @return Path if found, empty string if not
  */
 std::string find_solution_file(const Problem& prob, const std::string& language);
-
-// 鈹€鈹€鈹€ Command Declarations 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 void cmd_test(CommandContext& ctx);
 void cmd_list(CommandContext& ctx);

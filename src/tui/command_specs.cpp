@@ -5,17 +5,17 @@ namespace tui {
 
 std::vector<CommandSpec> tui_command_specs() {
     return {
-        {"/help", "/help | ?", "查看全部指令与示例", CommandCategory::System},
+        {"/help", "/help | /?", "查看全部指令与示例", CommandCategory::System},
         {"/init", "/init", "在当前目录初始化项目", CommandCategory::Project},
         {"/info", "/info", "显示环境信息", CommandCategory::System},
         {"/pull", "/pull <url>", "从 URL 拉取题目", CommandCategory::Problem},
         {"/new", "/new <title>", "创建本地题目", CommandCategory::Problem},
-        {"/solve", "/solve [id]", "进入做题/解题工作流", CommandCategory::Problem},
-        {"/list", "/list [--filter ...]", "列出题库题目", CommandCategory::Problem},
+        {"/solve", "/solve [id]", "进入做题工作流", CommandCategory::Problem},
+        {"/list", "/list [--filter all|ac|failed|unaudited|review]", "列出题库题目", CommandCategory::Problem},
         {"/view", "/view <id>", "查看测试详情", CommandCategory::Problem},
         {"/test", "/test <id>", "运行测试用例", CommandCategory::Problem},
         {"/hint", "/hint <id>", "获取 AI 提示", CommandCategory::AI},
-        {"/submit", "/submit <id>", "提交并记录心得", CommandCategory::Problem},
+        {"/submit", "/submit <id>", "提交并记录掌握度", CommandCategory::Problem},
         {"/delete", "/delete <id>", "删除题目", CommandCategory::Problem},
         {"/clean", "/clean", "清理临时文件", CommandCategory::Project},
         {"/login", "/login <platform>", "配置平台登录 Cookie", CommandCategory::Project},
@@ -28,4 +28,3 @@ std::vector<CommandSpec> tui_command_specs() {
 
 } // namespace tui
 } // namespace shuati
-

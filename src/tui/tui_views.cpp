@@ -7,6 +7,18 @@ namespace tui {
 
 using namespace ftxui;
 
+namespace {
+
+std::string filter_label(const std::string& filter) {
+    if (filter == "ac") return "AC";
+    if (filter == "failed") return "Failed";
+    if (filter == "unaudited") return "Unaudited";
+    if (filter == "review") return "Review";
+    return "All";
+}
+
+} // namespace
+
 Element render_buffer_line(const BufferLine& line, const TuiTheme& theme) {
     switch (line.type) {
     case LineType::Input:
@@ -110,7 +122,7 @@ Element render_welcome(const TuiTheme& theme) {
     }));
     lines.push_back(hbox({
         text("     /list") | bold | color(theme.prompt_color),
-        text("             \xe6\xb5\x8f\xe8\xa7\x88\xe6\x9c\xac\xe5\x9c\xb0\xe9\xa2\x98\xe5\xba\x93\xef\xbc\x8c\xe6\x94\xaf\xe6\x8c\x81\xe7\xad\x9b\xe9\x80\x89\xe5\x92\x8c\xe5\xbf\xab\xe6\x8d\xb7\xe6\x93\x8d\xe4\xbd\x9c") | color(theme.dim_color),
+        text("             \xe6\xb5\x8f\xe8\xa7\x88\xe6\x9c\xac\xe5\x9c\xb0\xe9\xa2\x98\xe5\xba\x93\xef\xbc\x8c\xe6\x94\xaf\xe6\x8c\x81 --filter \xe5\x92\x8c\xe5\xbf\xab\xe6\x8d\xb7\xe6\x93\x8d\xe4\xbd\x9c") | color(theme.dim_color),
     }));
     lines.push_back(hbox({
         text("     /solve <id>") | bold | color(theme.prompt_color),
@@ -316,7 +328,7 @@ Element render_list_view(const AppState& state, const TuiTheme& theme) {
         text("   \xe9\xa2\x98\xe5\xba\x93") | bold | color(theme.heading_color),
         text("  ") | color(theme.dim_color),
         text("\xe7\xad\x9b\xe9\x80\x89: ") | color(theme.dim_color),
-        text(ls.filter) | bold | color(theme.accent_color),
+        text(filter_label(ls.filter)) | bold | color(theme.accent_color),
         filler(),
         text("Esc \xe8\xbf\x94\xe5\x9b\x9e") | color(theme.dim_color),
         text("  "),
@@ -395,7 +407,7 @@ Element render_list_view(const AppState& state, const TuiTheme& theme) {
         text("  d") | bold | color(theme.dim_color),
         text(" \xe5\x88\xa0\xe9\x99\xa4") | color(theme.dim_color),
         text("  f") | bold | color(theme.dim_color),
-        text(" \xe7\xad\x9b\xe9\x80\x89") | color(theme.dim_color),
+        text(" \xe7\xad\x9b\xe9\x80\x89(All/AC/Failed/Unaudited/Review)") | color(theme.dim_color),
         filler(),
         text(std::to_string(ls.selected + 1) + "/" + std::to_string(ls.rows.size()) + " ") | color(theme.dim_color),
     }));
