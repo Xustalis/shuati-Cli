@@ -29,7 +29,9 @@ jobs:
           chmod +x ./actionlint
       - name: Lint workflows
         shell: bash
-        run: ./actionlint -no-color -shellcheck "" -pyflakes ""
+        # Use actionlint's recommended empty-string form to disable external linters
+        # and avoid command-line flag parsing issues.
+        run: ./actionlint -shellcheck= -pyflakes=
 
   release_tools:
     runs-on: ubuntu-latest

@@ -11,12 +11,47 @@
 #include <system_error>
 #include <cstdlib>
 #include <random>
+#include <cctype>
 #include "shuati/utils/encoding.hpp"
 
 
 namespace shuati {
 
 namespace fs = std::filesystem;
+
+static std::string resolve_executable_in_path(const std::string& name) {
+    const char* path_env = std::getenv("PATH");
+    if (!path_env) return {};
+
+    std::string path_str(path_env);
+#ifdef _WIN32
+    char delimiter = ';';
+    std::vector<std::string> candidates = {name, name + ".exe"};
+#else
+    char delimiter = ':';
+    std::vector<std::string> candidates = {name};
+#endif
+
+    std::istringstream iss(path_str);
+    std::string dir;
+    while (std::getline(iss, dir, delimiter)) {
+        if (dir.empty()) continue;
+        for (const auto& cand : candidates) {
+            fs::path full = fs::path(dir) / cand;
+            std::error_code ec;
+            if (fs::exists(full, ec) && !fs::is_directory(full, ec)) {
+                return shuati::utils::path_to_utf8(full);
+            }
+        }
+    }
+    return {};
+}
+
+static std::string resolve_python_executable() {
+    auto p = resolve_executable_in_path("python");
+    if (!p.empty()) return p;
+    return resolve_executable_in_path("python3");
+}
 
 // RAII helper for temporary files
 class TempFile {
@@ -70,13 +105,20 @@ JudgeResult Judge::run_prepared(const std::string& executable,
 
 void Judge::cleanup_prepared(const std::string& executable, const std::string& language) {
     if (language == "cpp" || language == "c++") {
-        if (fs::exists(executable)) fs::remove(executable);
+        fs::path exe_path = shuati::utils::utf8_path(executable);
+        if (fs::exists(exe_path)) fs::remove(exe_path);
     }
 }
 
 std::string Judge::compile(const std::string& source_file, const std::string& language) {
     if (language == "python" || language == "py") {
-        return "python \"" + source_file + "\""; 
+        // For sandbox compatibility, return a marker.
+        // The runner will resolve `python` executable from PATH and pass the script as argv[0]/arg0.
+        // The runner will set executable to `python` and pass the script as argv[0]/arg0.
+        if (source_file.find_first_of("&|;><$`\n\r\"") != std::string::npos) {
+            throw std::runtime_error("Invalid source file path (contains shell metacharacters): " + source_file);
+        }
+        return std::string("PYTHON:") + source_file;
     }
 
     if (language == "cpp" || language == "c++") {
@@ -87,7 +129,14 @@ std::string Judge::compile(const std::string& source_file, const std::string& la
         }
 
         fs::path src = shuati::utils::utf8_path(source_file);
-        std::string exe = shuati::utils::path_to_utf8(src.replace_extension(".exe"));
+        // Use absolute path so execvp() on Linux can locate the binary
+        // (execvp only searches PATH for bare names without '/'; CWD is not searched).
+        fs::path abs_src = fs::absolute(src);
+#ifdef _WIN32
+        std::string exe = shuati::utils::path_to_utf8(abs_src.replace_extension(".exe"));
+#else
+        std::string exe = shuati::utils::path_to_utf8(abs_src.replace_extension(""));
+#endif
         
 #ifdef _WIN32
         const char* null_dev = "nul";
@@ -216,10 +265,36 @@ JudgeResult Judge::run_case(const std::string& executable,
     limits.cpu_time_ms = time_limit_ms;
     limits.memory_mb = memory_limit_kb / 1024;
 
-    std::vector<std::string> args; 
+    std::vector<std::string> args;
+    std::string executable_program = executable;
+
+    // Interpreted languages marker-based execution.
+    constexpr const char* py_prefix = "PYTHON:";
+    std::string python_script;
+    if (executable.rfind(py_prefix, 0) == 0) {
+        python_script = executable.substr(std::string(py_prefix).size());
+    } else {
+        auto ext = fs::path(executable).extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(),
+                       [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+        if (ext == ".py" || ext == ".pyw") {
+            python_script = executable;
+        }
+    }
+
+    if (!python_script.empty()) {
+        std::string py_exe = resolve_python_executable();
+        if (py_exe.empty()) {
+            res.verdict = Verdict::SE;
+            res.message = "python executable not found in PATH";
+            return res;
+        }
+        executable_program = py_exe;
+        args.push_back(python_script); // script path
+    }
 
     auto sb_res = sb->execute(
-        executable,
+        executable_program,
         args,
         in_file.path(),
         out_file.path(),
@@ -289,6 +364,11 @@ JudgeResult Judge::run_process_redirect(const std::string& cmd,
             rest = rest.substr(1, rest.size() - 2);
         }
         args.push_back(rest);
+    }
+
+    if (executable == "python" || executable == "python3") {
+        std::string resolved = resolve_python_executable();
+        if (!resolved.empty()) executable = resolved;
     }
 
     shuati::TempFile err_file(".err");

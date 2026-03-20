@@ -131,6 +131,7 @@ terminals/
 *.err
 *.ans
 build.log
+debug.log
 build_error.txt
 
 # Stray solution files
@@ -138,5 +139,15 @@ build_error.txt
 *_luogu*.cpp
 *_codeforces*.cpp
 
+# Windows build artifacts (case variations)
+*.EXE
+
 # Old release notes
 RELEASE_NOTES_*.md
+
+# Local tools (not shipped with the project)
+actionlint_bin/
+actionlint.zip
+
+# Internal next-version development documents
+v*.*.?_*.md

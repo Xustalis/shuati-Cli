@@ -68,7 +68,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libcurl4-openssl-dev libx11-dev libxt-dev \
-            libgl1-mesa-dev xorg-dev ninja-build
+            libgl1-mesa-dev xorg-dev ninja-build g++
 
       - name: Setup CMake
         uses: jwlawson/actions-setup-cmake@v2
@@ -107,7 +107,13 @@ jobs:
 
       - name: Test
         shell: bash
-        run: ctest --test-dir build -C Release --output-on-failure --parallel 4
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            ctest --test-dir build -C Release --output-on-failure --parallel 4
+          else
+            # Ninja single-config doesn't use -C (multi-config) selection.
+            ctest --test-dir build --output-on-failure --parallel 4
+          fi
 
       - name: Package Artifacts
         shell: bash

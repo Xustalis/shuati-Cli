@@ -44,11 +44,15 @@ public:
 
         bool use_bwrap = has_bwrap();
 
-        // Check executable exists
-        struct stat st;
-        if (stat(executable_path.c_str(), &st) != 0) {
-            result.internal_message = "Executable not found: " + executable_path;
-            return result;
+        // Check executable exists only when an explicit path is provided.
+        // For commands like "python" we should rely on PATH lookup (execvp).
+        bool needs_stat = executable_path.find('/') != std::string::npos;
+        if (needs_stat) {
+            struct stat st;
+            if (stat(executable_path.c_str(), &st) != 0) {
+                result.internal_message = "Executable not found: " + executable_path;
+                return result;
+            }
         }
 
         pid_t pid = fork();
@@ -122,7 +126,8 @@ public:
             if (use_bwrap) {
                 execvp("bwrap", const_cast<char* const*>(c_args.data()));
             } else {
-                execv(executable_path.c_str(), const_cast<char* const*>(c_args.data()));
+                // execvp performs PATH lookup for relative/command-only executables.
+                execvp(executable_path.c_str(), const_cast<char* const*>(c_args.data()));
             }
             
             // If exec fails

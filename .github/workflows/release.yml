@@ -62,7 +62,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libcurl4-openssl-dev libx11-dev libxt-dev libgl1-mesa-dev xorg-dev ninja-build
+          sudo apt-get install -y libcurl4-openssl-dev libx11-dev libxt-dev libgl1-mesa-dev xorg-dev ninja-build g++
 
       - name: Setup CMake
         uses: jwlawson/actions-setup-cmake@v2
@@ -101,15 +101,34 @@ jobs:
 
       - name: Test
         shell: bash
-        run: ctest --test-dir build -C Release --output-on-failure
+        run: |
+          set -o pipefail
+          # On Linux (Ninja single-config), don't force -C Release.
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            ctest --test-dir build -C Release --output-on-failure 2>&1 | tee ctest_output.txt
+          else
+            ctest --test-dir build --output-on-failure 2>&1 | tee ctest_output.txt
+          fi
+
+      - name: Upload CTest output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-${{ runner.os }}-${{ github.ref_name }}
+          path: |
+            ctest_output.txt
 
       - name: Smoke Test
         shell: bash
         run: |
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            vcpkg_bin="$(find build/vcpkg_installed -path '*/bin' -type d 2>/dev/null | head -1)"
-            [ -n "$vcpkg_bin" ] && export PATH="$vcpkg_bin:$PATH"
-            build/Release/shuati.exe --help
+            # Keep runtime DLL lookup deterministic on windows-latest.
+            if [[ -d "build/vcpkg_installed/x64-windows/bin" ]]; then
+              export PATH="$(pwd)/build/vcpkg_installed/x64-windows/bin:$PATH"
+            elif [[ -d "vcpkg_installed/x64-windows/bin" ]]; then
+              export PATH="$(pwd)/vcpkg_installed/x64-windows/bin:$PATH"
+            fi
+            ./build/Release/shuati.exe --help
             mkdir -p smoke && (cd smoke && ../build/Release/shuati.exe init)
           else
             ./build/shuati --help
@@ -255,6 +274,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          if ! command -v gh >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y gh
+          fi
           tag="${GITHUB_REF_NAME}"
           shopt -s nullglob
           files=()
