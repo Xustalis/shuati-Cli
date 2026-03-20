@@ -133,7 +133,11 @@ std::string Judge::compile(const std::string& source_file, const std::string& la
         // (execvp only searches PATH for bare names without '/'; CWD is not searched).
         fs::path abs_src = fs::absolute(src);
 #ifdef _WIN32
-        std::string exe = shuati::utils::path_to_utf8(abs_src.replace_extension(".exe"));
+        // On Windows, MinGW g++ / ld.exe via _wsystem struggles with Unicode characters in the output path.
+        // We override the executable name to be ASCII-safe using a timestamp.
+        auto now = std::chrono::system_clock::now().time_since_epoch().count();
+        std::string safe_name = fmt::format("shuati_build_{}.exe", now);
+        std::string exe = shuati::utils::path_to_utf8(abs_src.replace_filename(safe_name));
 #else
         std::string exe = shuati::utils::path_to_utf8(abs_src.replace_extension(""));
 #endif
