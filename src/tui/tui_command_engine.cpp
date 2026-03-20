@@ -10,6 +10,7 @@
 #include <sstream>
 #include <streambuf>
 #include <string>
+#include <mutex>
 #include <vector>
 #include <thread>
 
@@ -33,6 +34,9 @@ protected:
         if (std::this_thread::get_id() == cmd_thread_id_) {
             if (c != EOF) {
                 char ch = static_cast<char>(c);
+                // Treat carriage-return as line overwrite boundary.
+                // We convert it into '\n' so UI streaming can flush promptly.
+                if (ch == '\r') ch = '\n';
                 buf_ += ch;
                 if (ch == '\n' || buf_.size() >= 256) flush_buf();
             }
@@ -45,10 +49,14 @@ protected:
 
     std::streamsize xsputn(const char* s, std::streamsize n) override {
         if (std::this_thread::get_id() == cmd_thread_id_) {
-            buf_.append(s, static_cast<size_t>(n));
-            auto pos = buf_.rfind('\n');
-            if (pos != std::string::npos) flush_buf();
-            else if (buf_.size() >= 512) flush_buf();
+            for (std::streamsize i = 0; i < n; i++) {
+                char ch = s[i];
+                if (ch == '\r') ch = '\n';
+                buf_.push_back(ch);
+                if (ch == '\n' || buf_.size() >= 512) {
+                    flush_buf();
+                }
+            }
             return n;
         } else if (real_buf_) {
             return real_buf_->sputn(s, n);
@@ -77,6 +85,12 @@ private:
     std::thread::id cmd_thread_id_;
     std::string buf_;
 };
+
+// Serialize global std::cout/std::cerr rdbuf swapping across threads.
+static std::mutex& stream_redirect_mutex() {
+    static std::mutex mu;
+    return mu;
+}
 
 // ---------------------------------------------------------------------------
 // RAII guard that installs CallbackStreamBuf on cout+cerr for scope duration.
@@ -260,6 +274,7 @@ std::string tui_execute_command_capture(const std::vector<std::string>& args,
 
     std::string accumulated;
     {
+        std::lock_guard<std::mutex> lk(stream_redirect_mutex());
         ScopedStreamRedirect redir([&accumulated](const std::string& chunk) {
             accumulated += chunk;
         });
@@ -302,6 +317,7 @@ void tui_execute_command_stream(const std::vector<std::string>& args,
     }
 
     {
+        std::lock_guard<std::mutex> lk(stream_redirect_mutex());
         ScopedStreamRedirect redir(stream_cb);
 
         try {

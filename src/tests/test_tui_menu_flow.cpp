@@ -99,5 +99,10 @@ int main() {
         assert(hs.command_history.size() == 2);
     }
 
+    {
+        AppState ls;
+        assert(ls.list_state.filter == "all");
+    }
+
     return 0;
 }

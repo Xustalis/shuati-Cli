@@ -122,8 +122,8 @@ static std::string build_problem_text(const Problem& prob) {
     desc += "难度: " + ensure_utf8(prob.difficulty) + "\n";
     desc += "URL: " + ensure_utf8(prob.url) + "\n\n";
 
-    if (!prob.content_path.empty() && fs::exists(prob.content_path)) {
-        std::ifstream f(prob.content_path, std::ios::in | std::ios::binary);
+    if (!prob.content_path.empty() && fs::exists(shuati::utils::utf8_path(prob.content_path))) {
+        std::ifstream f(shuati::utils::utf8_path(prob.content_path), std::ios::in | std::ios::binary);
         std::string body(std::istreambuf_iterator<char>(f), {});
         if (!body.empty()) {
             desc += body.substr(0, 9000);
@@ -399,8 +399,8 @@ void cmd_test(CommandContext& ctx) {
              
              // Gather info
              std::string code;
-             if (fs::exists(src_file)) {
-                 std::ifstream f(src_file);
+             if (fs::exists(shuati::utils::utf8_path(src_file))) {
+                 std::ifstream f(shuati::utils::utf8_path(src_file));
                  code.assign(std::istreambuf_iterator<char>(f), {});
              }
 

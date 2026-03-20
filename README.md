@@ -11,7 +11,7 @@
 
 **专为 OIer 和 Coder 打造的本地化、智能化命令行刷题工具**
 
-[![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
+[![Version](https://img.shields.io/badge/version-0.1.1-green.svg)](https://github.com/Xustalis/shuati-Cli/releases)
 [![CI](https://github.com/Xustalis/shuati-Cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Xustalis/shuati-Cli/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![C++20](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
@@ -26,7 +26,7 @@
 
 Shuati CLI 是一款专为算法爱好者设计的命令行工具。它能从各大 OJ 平台自动拉取题目，接管你的 **编码 -> 测试 -> 提交** 工作流，更引入了 AI 辅助诊断和 SM2 记忆曲线，高效管理算法练习题、追踪学习进度、自动分析错题，让刷题更加智能化。
 
-> **v0.1.0 新亮点：** 首次引入基于 FTXUI 的 TUI 终端界面，运行 `shuati tui` 即可体验沉浸式全屏交互。详见 [TUI 交互模式](#tui-交互模式)。
+> **v0.1.1 更新亮点：** 强化 TUI 稳定性与可用性（避免退出后崩溃、完善滚动与流式输出）；同时修复 `python` 判题在 TUI/测试流程中的功能障碍。详见 [TUI 交互模式](#tui-交互模式)。
 
 ## 15分钟快速上手
 
@@ -110,7 +110,7 @@ graph LR
 
 ## TUI 交互模式
 
-v0.1.0 首次引入基于 FTXUI 的沉浸式终端界面：
+v0.1.1 强化后的 TUI 交互体验：
 
 ```bash
 shuati tui

@@ -13,7 +13,11 @@
 #include <ftxui/dom/elements.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <functional>
 #include <ctime>
+#include <memory>
+#include <unordered_set>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -189,21 +193,65 @@ void save_config_state(AppState& state) {
     state.config_state.status_msg = "\xe9\x85\x8d\xe7\xbd\xae\xe5\xb7\xb2\xe4\xbf\x9d\xe5\xad\x98\xe3\x80\x82";
 }
 
-void load_list_state(AppState& state) {
+std::vector<Problem> filter_problems_for_list(Database& db,
+                                              std::vector<Problem> problems,
+                                              const std::string& filter) {
+    if (filter.empty() || filter == "all") return problems;
+
+    if (filter == "review") {
+        auto reviews = db.get_due_reviews(std::time(nullptr));
+        std::unordered_set<std::string> due_ids;
+        for (const auto& review : reviews) due_ids.insert(review.problem_id);
+
+        problems.erase(std::remove_if(problems.begin(), problems.end(),
+            [&](const Problem& problem) {
+                return due_ids.find(problem.id) == due_ids.end();
+            }), problems.end());
+        return problems;
+    }
+
+    problems.erase(std::remove_if(problems.begin(), problems.end(),
+        [&](const Problem& problem) {
+            if (filter == "ac") return problem.last_verdict != "AC";
+            if (filter == "failed") return problem.last_verdict == "AC" || problem.last_verdict.empty();
+            if (filter == "unaudited") return !problem.last_verdict.empty();
+            return false;
+        }), problems.end());
+    return problems;
+}
+
+std::string next_list_filter(const std::string& filter) {
+    if (filter == "all") return "ac";
+    if (filter == "ac") return "failed";
+    if (filter == "failed") return "unaudited";
+    if (filter == "unaudited") return "review";
+    return "all";
+}
+
+std::string normalize_list_filter(const std::string& filter) {
+    if (filter == "all" || filter == "ac" || filter == "failed" ||
+        filter == "unaudited" || filter == "review") {
+        return filter;
+    }
+    return {};
+}
+
+void load_list_state(AppState& state, const std::string& filter = "all") {
     auto root = Config::find_root();
+    state.list_state.filter = filter;
     if (root.empty()) {
         state.list_state.error = "\xe6\x9c\xaa\xe6\x89\xbe\xe5\x88\xb0 .shuati \xe9\xa1\xb9\xe7\x9b\xae\xef\xbc\x8c\xe8\xaf\xb7\xe5\x85\x88\xe8\xbf\x90\xe8\xa1\x8c /init";
+        state.list_state.rows.clear();
         state.list_state.loaded = true;
         return;
     }
     try {
         Database db(Config::db_path(root).string());
-        auto problems = db.get_all_problems();
+        auto problems = filter_problems_for_list(db, db.get_all_problems(), filter);
         state.list_state.rows.clear();
-        int tid = 1;
         for (const auto& p : problems) {
             ListState::Row row;
-            row.tid        = tid++;
+            row.tid        = p.display_id;
             row.id         = p.id;
             row.title      = p.title;
             row.difficulty = p.difficulty;
@@ -225,6 +273,7 @@ void load_list_state(AppState& state) {
         state.list_state.selected = 0;
         state.list_state.error.clear();
     } catch (const std::exception& e) {
+        state.list_state.rows.clear();
         state.list_state.error = std::string("\xe6\x95\xb0\xe6\x8d\xae\xe5\xba\x93\xe9\x94\x99\xe8\xaf\xaf: ") + e.what();
     }
     state.list_state.loaded = true;
@@ -235,6 +284,17 @@ bool is_error_output(const std::string& text) {
     return text.starts_with("[Error]") ||
            text.starts_with("[!]") ||
            text.starts_with("Error:");
+}
+
+LineType classify_output_line(const std::string& text) {
+    if (text.empty()) return LineType::Output;
+    if (is_error_output(text)) return LineType::Error;
+    if (text.starts_with("[+]") || text.starts_with("[*]") ||
+        text.starts_with("[Hint]") || text.starts_with("[TUI]") ||
+        text.starts_with("[Coach]")) {
+        return LineType::System;
+    }
+    return LineType::Output;
 }
 
 } // namespace
@@ -260,7 +320,14 @@ int TuiApp::run() {
         if (!root.empty()) project_path = root.string();
     }
 
+    auto alive = std::make_shared<std::atomic_bool>(true);
+    std::vector<std::thread> workers;
+
     auto quit = [&] {
+        alive->store(false);
+        state.pending_commands.clear();
+        state.is_running = false;
+        state.active_command.clear();
         screen.ExitLoopClosure()();
     };
 
@@ -268,14 +335,17 @@ int TuiApp::run() {
         screen.Post(std::move(task));
     };
 
-    auto run_command = [&](const std::string& line) {
+    auto run_command_ptr = std::make_shared<std::function<void(const std::string&, bool)>>();
+    *run_command_ptr = [&](const std::string& line, bool record_input) {
         std::string trimmed = line;
         while (!trimmed.empty() && trimmed.front() == ' ') trimmed.erase(trimmed.begin());
         while (!trimmed.empty() && trimmed.back() == ' ') trimmed.pop_back();
         if (trimmed.empty()) return;
 
-        state.push_history(trimmed);
-        state.append(LineType::Input, trimmed);
+        if (record_input) {
+            state.push_history(trimmed);
+            state.append(LineType::Input, trimmed);
+        }
 
         std::string normalized = trimmed;
         if (!normalized.empty() && normalized.front() == '/') normalized.erase(normalized.begin());
@@ -306,31 +376,57 @@ int TuiApp::run() {
             return;
         }
 
-        if (base_cmd == "list" && args.size() == 2) {
-            load_list_state(state);
+        if (base_cmd == "list") {
+            std::string requested_filter = state.list_state.filter.empty() ? "all" : state.list_state.filter;
+            if (args.size() == 4 && (args[2] == "--filter" || args[2] == "-f")) {
+                auto normalized_filter = normalize_list_filter(args[3]);
+                if (normalized_filter.empty()) {
+                    state.append(LineType::Error,
+                        "Invalid list filter. Use all/ac/failed/unaudited/review.");
+                    return;
+                }
+                requested_filter = normalized_filter;
+            } else if (args.size() != 2) {
+                state.append(LineType::Error,
+                    "Usage: /list [--filter all|ac|failed|unaudited|review]");
+                return;
+            }
+
+            load_list_state(state, requested_filter);
             state.view_mode = ViewMode::ListView;
             return;
         }
 
         if (base_cmd == "hint") {
+            if (state.is_running) {
+                state.pending_commands.push_back(trimmed);
+                return;
+            }
             state.hint_state = HintState{};
             state.hint_state.loading = true;
             state.view_mode = ViewMode::HintView;
+            state.is_running = true;
+            state.active_command = base_cmd;
 
-            std::thread([&screen, &state, args = std::move(args), base_cmd]() mutable {
-                auto cb = [&screen, &state](const std::string& chunk) {
+            workers.emplace_back([alive, run_command_ptr, &screen, &state, args = std::move(args), base_cmd]() mutable {
+                auto cb = [alive, &screen, &state](const std::string& chunk) {
+                    if (!alive->load()) return;
                     screen.Post([&state, chunk]() {
+                        std::string lines = chunk;
+                        for (auto& c : lines) {
+                            if (c == '\r') c = '\n';
+                        }
                         state.hint_state.loading = false;
                         std::string::size_type start = 0;
-                        while (start < chunk.size()) {
-                            auto nl = chunk.find('\n', start);
+                        while (start < lines.size()) {
+                            auto nl = lines.find('\n', start);
                             if (nl == std::string::npos) {
                                 if (state.hint_state.lines.empty()) state.hint_state.lines.push_back("");
-                                state.hint_state.lines.back() += chunk.substr(start);
+                                state.hint_state.lines.back() += lines.substr(start);
                                 break;
                             }
                             if (state.hint_state.lines.empty()) state.hint_state.lines.push_back("");
-                            state.hint_state.lines.back() += chunk.substr(start, nl - start);
+                            state.hint_state.lines.back() += lines.substr(start, nl - start);
                             state.hint_state.lines.push_back("");
                             start = nl + 1;
                         }
@@ -339,13 +435,22 @@ int TuiApp::run() {
                     });
                 };
                 tui_execute_command_stream(args, base_cmd, cb);
-                screen.Post([&state] {
+                if (!alive->load()) return;
+                auto run_command_ptr_local = run_command_ptr;
+                screen.Post([&state, run_command_ptr_local] {
                     state.hint_state.loading = false;
+                    state.is_running = false;
+                    state.active_command.clear();
                     if (state.hint_state.lines.empty() && state.hint_state.error.empty()) {
                         state.hint_state.error = "\xe6\x9c\xaa\xe8\x8e\xb7\xe5\x8f\x96\xe5\x88\xb0\xe6\x8f\x90\xe7\xa4\xba\xe5\x86\x85\xe5\xae\xb9\xe3\x80\x82";
                     }
+                    if (!state.pending_commands.empty()) {
+                        auto next = state.pending_commands.front();
+                        state.pending_commands.pop_front();
+                        (*run_command_ptr_local)(next, false);
+                    }
                 });
-            }).detach();
+            });
             return;
         }
 
@@ -358,17 +463,25 @@ int TuiApp::run() {
             return;
         }
 
+        if (state.is_running) {
+            state.pending_commands.push_back(trimmed);
+            return;
+        }
         state.is_running = true;
         state.active_command = base_cmd;
 
-        std::thread([&screen, &state, args = std::move(args), base_cmd]() mutable {
+        workers.emplace_back([alive, run_command_ptr, &screen, &state, args = std::move(args), base_cmd]() mutable {
             // Use streaming for all real commands so output appears incrementally.
             std::string accumulated;
-            auto cb = [&screen, &state, &accumulated](const std::string& chunk) {
+            auto cb = [alive, &screen, &state, &accumulated](const std::string& chunk) {
                 accumulated += chunk;
                 // Post each chunk to TUI for live update
+                if (!alive->load()) return;
                 screen.Post([&state, chunk]() {
-                    auto lines = chunk;
+                    std::string lines = chunk;
+                    for (auto& c : lines) {
+                        if (c == '\r') c = '\n';
+                    }
                     // Split and append each line
                     std::string::size_type start = 0;
                     while (start < lines.size()) {
@@ -377,7 +490,7 @@ int TuiApp::run() {
                             ? lines.substr(start)
                             : lines.substr(start, nl - start);
                         if (!seg.empty() || nl != std::string::npos) {
-                            state.buffer.push_back({LineType::Output, seg});
+                            state.buffer.push_back({classify_output_line(seg), seg});
                         }
                         if (nl == std::string::npos) break;
                         start = nl + 1;
@@ -388,11 +501,18 @@ int TuiApp::run() {
 
             tui_execute_command_stream(args, base_cmd, cb);
 
-            screen.Post([&state]() {
+            if (!alive->load()) return;
+            auto run_command_ptr_local = run_command_ptr;
+            screen.Post([&state, run_command_ptr_local]() {
                 state.is_running = false;
                 state.active_command.clear();
+                if (!state.pending_commands.empty()) {
+                    auto next = state.pending_commands.front();
+                    state.pending_commands.pop_front();
+                    (*run_command_ptr_local)(next, false);
+                }
             });
-        }).detach();
+        });
     };
 
     // --- Component tree ---
@@ -412,7 +532,7 @@ int TuiApp::run() {
         cursor_pos = 0;
         state.is_autocomplete_open = false;
         state.history_index = -1;
-        run_command(cmd);
+        (*run_command_ptr)(cmd, true);
     };
 
     auto input_comp = Input(&state.input, "", input_opt);
@@ -501,9 +621,7 @@ int TuiApp::run() {
                 return true;
             }
             if (event == Event::Character('f')) {
-                if (ls.filter == "all") ls.filter = "AC";
-                else if (ls.filter == "AC") ls.filter = "WA";
-                else ls.filter = "all";
+                load_list_state(state, next_list_filter(ls.filter));
                 return true;
             }
             auto get_selected_tid = [&]() -> std::string {
@@ -513,28 +631,28 @@ int TuiApp::run() {
             };
             if (event == Event::Return && !ls.rows.empty()) {
                 state.view_mode = ViewMode::Main;
-                run_command("/solve " + get_selected_tid());
+                (*run_command_ptr)("/solve " + get_selected_tid(), true);
                 return true;
             }
             if (event == Event::Character('t') && !ls.rows.empty()) {
                 state.view_mode = ViewMode::Main;
-                run_command("/test " + get_selected_tid());
+                (*run_command_ptr)("/test " + get_selected_tid(), true);
                 return true;
             }
             if (event == Event::Character('v') && !ls.rows.empty()) {
                 state.view_mode = ViewMode::Main;
-                run_command("/view " + get_selected_tid());
+                (*run_command_ptr)("/view " + get_selected_tid(), true);
                 return true;
             }
             if (event == Event::Character('d') && !ls.rows.empty()) {
                 state.view_mode = ViewMode::Main;
-                run_command("/delete " + get_selected_tid());
+                (*run_command_ptr)("/delete " + get_selected_tid(), true);
                 return true;
             }
             if (event == Event::Character('h') && !ls.rows.empty()) {
                 auto tid = get_selected_tid();
                 state.view_mode = ViewMode::Main;
-                run_command("/hint " + tid);
+                (*run_command_ptr)("/hint " + tid, true);
                 return true;
             }
             return true;
@@ -640,7 +758,7 @@ int TuiApp::run() {
 
         // Buffer scroll
         if (event == Event::PageUp || event == Event::Special("\x1B[5~")) {
-            int max_scroll = std::max(0, static_cast<int>(state.buffer.size()) - 10);
+            int max_scroll = std::max(0, static_cast<int>(state.buffer.size()) - 20);
             state.scroll_offset = std::min(state.scroll_offset + 5, max_scroll);
             return true;
         }
@@ -740,6 +858,10 @@ int TuiApp::run() {
     });
 
     screen.Loop(renderer);
+    alive->store(false);
+    for (auto& t : workers) {
+        if (t.joinable()) t.join();
+    }
     return 0;
 }
 

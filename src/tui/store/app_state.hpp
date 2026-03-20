@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <deque>
 #include <functional>
 
 namespace shuati {
@@ -79,6 +80,10 @@ struct AppState {
 
     bool is_running = false;
     std::string active_command;
+
+    // Commands waiting for the currently running command to finish.
+    // Only the TUI main thread mutates this; worker threads update UI via screen.Post.
+    std::deque<std::string> pending_commands;
 
     std::function<void(std::function<void()>)> post_task = [](std::function<void()>) {};
 
