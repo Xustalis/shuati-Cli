@@ -180,7 +180,7 @@ Element render_welcome(const TuiTheme& theme) {
     lines.push_back(text("   \xe8\xbe\x93\xe5\x85\xa5 / \xe5\xbc\x80\xe5\xa4\xb4\xe7\x9a\x84\xe5\x91\xbd\xe4\xbb\xa4, Tab \xe8\xa1\xa5\xe5\x85\xa8, \xe2\x86\x91\xe2\x86\x93 \xe5\x8e\x86\xe5\x8f\xb2\xe8\xae\xb0\xe5\xbd\x95") | color(theme.dim_color));
     lines.push_back(text(""));
 
-    return vbox(std::move(lines));
+    return vbox(std::move(lines)) | center;
 }
 
 Element render_top_bar(const TuiTheme& theme, const std::string& version, const std::string& project_path) {

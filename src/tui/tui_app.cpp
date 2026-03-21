@@ -863,7 +863,7 @@ int TuiApp::run() {
                 render_config_view(state, theme) | flex,
                 separator_line,
                 bottom_bar,
-            });
+            }) | borderStyled(ROUNDED);
         }
         if (state.view_mode == ViewMode::ListView) {
             return vbox({
@@ -872,7 +872,7 @@ int TuiApp::run() {
                 render_list_view(state, theme) | flex,
                 separator_line,
                 bottom_bar,
-            });
+            }) | borderStyled(ROUNDED);
         }
         if (state.view_mode == ViewMode::HintView) {
             return vbox({
@@ -881,7 +881,7 @@ int TuiApp::run() {
                 render_hint_view(state, theme) | flex,
                 separator_line,
                 bottom_bar,
-            });
+            }) | borderStyled(ROUNDED);
         }
 
         // --- Main view ---
@@ -931,7 +931,7 @@ int TuiApp::run() {
             input_line,
             separator_line,
             bottom_bar,
-        });
+        }) | borderStyled(ROUNDED);
     });
 
     screen.Loop(renderer);
