@@ -94,23 +94,13 @@ Element render_welcome(const TuiTheme& theme) {
     auto accent = theme.accent_color;
     auto dim = theme.dim_color;
 
+    // Cute panda mascot
     auto panda_mascot = vbox({
-        text("  \xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x97") | bold | color(panda_black),
-        hbox({
-            text("  \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\xa3") | color(panda_black),
-            text("     ") | color(panda_white),
-            text("\xe2\x95\xa0\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d  ") | color(panda_black),
-        }),
-        hbox({
-            text("     \xe2\x95\x91 ") | color(panda_white),
-            text("\xe2\x97\x8f") | bold | color(panda_black),
-            text(" \xe2\x96\xbd ") | color(panda_black),
-            text("\xe2\x97\x8f") | bold | color(panda_black),
-            text(" \xe2\x95\x91     ") | color(panda_white),
-        }),
-        hbox({
-            text("     \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d     ") | color(panda_white),
-        }),
+        text("    (\xe2\x97\x8f)(  )(  )(\xe2\x97\x8f)") | bold | color(panda_black),
+        text("   (  \xe2\x96\x88\xe2\x96\x88      \xe2\x96\x88\xe2\x96\x88  )") | color(panda_white),
+        text("   ( \xe2\x96\x88\xe2\x97\x8b\xe2\x96\x88  \xe2\x96\xbc  \xe2\x96\x88\xe2\x97\x8b\xe2\x96\x88 )") | color(panda_white),
+        text("    (    \xe2\x80\xa2\xcf\x89\xe2\x80\xa2    )") | color(panda_white),
+        text("     \\  \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80  /") | color(panda_white),
     });
 
     auto left_col = vbox({
