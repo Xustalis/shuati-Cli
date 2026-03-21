@@ -100,17 +100,16 @@ std::string find_solution_file(const Problem& prob, const std::string& language)
     auto fallback = root / ".shuati" / "problems" / prob.id / ("solution" + ext);
     if (fs::exists(fallback)) return fallback.string();
     
-    // 3. Fallbacks in cwd
-    std::string old_uuid = "solution_" + prob.id + ext;
-    if (fs::exists(shuati::utils::utf8_path(old_uuid))) return old_uuid;
-    
+    // 3. Old display_id structure (also relative to root, to prevent cwd dependence)
     std::string prefix = std::to_string(prob.display_id) + "_";
     try {
-        for (const auto& entry : fs::directory_iterator(".")) {
-            std::string name = entry.path().filename().string();
-            if (name.rfind(prefix, 0) == 0 && name.size() > ext.size() &&
-                name.substr(name.size() - ext.size()) == ext) {
-                return name;
+        if (fs::exists(root)) {
+            for (const auto& entry : fs::directory_iterator(root)) {
+                std::string name = entry.path().filename().string();
+                if (name.rfind(prefix, 0) == 0 && name.size() > ext.size() &&
+                    name.substr(name.size() - ext.size()) == ext) {
+                    return entry.path().string();
+                }
             }
         }
     } catch (...) {}

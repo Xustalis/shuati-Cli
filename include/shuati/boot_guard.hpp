@@ -22,10 +22,11 @@ public:
     // Records a successful project load
     static void record_history(const std::string& path);
 
-private:
     static std::vector<ProjectHistory> load_history();
-    static void save_history(const std::vector<ProjectHistory>& history);
     static std::filesystem::path get_history_file();
+
+private:
+    static void save_history(const std::vector<ProjectHistory>& history);
 };
 
 } // namespace shuati

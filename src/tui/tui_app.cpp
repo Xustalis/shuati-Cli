@@ -130,6 +130,7 @@ const std::unordered_map<std::string, CmdHint>& hint_table() {
         {"/help",   {"Enter \xe6\x9f\xa5\xe7\x9c\x8b\xe5\x85\xa8\xe9\x83\xa8\xe5\x8f\xaf\xe7\x94\xa8\xe5\x91\xbd\xe4\xbb\xa4\xe5\x8f\x8a\xe7\x94\xa8\xe6\xb3\x95", nullptr}},
         {"/?",      {"Enter \xe6\x9f\xa5\xe7\x9c\x8b\xe5\x85\xa8\xe9\x83\xa8\xe5\x8f\xaf\xe7\x94\xa8\xe5\x91\xbd\xe4\xbb\xa4\xe5\x8f\x8a\xe7\x94\xa8\xe6\xb3\x95", nullptr}},
         {"/init",   {"Enter \xe5\x9c\xa8\xe5\xbd\x93\xe5\x89\x8d\xe7\x9b\xae\xe5\xbd\x95\xe5\x88\x9d\xe5\xa7\x8b\xe5\x8c\x96 .shuati \xe9\xa1\xb9\xe7\x9b\xae\xe7\xbb\x93\xe6\x9e\x84", nullptr}},
+        {"/uninstall", {"Enter 查看并清除所有相关记录及 .shuati 文件夹", nullptr}},
         {"/info",   {"Enter \xe6\x98\xbe\xe7\xa4\xba\xe5\xbd\x93\xe5\x89\x8d\xe7\x8e\xaf\xe5\xa2\x83\xe5\x92\x8c\xe7\x89\x88\xe6\x9c\xac\xe4\xbf\xa1\xe6\x81\xaf", nullptr}},
         {"/clean",  {"Enter \xe6\xb8\x85\xe7\x90\x86\xe4\xb8\xb4\xe6\x97\xb6\xe6\x96\x87\xe4\xbb\xb6\xe5\x92\x8c\xe7\xbc\x93\xe5\xad\x98", nullptr}},
         {"/exit",   {"Enter \xe9\x80\x80\xe5\x87\xba\xe7\xa8\x8b\xe5\xba\x8f", nullptr}},
@@ -175,6 +176,10 @@ void load_config_state(AppState& state) {
     state.config_state.model          = cfg.model;
     state.config_state.ui_mode        = cfg.ui_mode;
     state.config_state.autostart_repl = cfg.autostart_repl;
+    state.config_state.max_tokens     = cfg.max_tokens;
+    state.config_state.ai_enabled     = cfg.ai_enabled;
+    state.config_state.template_enabled = cfg.template_enabled;
+    state.config_state.lanqiao_cookie = cfg.lanqiao_cookie;
     state.config_state.focused_field  = 0;
     state.config_state.status_msg.clear();
     state.config_state.loaded         = true;
@@ -193,6 +198,10 @@ void save_config_state(AppState& state) {
     cfg.model          = state.config_state.model;
     cfg.ui_mode        = state.config_state.ui_mode;
     cfg.autostart_repl = state.config_state.autostart_repl;
+    cfg.max_tokens     = state.config_state.max_tokens;
+    cfg.ai_enabled     = state.config_state.ai_enabled;
+    cfg.template_enabled = state.config_state.template_enabled;
+    cfg.lanqiao_cookie = state.config_state.lanqiao_cookie;
     cfg.save(Config::config_path(root));
     state.config_state.status_msg = "\xe9\x85\x8d\xe7\xbd\xae\xe5\xb7\xb2\xe4\xbf\x9d\xe5\xad\x98\xe3\x80\x82";
 }
@@ -606,6 +615,14 @@ int TuiApp::run() {
                     cs.autostart_repl = !cs.autostart_repl;
                     return true;
                 }
+                if (cs.focused_field == 7) {
+                    cs.ai_enabled = !cs.ai_enabled;
+                    return true;
+                }
+                if (cs.focused_field == 8) {
+                    cs.template_enabled = !cs.template_enabled;
+                    return true;
+                }
                 return true;
             }
             if (cs.focused_field >= 1 && cs.focused_field <= 3) {
@@ -626,6 +643,26 @@ int TuiApp::run() {
                         *target += event.character();
                         return true;
                     }
+                }
+            }
+            if (cs.focused_field == 6) { // max_tokens
+                if (event == Event::Backspace) {
+                    cs.max_tokens /= 10;
+                    return true;
+                }
+                if (event.is_character() && isdigit(event.character()[0])) {
+                    cs.max_tokens = cs.max_tokens * 10 + (event.character()[0] - '0');
+                    return true;
+                }
+            }
+            if (cs.focused_field == 9) { // lanqiao_cookie
+                if (event == Event::Backspace) {
+                    if (!cs.lanqiao_cookie.empty()) cs.lanqiao_cookie.pop_back();
+                    return true;
+                }
+                if (event.is_character()) {
+                    cs.lanqiao_cookie += event.character();
+                    return true;
                 }
             }
             return true;

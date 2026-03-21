@@ -31,15 +31,19 @@ struct ConfigState {
     std::string model;
     std::string ui_mode;
     bool autostart_repl = true;
+    int max_tokens = 4096;
+    bool ai_enabled = true;
+    bool template_enabled = true;
+    std::string lanqiao_cookie;
 
     int focused_field = 0;
     bool loaded = false;
     std::string status_msg;
 
-    static constexpr int FIELD_COUNT = 6;
-    static constexpr int SAVE_INDEX = 6;
-    static constexpr int CANCEL_INDEX = 7;
-    static constexpr int TOTAL_ITEMS = 8;
+    static constexpr int FIELD_COUNT = 10;
+    static constexpr int SAVE_INDEX = 10;
+    static constexpr int CANCEL_INDEX = 11;
+    static constexpr int TOTAL_ITEMS = 12;
 };
 
 struct ListState {

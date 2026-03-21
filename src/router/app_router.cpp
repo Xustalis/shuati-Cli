@@ -28,15 +28,21 @@ int AppRouter::route(int argc, char** argv) {
     }
 
     if (argc > 1) {
+        // Allow 'shuati config' to always run so users can rescue their config
+        if (std::string(argv[1]) != "config" && config_.ui_mode != "legacy") {
+            fmt::print(fg(fmt::color::yellow), "[!] CLI commands are disabled in TUI mode.\n");
+            fmt::print("    Please run without arguments to enter TUI, or run 'shuati config' to change ui_mode to 'legacy'.\n");
+            return 1;
+        }
         // Execute one-shot CLI command
         return execute_once_cli(argc, argv);
     }
 
     // No arguments interactive mode
-    if (config_.ui_mode == "tui") {
-        return launch_tui_app();
-    } else {
+    if (config_.ui_mode == "legacy") {
         return launch_legacy_repl();
+    } else {
+        return launch_tui_app();
     }
 }
 

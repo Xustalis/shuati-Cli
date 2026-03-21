@@ -66,6 +66,10 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
 
     app.add_subcommand("clean", "清理临时文件")->callback([&](){ cmd_clean(ctx); });
 
+    auto uninst = app.add_subcommand("uninstall", "清除所有记录与本地项目文件夹");
+    uninst->add_flag("--confirm", ctx.uninstall_confirm, "确认清除");
+    uninst->callback([&](){ cmd_uninstall(ctx); });
+
     auto login_cmd = app.add_subcommand("login", "配置平台登录凭据 (Cookie)");
     login_cmd->add_option("platform", ctx.login_platform, "平台名, 例如: lanqiao")->required();
     login_cmd->callback([&](){ cmd_login(ctx); });

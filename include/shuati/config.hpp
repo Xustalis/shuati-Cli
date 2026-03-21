@@ -26,7 +26,7 @@ struct Config {
     bool template_enabled = true;     // Enable template generation
     std::string lanqiao_cookie;       // Cookie for authenticated Lanqiao problem fetching
     bool autostart_repl = true;       // Auto-start REPL when running 'shuati' with no args
-    std::string ui_mode = "legacy";
+    std::string ui_mode = "tui";
 
     // --- Linux / cross-platform editor detection ---
     // Returns a best-guess editor command, checking $VISUAL, $EDITOR, then common editors in PATH.

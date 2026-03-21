@@ -306,6 +306,18 @@ Element render_config_view(const AppState& state, const TuiTheme& theme) {
     rows.push_back(render_toggle(5, "\xe8\x87\xaa\xe5\x8a\xa8\xe5\x90\xaf\xe5\x8a\xa8 REPL",
                                   cs.autostart_repl ? "on" : "off", "on", "off",
                                   "\xe5\x90\xaf\xe5\x8a\xa8\xe6\x97\xb6\xe8\x87\xaa\xe5\x8a\xa8\xe8\xbf\x9b\xe5\x85\xa5\xe4\xba\xa4\xe4\xba\x92\xe6\xa8\xa1\xe5\xbc\x8f"));
+    rows.push_back(text(""));
+    rows.push_back(render_text_field(6, "\xe6\x9c\x80\xe5\xa4\xa7 Token", std::to_string(cs.max_tokens), false,
+                                     "\xe8\xbe\x93\xe5\x85\xa5\xe6\x95\xb0\xe5\xad\x97 (e.g. 4096)"));
+    rows.push_back(text(""));
+    rows.push_back(render_toggle(7, "AI \xe5\x8a\x9f\xe8\x83\xbd\xe5\xbc\x80\xe5\x85\xb3",
+                                  cs.ai_enabled ? "on" : "off", "on", "off", "\xe6\x98\xaf\xe5\x90\xa6\xe5\x90\xaf\xe7\x94\xa8 AI \xe6\x8f\x90\xe7\xa4\xba"));
+    rows.push_back(text(""));
+    rows.push_back(render_toggle(8, "\xe6\xa8\xa1\xe6\x9d\xbf\xe7\x94\x9f\xe6\x88\x90\xe5\xbc\x80\xe5\x85\xb3",
+                                  cs.template_enabled ? "on" : "off", "on", "off", "\xe6\x98\xaf\xe5\x90\xa6\xe5\x90\xaf\xe7\x94\xa8\xe4\xbb\xa3\xe7\xa0\x81\xe6\xa8\xa1\xe6\x9d\xbf"));
+    rows.push_back(text(""));
+    rows.push_back(render_text_field(9, "\xe8\x93\x9d\xe6\xa1\xa5\xe6\x9d\xaf Cookie", cs.lanqiao_cookie, true,
+                                     "\xe8\x93\x9d\xe6\xa1\xa5\xe6\x9d\xaf Cookie (\xe7\x94\xa8\xe4\xba\x8e\xe6\x8a\x93\xe5\x8f\x96)"));
 
     rows.push_back(text(""));
     rows.push_back(text(""));

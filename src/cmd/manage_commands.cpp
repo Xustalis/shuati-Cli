@@ -1,8 +1,13 @@
 #include "commands.hpp"
+#include "shuati/boot_guard.hpp"
 #include "shuati/utils/encoding.hpp"
 #include <string>
 #include <iostream>
 #include <fstream>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace shuati {
 namespace cmd {
@@ -164,6 +169,79 @@ void cmd_clean(CommandContext& ctx) {
     } catch (const std::exception& e) {
         std::cerr << "[!] Error: " << e.what() << std::endl;
     }
+}
+
+void cmd_uninstall(CommandContext& ctx) {
+    auto history = BootGuard::load_history();
+    std::vector<fs::path> to_delete;
+    for (const auto& h : history) {
+        fs::path p = fs::path(h.path) / Config::DIR_NAME;
+        if (fs::exists(p)) to_delete.push_back(p);
+    }
+    
+    if (to_delete.empty()) {
+        std::cout << "未发现任何已记录的 .shuati 目录。" << std::endl;
+    } else {
+        std::cout << "[*] 找到以下需要清除的 .shuati 目录：" << std::endl;
+        for (const auto& p : to_delete) {
+            std::cout << "  - " << p.string() << std::endl;
+        }
+        
+        if (!ctx.uninstall_confirm) {
+            std::cout << "\n[!] 警告：此操作将删除上述目录中的所有题目和记录数据！\n";
+            std::cout << "请添加 --confirm 参数以确认清除 (例如: shuati uninstall --confirm 或在 TUI 输入 '/uninstall --confirm' )。" << std::endl;
+            return;
+        }
+        
+        for (const auto& p : to_delete) {
+            std::error_code ec;
+            uintmax_t removed = fs::remove_all(p, ec);
+            if (!ec) {
+                std::cout << "[+] 已删除: " << p.string() << " (" << removed << " 个文件/目录)" << std::endl;
+            } else {
+                std::cerr << "[-] 删除失败: " << p.string() << " 原因: " << ec.message() << std::endl;
+            }
+        }
+    }
+    
+    // remove history
+    std::error_code ec;
+    auto hfile = BootGuard::get_history_file();
+    if (fs::exists(hfile)) {
+        fs::remove(hfile, ec);
+        if (!ec) std::cout << "[+] 已清除全局访问记录 (history.json)" << std::endl;
+    }
+    
+    // remove registry env vars
+#ifdef _WIN32
+    HKEY hKey;
+    if (RegOpenKeyExA(HKEY_CURRENT_USER, "Environment", 0, KEY_READ | KEY_WRITE, &hKey) == ERROR_SUCCESS) {
+        char valName[256];
+        DWORD valNameLen = sizeof(valName);
+        DWORD i = 0;
+        std::vector<std::string> varsToDelete;
+        while (RegEnumValueA(hKey, i, valName, &valNameLen, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) {
+            std::string name(valName);
+            if (name.find("SHUATI") != std::string::npos) {
+                varsToDelete.push_back(name);
+            }
+            i++;
+            valNameLen = sizeof(valName);
+        }
+        for (const auto& var : varsToDelete) {
+            RegDeleteValueA(hKey, var.c_str());
+            std::cout << "[+] 已从注册表移除环境变量: " << var << std::endl;
+        }
+        if (!varsToDelete.empty()) {
+            SendMessageTimeoutA(HWND_BROADCAST, WM_SETTINGCHANGE, 0, (LPARAM)"Environment", SMTO_ABORTIFHUNG, 5000, NULL);
+        }
+        RegCloseKey(hKey);
+    }
+#else
+    std::cout << "[*] 非 Windows 系统：请在您的 ~/.bashrc 或 ~/.zshrc 中手动移除相关的 SHUATI 环境变量。" << std::endl;
+#endif
+    
+    std::cout << "[+] 完全清除操作完成。" << std::endl;
 }
 
 } // namespace cmd

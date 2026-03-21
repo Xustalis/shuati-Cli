@@ -44,6 +44,7 @@ struct CommandContext {
     std::string list_source;  // "all", "leetcode", "codeforces", "luogu", "lanqiao", "local"
     std::string view_export_dir; // Directory to save test cases
     std::string login_platform;  // Platform for login command (e.g., "lanqiao")
+    bool uninstall_confirm = false; // Flag for uninstall/clean-all
     std::function<void(const std::string&)> stream_cb; // Callback for streaming outputs
     // Set to true when command is dispatched from the TUI - suppresses stdin reads,
     // FTXUI interactive menus, and editor launch to avoid TUI corruption.
@@ -102,6 +103,7 @@ void cmd_delete(CommandContext& ctx);
 void cmd_record(CommandContext& ctx);
 void cmd_hint(CommandContext& ctx);
 void cmd_clean(CommandContext& ctx);
+void cmd_uninstall(CommandContext& ctx);
 void cmd_view(CommandContext& ctx);
 void cmd_login(CommandContext& ctx);
 

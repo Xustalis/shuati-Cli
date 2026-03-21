@@ -18,6 +18,7 @@ std::vector<CommandSpec> tui_command_specs() {
         {"/record", "/record <id>", "复习推荐检查完成并记录", CommandCategory::Problem},
         {"/delete", "/delete <id>", "删除题目", CommandCategory::Problem},
         {"/clean", "/clean", "清理临时文件", CommandCategory::Project},
+        {"/uninstall", "/uninstall", "完全清除所有初始化目录及本地环境", CommandCategory::System},
         {"/login", "/login <platform>", "配置平台登录 Cookie", CommandCategory::Project},
         {"/config", "/config [--show]", "配置工具", CommandCategory::System},
         {"/repl", "/repl", "进入 legacy 交互模式", CommandCategory::System},
