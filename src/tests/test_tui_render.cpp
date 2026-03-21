@@ -94,11 +94,12 @@ static void test_list_view() {
     AppState state;
     TuiTheme theme;
 
-    state.list_state.filter = "all";
+    state.list_state.status_filter = "all";
+    state.list_state.difficulty_filter = "all";
     state.list_state.rows = {
-        {1, "two-sum",         "Two Sum",                "easy",   "AC",     "2025-03-01"},
-        {2, "add-two-numbers", "Add Two Numbers",        "medium", "WA 1/3", "2025-03-02"},
-        {3, "longest-substr",  "Longest Substring",      "hard",   "-",      "-"},
+        {1, "two-sum",         "Two Sum",                "easy",   "leetcode", "AC",     "2025-03-01", true, false},
+        {2, "add-two-numbers", "Add Two Numbers",        "medium", "leetcode", "WA 1/3", "2025-03-02", false, false},
+        {3, "longest-substr",  "Longest Substring",      "hard",   "leetcode", "-",      "-",          false, false},
     };
     state.list_state.loaded = true;
 

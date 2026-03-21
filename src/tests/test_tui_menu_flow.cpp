@@ -101,7 +101,7 @@ int main() {
 
     {
         AppState ls;
-        assert(ls.list_state.filter == "all");
+        assert(ls.list_state.status_filter == "all");
     }
 
     return 0;

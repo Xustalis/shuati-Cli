@@ -48,12 +48,17 @@ struct ListState {
         std::string id;
         std::string title;
         std::string difficulty;
+        std::string source;
         std::string status;
         std::string date;
+        bool passed = false;
+        bool review_due = false;
     };
     std::vector<Row> rows;
     int selected = 0;
-    std::string filter = "all";
+    std::string status_filter = "all";
+    std::string difficulty_filter = "all";
+    std::string source_filter = "all";
     bool loaded = false;
     std::string error;
 };
@@ -67,6 +72,7 @@ struct HintState {
 
 struct AppState {
     ViewMode view_mode = ViewMode::Main;
+    std::vector<ViewMode> view_stack;
 
     std::vector<BufferLine> buffer;
     int scroll_offset = 0;
@@ -98,6 +104,23 @@ struct AppState {
     void append(LineType type, const std::string& text) {
         buffer.push_back({type, text});
         scroll_offset = 0;
+    }
+
+    void push_view(ViewMode mode) {
+        if (view_mode != mode) {
+            view_stack.push_back(view_mode);
+            view_mode = mode;
+        }
+    }
+
+    bool pop_view() {
+        if (!view_stack.empty()) {
+            view_mode = view_stack.back();
+            view_stack.pop_back();
+            return true;
+        }
+        view_mode = ViewMode::Main;
+        return false;
     }
 
     void append_output_lines(const std::string& text) {

@@ -14,7 +14,14 @@ std::string filter_label(const std::string& filter) {
     if (filter == "failed") return "Failed";
     if (filter == "unaudited") return "Unaudited";
     if (filter == "review") return "Review";
-    return "All";
+    return "All Status";
+}
+
+std::string diff_filter_label(const std::string& diff) {
+    if (diff == "easy") return "Easy";
+    if (diff == "medium") return "Medium";
+    if (diff == "hard") return "Hard";
+    return "All Diffs";
 }
 
 } // namespace
@@ -346,11 +353,14 @@ Element render_list_view(const AppState& state, const TuiTheme& theme) {
     rows.push_back(text(""));
     rows.push_back(hbox({
         text("   \xe9\xa2\x98\xe5\xba\x93") | bold | color(theme.heading_color),
-        text("  ") | color(theme.dim_color),
-        text("\xe7\xad\x9b\xe9\x80\x89: ") | color(theme.dim_color),
-        text(filter_label(ls.filter)) | bold | color(theme.accent_color),
         filler(),
-        text("Esc \xe8\xbf\x94\xe5\x9b\x9e") | color(theme.dim_color),
+        text(" f ") | color(theme.prompt_color) | bold,
+        text("Status: [" + filter_label(ls.status_filter) + "] ") | color(theme.system_color),
+        text(" F ") | color(theme.prompt_color) | bold,
+        text("Difficulty: [" + diff_filter_label(ls.difficulty_filter) + "] ") | color(theme.system_color),
+        text(" s ") | color(theme.prompt_color) | bold,
+        text("Source: [" + ls.source_filter + "] ") | color(theme.system_color),
+        text("  Esc \xe8\xbf\x94\xe5\x9b\x9e") | color(theme.dim_color),
         text("  "),
     }));
     rows.push_back(text(""));
@@ -372,8 +382,11 @@ Element render_list_view(const AppState& state, const TuiTheme& theme) {
     rows.push_back(hbox({
         text("     ") | size(WIDTH, EQUAL, 5),
         text("#") | bold | color(theme.table_header_color) | size(WIDTH, EQUAL, 5),
-        text("\xe9\xa2\x98\xe7\x9b\xae\xe5\x90\x8d\xe7\xa7\xb0") | bold | color(theme.table_header_color) | size(WIDTH, EQUAL, 30),
-        text("\xe9\x9a\xbe\xe5\xba\xa6") | bold | color(theme.table_header_color) | size(WIDTH, EQUAL, 10),
+        text("\xe9\xa2\x98\xe7\x9b\xae\xe5\x90\x8d\xe7\xa7\xb0") | bold | color(theme.table_header_color) | size(WIDTH, EQUAL, 25),
+        text("\xe9\x9a\xbe\xe5\xba\xa6") | bold | color(theme.table_header_color) | size(WIDTH, EQUAL, 8),
+        text("\xe6\x9d\xa5\xe6\xba\x90") | bold | color(theme.table_header_color) | size(WIDTH, EQUAL, 10),
+        text("P") | bold | color(theme.table_header_color) | size(WIDTH, EQUAL, 3),
+        text("R") | bold | color(theme.table_header_color) | size(WIDTH, EQUAL, 3),
         text("\xe7\x8a\xb6\xe6\x80\x81") | bold | color(theme.table_header_color) | size(WIDTH, EQUAL, 10),
         text("\xe6\x97\xa5\xe6\x9c\x9f") | bold | color(theme.table_header_color),
     }));
@@ -397,8 +410,11 @@ Element render_list_view(const AppState& state, const TuiTheme& theme) {
             text(sel ? "  >  " : "     ") | color(sel ? theme.prompt_color : theme.dim_color)
                                            | size(WIDTH, EQUAL, 5),
             text(std::to_string(r.tid)) | color(rc) | size(WIDTH, EQUAL, 5),
-            text(r.title)               | color(rc) | size(WIDTH, EQUAL, 30),
-            text(r.difficulty)          | color(diff_c) | size(WIDTH, EQUAL, 10),
+            text(r.title)               | color(rc) | size(WIDTH, EQUAL, 25),
+            text(r.difficulty)          | color(diff_c) | size(WIDTH, EQUAL, 8),
+            text(r.source)              | color(theme.dim_color) | size(WIDTH, EQUAL, 10),
+            text(r.passed ? "Y" : " ")  | color(r.passed ? theme.success_color : theme.dim_color) | bold | size(WIDTH, EQUAL, 3),
+            text(r.review_due ? "!" : " ") | color(r.review_due ? theme.error_color : theme.dim_color) | bold | size(WIDTH, EQUAL, 3),
             text(r.status)              | color(stat_c) | size(WIDTH, EQUAL, 10),
             text(r.date)                | color(rc),
         });
@@ -424,10 +440,12 @@ Element render_list_view(const AppState& state, const TuiTheme& theme) {
         text(" \xe6\x9f\xa5\xe7\x9c\x8b") | color(theme.dim_color),
         text("  h") | bold | color(theme.dim_color),
         text(" \xe6\x8f\x90\xe7\xa4\xba") | color(theme.dim_color),
+        text("  r") | bold | color(theme.dim_color),
+        text(" \xe8\xae\xb0\xe5\xbd\x95") | color(theme.dim_color),
         text("  d") | bold | color(theme.dim_color),
         text(" \xe5\x88\xa0\xe9\x99\xa4") | color(theme.dim_color),
-        text("  f") | bold | color(theme.dim_color),
-        text(" \xe7\xad\x9b\xe9\x80\x89(All/AC/Failed/Unaudited/Review)") | color(theme.dim_color),
+        text("  f/F/s") | bold | color(theme.dim_color),
+        text(" \xe5\x88\x87\xe6\x8d\xa2\xe7\xad\x9b\xe9\x80\x89") | color(theme.dim_color),
         filler(),
         text(std::to_string(ls.selected + 1) + "/" + std::to_string(ls.rows.size()) + " ") | color(theme.dim_color),
     }));

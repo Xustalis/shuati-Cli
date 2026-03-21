@@ -24,6 +24,15 @@ int main(int argc, char** argv) {
             SetConsoleMode(hOut, dwMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
         }
     }
+
+    HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+    if (hIn != INVALID_HANDLE_VALUE) {
+        DWORD dwMode = 0;
+        if (GetConsoleMode(hIn, &dwMode)) {
+            // Explicitly disable VT input as it interferes with replxx backspace handling
+            SetConsoleMode(hIn, dwMode & ~ENABLE_VIRTUAL_TERMINAL_INPUT);
+        }
+    }
 #endif
 
     // Initialize Logger

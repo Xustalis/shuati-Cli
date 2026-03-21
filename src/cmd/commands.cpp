@@ -32,16 +32,18 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
 
     auto list_cmd = app.add_subcommand("list", "列出所有题目");
     list_cmd->add_option("-f,--filter", ctx.list_filter, "过滤状态: all, ac, failed, unaudited, review");
+    list_cmd->add_option("-d,--difficulty", ctx.list_difficulty, "过滤难度: easy, medium, hard");
+    list_cmd->add_option("-s,--source", ctx.list_source, "过滤来源: all, leetcode, codeforces, luogu, lanqiao, local");
     list_cmd->callback([&](){ cmd_list(ctx); });
 
     auto del = app.add_subcommand("delete", "删除题目");
     del->add_option("id", ctx.solve_pid, "题目 ID 或 TID");
     del->callback([&](){ cmd_delete(ctx); });
 
-    auto sub = app.add_subcommand("submit", "提交并记录心得");
-    sub->add_option("id", ctx.submit_pid, "题目 ID")->required();
-    sub->add_option("-q,--quality", ctx.submit_quality, "掌握程度 (0-5)");
-    sub->callback([&](){ cmd_submit(ctx); });
+    auto sub = app.add_subcommand("record", "记录题目复习完成及心得");
+    sub->add_option("id", ctx.record_pid, "题目 ID")->required();
+    sub->add_option("-q,--quality", ctx.record_quality, "掌握程度 (0-5)");
+    sub->callback([&](){ cmd_record(ctx); });
 
     auto tst = app.add_subcommand("test", "运行测试用例");
     tst->add_option("id", ctx.solve_pid, "题目 ID")->required();

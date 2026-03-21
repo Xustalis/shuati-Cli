@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <string>
 #include <vector>
@@ -7,6 +7,7 @@
 #include <optional>
 #include <functional>
 #include <CLI/CLI.hpp>
+#include <fmt/color.h>
 
 // Include service headers
 #include "shuati/config.hpp"
@@ -26,8 +27,8 @@ struct CommandContext {
     std::string pull_url;
     std::string new_title, new_tags, new_diff = "medium";
     std::string solve_pid;
-    std::string submit_pid, submit_file;
-    int submit_quality = -1;
+    std::string record_pid;
+    int record_quality = -1;
     std::string hint_pid, hint_file;
     std::string cfg_key, cfg_model;
     std::string cfg_language;         // --language flag for config command
@@ -39,6 +40,8 @@ struct CommandContext {
     std::string test_oracle = "auto";
     bool test_ui = false;
     std::string list_filter; // "all", "ac", "failed", "unaudited", "review"
+    std::string list_difficulty; // "easy", "medium", "hard"
+    std::string list_source;  // "all", "leetcode", "codeforces", "luogu", "lanqiao", "local"
     std::string view_export_dir; // Directory to save test cases
     std::string login_platform;  // Platform for login command (e.g., "lanqiao")
     std::function<void(const std::string&)> stream_cb; // Callback for streaming outputs
@@ -61,8 +64,14 @@ struct Services {
     static Services load(const std::filesystem::path& root, bool skip_doctor = false);
 };
 
+#include "shuati/utils/project_utils.hpp"
 
-std::filesystem::path find_root_or_die();
+inline std::filesystem::path find_root_or_die() {
+    return utils::find_root_or_die();
+}
+inline std::string canonical_source(const std::string& source) { 
+    return utils::canonical_source(source); 
+}
 std::string executable_path_utf8();
 
 /**
@@ -90,7 +99,7 @@ void cmd_pull(CommandContext& ctx);
 void cmd_new(CommandContext& ctx);
 void cmd_solve(CommandContext& ctx);
 void cmd_delete(CommandContext& ctx);
-void cmd_submit(CommandContext& ctx);
+void cmd_record(CommandContext& ctx);
 void cmd_hint(CommandContext& ctx);
 void cmd_clean(CommandContext& ctx);
 void cmd_view(CommandContext& ctx);

@@ -5,6 +5,7 @@
 #include <memory>
 #include "shuati/database.hpp"
 #include "shuati/crawler.hpp"
+#include "shuati/utils/project_utils.hpp"
 
 namespace shuati {
 
@@ -18,6 +19,11 @@ public:
     std::vector<Problem> list_problems();
     void delete_problem(int tid);
     void delete_problem(const std::string& id);
+    
+    std::vector<Problem> filter_problems(const std::vector<Problem>& problems,
+                                         const std::string& status_filter,
+                                         const std::string& difficulty_filter,
+                                         const std::string& source_filter = "all");
 
     void register_crawler(std::unique_ptr<ICrawler> crawler);
 

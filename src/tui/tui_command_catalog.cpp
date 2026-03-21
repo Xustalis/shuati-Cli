@@ -7,7 +7,7 @@ std::vector<std::string> tui_command_candidates() {
     return {
         "/help", "/ls", "/dir", "/cd", "/pwd", "/clear",
         "/init", "/info", "/pull", "/new", "/solve", "/list", "/delete",
-        "/submit", "/test", "/hint", "/view", "/clean", "/login",
+        "/record", "/test", "/hint", "/view", "/clean", "/login",
         "/config", "/repl", "/tui", "/exit"
     };
 }
@@ -15,7 +15,7 @@ std::vector<std::string> tui_command_candidates() {
 std::vector<std::string> tui_cli_command_candidates() {
     return {
         "init", "info", "pull", "new", "solve", "list", "delete",
-        "submit", "test", "hint", "view", "clean", "login",
+        "record", "test", "hint", "view", "clean", "login",
         "config", "repl", "tui", "exit"
     };
 }

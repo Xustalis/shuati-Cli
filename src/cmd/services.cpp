@@ -18,14 +18,7 @@ namespace cmd {
 
 namespace fs = std::filesystem;
 
-fs::path find_root_or_die() {
-    auto root = Config::find_root();
-    if (root.empty()) {
-        fmt::print(fg(fmt::color::red), "[!] 未找到项目根目录。请先运行: shuati init\n");
-        throw std::runtime_error("Root not found");
-    }
-    return root;
-}
+
 
 #ifdef _WIN32
 std::string executable_path_utf8() {
@@ -46,19 +39,7 @@ Services Services::load(const fs::path& root, bool skip_doctor) {
     Services s;
     try {
         s.cfg = Config::load(Config::config_path(root));
-        
-        // Simple caching for Database to avoid overhead in REPL
-        static std::weak_ptr<Database> db_cache;
-        static std::string db_cache_path;
-        
-        std::shared_ptr<Database> db = db_cache.lock();
-        std::string current_db_path = Config::db_path(root).string();
-        
-        if (!db || db_cache_path != current_db_path) {
-            db = std::make_shared<Database>(current_db_path);
-            db_cache = db;
-            db_cache_path = current_db_path;
-        }
+        auto db = std::make_shared<Database>(Config::db_path(root).string());
         s.db = db;
         s.pm  = std::make_shared<ProblemManager>(s.db);
         
@@ -93,68 +74,47 @@ Services Services::load(const fs::path& root, bool skip_doctor) {
     return s;
 }
 
+
+
 std::string make_solution_filename(const Problem& prob, const std::string& language) {
     std::string ext = (language == "python" || language == "py") ? ".py" : ".cpp";
-    
-    // Sanitize title for filename: keep CJK chars, alphanumeric, underscore
-    std::string safe_title;
-    std::string title = prob.title;
-    
-    // Limit title length
-    if (title.size() > 40) {
-        // Truncate at UTF-8 boundary
-        size_t len = 40;
-        while (len > 0) {
-            unsigned char c = static_cast<unsigned char>(title[len]);
-            if ((c & 0xC0) != 0x80) break;
-            len--;
-        }
-        title = title.substr(0, len);
+    auto root = find_root_or_die();
+    auto dir = root / ".shuati" / "problems" / canonical_source(prob.source) / prob.id;
+    if (!std::filesystem::exists(dir)) {
+        std::filesystem::create_directories(dir);
     }
-    
-    for (size_t i = 0; i < title.size(); ) {
-        unsigned char c = static_cast<unsigned char>(title[i]);
-        if (c < 0x80) {
-            // ASCII
-            if (std::isalnum(c) || c == '_') {
-                safe_title += static_cast<char>(c);
-            } else if (c == ' ' || c == '-') {
-                safe_title += '_';
-            }
-            i++;
-        } else {
-            // Multi-byte UTF-8 (CJK etc.) - keep as-is
-            size_t bytes = 1;
-            if ((c & 0xE0) == 0xC0) bytes = 2;
-            else if ((c & 0xF0) == 0xE0) bytes = 3;
-            else if ((c & 0xF8) == 0xF0) bytes = 4;
-            safe_title += title.substr(i, bytes);
-            i += bytes;
-        }
-    }
-    
-    // Remove trailing underscores
-    while (!safe_title.empty() && safe_title.back() == '_') safe_title.pop_back();
-    
-    if (safe_title.empty()) safe_title = prob.id;
-    
-    // Format: TID_title.ext (e.g., "3_两数之和.cpp")
-    return std::to_string(prob.display_id) + "_" + safe_title + ext;
+    return (dir / ("solution" + ext)).string();
 }
 
 std::string find_solution_file(const Problem& prob, const std::string& language) {
     namespace fs = std::filesystem;
     std::string ext = (language == "python" || language == "py") ? ".py" : ".cpp";
     
-    // Try new naming first
-    std::string new_name = make_solution_filename(prob, language);
-    if (fs::exists(shuati::utils::utf8_path(new_name))) return new_name;
+    auto root = find_root_or_die();
     
-    // Fallback: old naming (solution_ID.ext)
-    std::string old_name = "solution_" + prob.id + ext;
-    if (fs::exists(shuati::utils::utf8_path(old_name))) return old_name;
+    // 1. Canonical path (new source-based structure)
+    auto canonical = root / ".shuati" / "problems" / canonical_source(prob.source) / prob.id / ("solution" + ext);
+    if (fs::exists(canonical)) return canonical.string();
     
-    // Not found — return new name for creation
+    // 2. Fallbacks (old UUID structure)
+    auto fallback = root / ".shuati" / "problems" / prob.id / ("solution" + ext);
+    if (fs::exists(fallback)) return fallback.string();
+    
+    // 3. Fallbacks in cwd
+    std::string old_uuid = "solution_" + prob.id + ext;
+    if (fs::exists(shuati::utils::utf8_path(old_uuid))) return old_uuid;
+    
+    std::string prefix = std::to_string(prob.display_id) + "_";
+    try {
+        for (const auto& entry : fs::directory_iterator(".")) {
+            std::string name = entry.path().filename().string();
+            if (name.rfind(prefix, 0) == 0 && name.size() > ext.size() &&
+                name.substr(name.size() - ext.size()) == ext) {
+                return name;
+            }
+        }
+    } catch (...) {}
+    
     return "";
 }
 

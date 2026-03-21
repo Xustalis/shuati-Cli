@@ -23,18 +23,18 @@ void cmd_pull(CommandContext& ctx) {
 
 void cmd_new(CommandContext& ctx) {
     try {
-        auto svc = Services::load(find_root_or_die());
+        auto root = find_root_or_die();
+        auto svc = Services::load(root);
         std::string pid = svc.pm->create_local(ctx.new_title, ctx.new_tags, ctx.new_diff);
         
         // Create directory structure
-        fs::path prob_dir = fs::path(".shuati") / "problems" / pid;
+        fs::path prob_dir = root / ".shuati" / "problems" / "local" / pid;
         fs::create_directories(prob_dir / "data");
         fs::create_directories(prob_dir / "validator");
         fs::create_directories(prob_dir / "debug");
         fs::create_directories(prob_dir / "temp");
 
-        // Create initial files
-        std::ofstream(prob_dir / "problem.md") << "# " << ctx.new_title << "\n\nDescription here.\n";
+        // Statement is already created by create_local in root/.shuati/problems/pid.md
         
         std::cout << "[+] 本地题目创建成功: " << ctx.new_title << " (" << pid << ")" << std::endl;
         std::cout << "    目录: " << prob_dir.string() << std::endl;
@@ -119,13 +119,16 @@ void cmd_clean(CommandContext& ctx) {
         // 2. Clean problem temps
         fs::path problems_dir = shuati_dir / "problems";
         if (fs::exists(problems_dir)) {
-            for (const auto& p_entry : fs::directory_iterator(problems_dir)) {
-                if (!p_entry.is_directory()) continue;
-                
-                fs::path p_temp = p_entry.path() / "temp";
-                if (fs::exists(p_temp)) {
-                    for (const auto& entry : fs::directory_iterator(p_temp)) {
-                        remove_file(entry.path());
+            for (const auto& src_entry : fs::directory_iterator(problems_dir)) {
+                if (!src_entry.is_directory()) continue;
+                for (const auto& p_entry : fs::directory_iterator(src_entry.path())) {
+                    if (!p_entry.is_directory()) continue;
+                    
+                    fs::path p_temp = p_entry.path() / "temp";
+                    if (fs::exists(p_temp)) {
+                        for (const auto& entry : fs::directory_iterator(p_temp)) {
+                            remove_file(entry.path());
+                        }
                     }
                 }
             }

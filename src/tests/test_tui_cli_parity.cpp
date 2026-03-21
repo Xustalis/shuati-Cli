@@ -12,7 +12,7 @@ int main() {
 
     const std::set<std::string> expected_cli = {
         "init", "info", "pull", "new", "solve", "list", "delete",
-        "submit", "test", "hint", "view", "clean", "login",
+        "record", "test", "hint", "view", "clean", "login",
         "config", "repl", "tui", "exit"
     };
 

@@ -60,16 +60,13 @@ namespace {
 
 void cmd_view(CommandContext& ctx) {
     try {
-        auto svc = Services::load(find_root_or_die());
-        Problem prob;
-        if (std::all_of(ctx.solve_pid.begin(), ctx.solve_pid.end(), ::isdigit)) {
-             prob = svc.db->get_problem_by_display_id(std::stoi(ctx.solve_pid));
-        }
-        if (prob.id.empty()) prob = svc.db->get_problem(ctx.solve_pid);
+        auto root = find_root_or_die();
+        auto svc = Services::load(root);
+        auto prob = svc.pm->get_problem(ctx.solve_pid);
 
         if (prob.id.empty()) { std::cerr << "[!] 题目不存在。" << std::endl; return; }
         
-        std::filesystem::path prob_dir = std::filesystem::path(".shuati") / "problems" / prob.id;
+        std::filesystem::path prob_dir = root / ".shuati" / "problems" / canonical_source(prob.source) / prob.id;
         std::filesystem::path report_path = prob_dir / "test_report.json";
         
         auto [report, ok] = load_report(report_path);

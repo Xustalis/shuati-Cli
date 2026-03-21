@@ -10,15 +10,12 @@ namespace shuati {
 // Luogu difficulty levels (0-7)
 static std::string luogu_difficulty_str(int level) {
     switch (level) {
-        case 0: return "暂无评定";
-        case 1: return "入门";
-        case 2: return "普及-";
-        case 3: return "普及/提高-";
-        case 4: return "普及+/提高";
-        case 5: return "提高+/省选-";
-        case 6: return "省选/NOI-";
-        case 7: return "NOI/NOI+/CTSC";
-        default: return fmt::format("Unknown({})", level);
+        case 1: 
+        case 2: return "easy";
+        case 5:
+        case 6:
+        case 7: return "hard";
+        default: return "medium";
     }
 }
 

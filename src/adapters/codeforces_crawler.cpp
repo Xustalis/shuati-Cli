@@ -9,13 +9,10 @@ namespace shuati {
 
 // Map CF rating to difficulty string
 static std::string cf_rating_to_difficulty(int rating) {
-    if (rating <= 0) return "";
-    if (rating <= 800) return "入门 (800)";
-    if (rating <= 1200) return "普及- (≤1200)";
-    if (rating <= 1600) return "普及/提高 (≤1600)";
-    if (rating <= 2000) return "提高+ (≤2000)";
-    if (rating <= 2400) return "省选 (≤2400)";
-    return fmt::format("NOI+ ({})", rating);
+    if (rating <= 0) return "medium";
+    if (rating <= 1200) return "easy";
+    if (rating <= 1900) return "medium";
+    return "hard";
 }
 
 bool CodeforcesCrawler::can_handle(const std::string& url) const {

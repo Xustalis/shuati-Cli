@@ -1,4 +1,4 @@
-﻿#include <iostream>
+#include <iostream>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -40,31 +40,11 @@ void cmd_list(CommandContext& ctx) {
         }
 
         // Filtering
-        if (!ctx.list_filter.empty() && ctx.list_filter != "all") {
-            if (ctx.list_filter == "review") {
-                auto reviews = svc.db->get_due_reviews(std::time(nullptr));
-                std::unordered_set<std::string> due_ids;
-                for (const auto& r : reviews) due_ids.insert(r.problem_id);
-                
-                auto it = std::remove_if(problems.begin(), problems.end(), [&](const Problem& p) {
-                    return due_ids.find(p.id) == due_ids.end();
-                });
-                problems.erase(it, problems.end());
-                
-                if (problems.empty()) {
-                    std::cout << "今天没有需要复习的题目。" << std::endl;
-                    return;
-                }
-            } else {
-                auto it = std::remove_if(problems.begin(), problems.end(), [&](const Problem& p) {
-                    if (ctx.list_filter == "ac") return p.last_verdict != "AC";
-                    if (ctx.list_filter == "failed") return p.last_verdict == "AC" || p.last_verdict.empty();
-                    if (ctx.list_filter == "unaudited") return !p.last_verdict.empty();
-                    return false;
-                });
-                problems.erase(it, problems.end());
-            }
-        }
+        std::string status_filter = ctx.list_filter.empty() ? "all" : ctx.list_filter;
+        std::string diff_filter = ctx.list_difficulty.empty() ? "all" : ctx.list_difficulty;
+        std::string source_filter = ctx.list_source.empty() ? "all" : ctx.list_source;
+        
+        problems = svc.pm->filter_problems(problems, status_filter, diff_filter, source_filter);
 
         if (problems.empty()) {
             std::cout << "没有符合条件的题目。" << std::endl;
@@ -76,9 +56,10 @@ void cmd_list(CommandContext& ctx) {
                   << pad_string("ID", 20)
                   << pad_string("标题", 25)
                   << pad_string("难度", 8)
+                  << pad_string("来源", 10)
                   << pad_string("状态", 15)
                   << pad_string("最后检查", 15) << std::endl;
-        std::cout << std::string(95, '-') << std::endl;
+        std::cout << std::string(105, '-') << std::endl;
 
         // Cache root path for link generation
         auto root_path = find_root_or_die();
@@ -117,7 +98,7 @@ void cmd_list(CommandContext& ctx) {
             }
 
             // Generate OSC 8 hyperlink to test report file
-            std::string uri_path = (root_path / ".shuati" / "problems" / p.id / "test_report.json").string();
+            std::string uri_path = (root_path / ".shuati" / "problems" / canonical_source(p.source) / p.id / "test_report.json").string();
             std::replace(uri_path.begin(), uri_path.end(), '\\', '/');
             std::string report_url = "file:///" + uri_path;
 
@@ -134,6 +115,7 @@ void cmd_list(CommandContext& ctx) {
                       << id_display << id_padding
                       << pad_string(title, 25)
                       << pad_string(ensure_utf8(p.difficulty), 8)
+                      << pad_string(ensure_utf8(canonical_source(p.source)), 10)
                       << status << status_padding
                       << pad_string(time_str, 15)
                       << std::endl;

@@ -59,15 +59,19 @@ static long long benchmark_config_view_ms() {
 static long long benchmark_list_view_ms() {
     shuati::tui::AppState state;
     shuati::tui::TuiTheme theme;
-    state.list_state.filter = "all";
+    state.list_state.status_filter = "all";
+    state.list_state.difficulty_filter = "all";
     for (int i = 0; i < 100; i++) {
         state.list_state.rows.push_back({
             i + 1,
             "problem-" + std::to_string(i),
             "Problem Title #" + std::to_string(i),
             (i % 3 == 0) ? "easy" : (i % 3 == 1) ? "medium" : "hard",
+            "leetcode",
             (i % 4 == 0) ? "AC" : (i % 4 == 1) ? "WA 1/3" : "-",
             "2025-01-" + std::string(i < 9 ? "0" : "") + std::to_string(i + 1),
+            (i % 4 == 0),
+            false,
         });
     }
     state.list_state.selected = 50;

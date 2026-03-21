@@ -35,7 +35,7 @@ void test_lanqiao() {
         std::cerr << "Lanqiao Description mismatch: " << p.description << "\n";
         exit(1);
     }
-    if (p.difficulty != "简单") {
+    if (p.difficulty != "easy") {
         std::cerr << "Lanqiao Difficulty mismatch: " << p.difficulty << "\n";
         exit(1);
     }
@@ -71,7 +71,7 @@ void test_luogu() {
         std::cerr << "Luogu Description mismatch: " << p.description << "\n";
         exit(1);
     }
-    if (p.difficulty != "入门") {
+    if (p.difficulty != "easy") {
         std::cerr << "Luogu Difficulty mismatch: " << p.difficulty << "\n";
         exit(1);
     }
@@ -125,7 +125,7 @@ void test_leetcode() {
         std::cerr << "LeetCode Description mismatch: " << p.description << "\n";
         exit(1);
     }
-    if (p.difficulty != "Easy") {
+    if (p.difficulty != "easy") {
         std::cerr << "LeetCode Difficulty mismatch: " << p.difficulty << "\n";
         exit(1);
     }

@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(MSVC)
-    add_compile_options(/utf-8 /W4)
+    add_compile_options(/utf-8 /W4 /FS)
     # MSVC filesystem workaround
     add_compile_definitions(_SILENCE_CXX17_ITERATOR_BASE_CLASS_DEPRECATION_WARNING)
 else()
@@ -80,6 +80,7 @@ set(INFRA_SOURCES
 
 set(UTIL_SOURCES
     src/utils/encoding.cpp
+    src/utils/project_utils.cpp
 )
 
 set(TUI_SOURCES

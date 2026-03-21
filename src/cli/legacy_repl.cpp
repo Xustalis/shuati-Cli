@@ -37,19 +37,19 @@ void run_legacy_repl() {
     // Set up completion
     rx.set_completion_callback([&](std::string const& input, int& contextLen) {
         std::vector<Replxx::Completion> completions;
-        std::vector<std::string> cmds = {"init", "info", "pull", "new", "solve", "list", "delete", "submit", "test", "hint", "config", "login", "repl", "exit", "view"};
+        std::vector<std::string> cmds = {"init", "info", "pull", "new", "solve", "list", "delete", "record", "test", "hint", "config", "login", "repl", "exit", "view"};
         
         // Command completion
         size_t last_space = input.rfind(' ');
         if (last_space == std::string::npos) {
             for (auto& c : cmds) if (c.find(input) == 0) completions.push_back({c});
-            contextLen = input.length();
+            contextLen = static_cast<int>(input.length());
         } else {
             // Context-aware completion
             std::string cmd = input.substr(0, last_space);
             std::string prefix = input.substr(last_space + 1);
             
-            if (cmd == "solve" || cmd == "delete" || cmd == "submit" || cmd == "hint" || cmd == "test" || cmd == "view") {
+            if (cmd == "solve" || cmd == "delete" || cmd == "record" || cmd == "hint" || cmd == "test" || cmd == "view") {
                 if (global_svc && global_svc->pm) {
                     auto problems = global_svc->pm->list_problems();
                     for (const auto& p : problems) {
@@ -194,7 +194,7 @@ void run_legacy_repl() {
              fmt::print("{:<10} {:<35} {}\n", "list", "列出所有题目", "list");
              fmt::print("{:<10} {:<35} {}\n", "view", "查看测试详情", "view <id>");
              fmt::print("{:<10} {:<35} {}\n", "delete", "删除题目", "delete <id>");
-             fmt::print("{:<10} {:<35} {}\n", "submit", "提交记录与心得", "submit <id>");
+             fmt::print("{:<10} {:<35} {}\n", "record", "提交记录与心得", "record <id>");
              fmt::print("{:<10} {:<35} {}\n", "test", "运行测试用例", "test <id>");
              fmt::print("{:<10} {:<35} {}\n", "hint", "获取 AI 提示", "hint <id>");
              fmt::print("{:<10} {:<35} {}\n", "config", "配置工具", "config [--show]");

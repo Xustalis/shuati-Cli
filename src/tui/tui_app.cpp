@@ -3,6 +3,8 @@
 #include "shuati/config.hpp"
 #include "shuati/version.hpp"
 #include "shuati/database.hpp"
+#include "shuati/problem_manager.hpp"
+#include "commands.hpp"
 
 #include "tui_command_engine.hpp"
 #include "command_specs.hpp"
@@ -44,9 +46,11 @@ bool configure_windows_console_for_tui() {
         return !!SetConsoleMode(h, (mode | add) & ~remove);
     };
     bool ok = apply(STD_OUTPUT_HANDLE, ENABLE_VIRTUAL_TERMINAL_PROCESSING, 0);
+    // NOTE: Do NOT re-enable ENABLE_VIRTUAL_TERMINAL_INPUT here — main.cpp disables it
+    // for replxx CLI mode. TUI uses ftxui's own raw input; it does not rely on VT INPUT.
     ok = apply(STD_INPUT_HANDLE,
-               ENABLE_VIRTUAL_TERMINAL_INPUT | ENABLE_EXTENDED_FLAGS,
-               ENABLE_QUICK_EDIT_MODE) && ok;
+               ENABLE_EXTENDED_FLAGS,
+               ENABLE_QUICK_EDIT_MODE | ENABLE_VIRTUAL_TERMINAL_INPUT) && ok;
     return ok;
 }
 #endif
@@ -115,7 +119,7 @@ const std::unordered_map<std::string, CmdHint>& hint_table() {
                      "\xe2\x9c\x93 Enter \xe6\x9f\xa5\xe7\x9c\x8b\xe8\xaf\xa6\xe6\x83\x85"}},
         {"/delete", {"\xe7\x94\xa8\xe6\xb3\x95: /delete <\xe9\xa2\x98\xe5\x8f\xb7>  \xe4\xbb\x8e\xe6\x9c\xac\xe5\x9c\xb0\xe9\xa2\x98\xe5\xba\x93\xe5\x88\xa0\xe9\x99\xa4\xe9\xa2\x98\xe7\x9b\xae",
                      "\xe2\x9c\x93 Enter \xe5\x88\xa0\xe9\x99\xa4\xe9\xa2\x98\xe7\x9b\xae"}},
-        {"/submit", {"\xe7\x94\xa8\xe6\xb3\x95: /submit <\xe9\xa2\x98\xe5\x8f\xb7>  \xe6\x8f\x90\xe4\xba\xa4\xe5\xb9\xb6\xe8\xae\xb0\xe5\xbd\x95\xe5\x81\x9a\xe9\xa2\x98\xe5\xbf\x83\xe5\xbe\x97",
+        {"/record", {"\xe7\x94\xa8\xe6\xb3\x95: /record <\xe9\xa2\x98\xe5\x8f\xb7>  \xe6\x8f\x90\xe4\xba\xa4\xe5\xb9\xb6\xe8\xae\xb0\xe5\xbd\x95\xe5\x81\x9a\xe9\xa2\x98\xe5\xbf\x83\xe5\xbe\x97",
                      "\xe2\x9c\x93 Enter \xe6\x8f\x90\xe4\xba\xa4\xe8\xae\xb0\xe5\xbd\x95"}},
         {"/new",    {"\xe7\x94\xa8\xe6\xb3\x95: /new <\xe6\xa0\x87\xe9\xa2\x98>  \xe5\x88\x9b\xe5\xbb\xba\xe4\xb8\x80\xe9\x81\x93\xe6\x9c\xac\xe5\x9c\xb0\xe9\xa2\x98\xe7\x9b\xae",
                      "\xe2\x9c\x93 Enter \xe5\x88\x9b\xe5\xbb\xba\xe9\xa2\x98\xe7\x9b\xae"}},
@@ -193,38 +197,29 @@ void save_config_state(AppState& state) {
     state.config_state.status_msg = "\xe9\x85\x8d\xe7\xbd\xae\xe5\xb7\xb2\xe4\xbf\x9d\xe5\xad\x98\xe3\x80\x82";
 }
 
-std::vector<Problem> filter_problems_for_list(Database& db,
-                                              std::vector<Problem> problems,
-                                              const std::string& filter) {
-    if (filter.empty() || filter == "all") return problems;
 
-    if (filter == "review") {
-        auto reviews = db.get_due_reviews(std::time(nullptr));
-        std::unordered_set<std::string> due_ids;
-        for (const auto& review : reviews) due_ids.insert(review.problem_id);
 
-        problems.erase(std::remove_if(problems.begin(), problems.end(),
-            [&](const Problem& problem) {
-                return due_ids.find(problem.id) == due_ids.end();
-            }), problems.end());
-        return problems;
-    }
-
-    problems.erase(std::remove_if(problems.begin(), problems.end(),
-        [&](const Problem& problem) {
-            if (filter == "ac") return problem.last_verdict != "AC";
-            if (filter == "failed") return problem.last_verdict == "AC" || problem.last_verdict.empty();
-            if (filter == "unaudited") return !problem.last_verdict.empty();
-            return false;
-        }), problems.end());
-    return problems;
-}
-
-std::string next_list_filter(const std::string& filter) {
+std::string next_status_filter(const std::string& filter) {
     if (filter == "all") return "ac";
     if (filter == "ac") return "failed";
     if (filter == "failed") return "unaudited";
     if (filter == "unaudited") return "review";
+    return "all";
+}
+
+std::string next_source_filter(const std::string& source) {
+    if (source == "all") return "leetcode";
+    if (source == "leetcode") return "codeforces";
+    if (source == "codeforces") return "luogu";
+    if (source == "luogu") return "lanqiao";
+    if (source == "lanqiao") return "local";
+    return "all";
+}
+
+std::string next_difficulty_filter(const std::string& diff) {
+    if (diff == "all") return "easy";
+    if (diff == "easy") return "medium";
+    if (diff == "medium") return "hard";
     return "all";
 }
 
@@ -236,9 +231,11 @@ std::string normalize_list_filter(const std::string& filter) {
     return {};
 }
 
-void load_list_state(AppState& state, const std::string& filter = "all") {
+void load_list_state(AppState& state, const std::string& status_filter = "all", const std::string& difficulty_filter = "all", const std::string& source_filter = "all") {
     auto root = Config::find_root();
-    state.list_state.filter = filter;
+    state.list_state.status_filter = status_filter;
+    state.list_state.difficulty_filter = difficulty_filter;
+    state.list_state.source_filter = source_filter;
     if (root.empty()) {
         state.list_state.error = "\xe6\x9c\xaa\xe6\x89\xbe\xe5\x88\xb0 .shuati \xe9\xa1\xb9\xe7\x9b\xae\xef\xbc\x8c\xe8\xaf\xb7\xe5\x85\x88\xe8\xbf\x90\xe8\xa1\x8c /init";
         state.list_state.rows.clear();
@@ -246,8 +243,19 @@ void load_list_state(AppState& state, const std::string& filter = "all") {
         return;
     }
     try {
-        Database db(Config::db_path(root).string());
-        auto problems = filter_problems_for_list(db, db.get_all_problems(), filter);
+        auto svc = cmd::Services::load(root);
+        auto problems = svc.pm->filter_problems(svc.pm->list_problems(), status_filter, difficulty_filter, source_filter);
+        
+        auto current_time = std::time(nullptr);
+        auto reviews = svc.db->get_due_reviews(current_time);
+        std::unordered_set<std::string> due_ids;
+        for (const auto& r : reviews) due_ids.insert(r.problem_id);
+
+        // Preserve previous selection: find the same problem ID in the new list
+        std::string prev_id;
+        if (state.list_state.selected < static_cast<int>(state.list_state.rows.size())) {
+            prev_id = state.list_state.rows[state.list_state.selected].id;
+        }
         state.list_state.rows.clear();
         for (const auto& p : problems) {
             ListState::Row row;
@@ -255,7 +263,10 @@ void load_list_state(AppState& state, const std::string& filter = "all") {
             row.id         = p.id;
             row.title      = p.title;
             row.difficulty = p.difficulty;
+            row.source     = cmd::canonical_source(p.source);
             row.status     = p.last_verdict.empty() ? "-" : p.last_verdict;
+            row.passed     = (p.last_verdict == "AC");
+            row.review_due = (due_ids.find(p.id) != due_ids.end());
             {
                 char buf[16] = {};
                 std::time_t t = static_cast<std::time_t>(p.created_at);
@@ -270,7 +281,16 @@ void load_list_state(AppState& state, const std::string& filter = "all") {
             }
             state.list_state.rows.push_back(std::move(row));
         }
+        // Restore selection to previous problem if still visible
         state.list_state.selected = 0;
+        if (!prev_id.empty()) {
+            for (int i = 0; i < static_cast<int>(state.list_state.rows.size()); ++i) {
+                if (state.list_state.rows[i].id == prev_id) {
+                    state.list_state.selected = i;
+                    break;
+                }
+            }
+        }
         state.list_state.error.clear();
     } catch (const std::exception& e) {
         state.list_state.rows.clear();
@@ -372,12 +392,13 @@ int TuiApp::run() {
 
         if (base_cmd == "config" && args.size() == 2) {
             load_config_state(state);
-            state.view_mode = ViewMode::ConfigView;
+            state.push_view(ViewMode::ConfigView);
             return;
         }
 
         if (base_cmd == "list") {
-            std::string requested_filter = state.list_state.filter.empty() ? "all" : state.list_state.filter;
+            std::string requested_status_filter = state.list_state.status_filter.empty() ? "all" : state.list_state.status_filter;
+            std::string requested_diff_filter = state.list_state.difficulty_filter.empty() ? "all" : state.list_state.difficulty_filter;
             if (args.size() == 4 && (args[2] == "--filter" || args[2] == "-f")) {
                 auto normalized_filter = normalize_list_filter(args[3]);
                 if (normalized_filter.empty()) {
@@ -385,15 +406,15 @@ int TuiApp::run() {
                         "Invalid list filter. Use all/ac/failed/unaudited/review.");
                     return;
                 }
-                requested_filter = normalized_filter;
+                requested_status_filter = normalized_filter;
             } else if (args.size() != 2) {
                 state.append(LineType::Error,
                     "Usage: /list [--filter all|ac|failed|unaudited|review]");
                 return;
             }
 
-            load_list_state(state, requested_filter);
-            state.view_mode = ViewMode::ListView;
+            load_list_state(state, requested_status_filter, requested_diff_filter);
+            state.push_view(ViewMode::ListView);
             return;
         }
 
@@ -404,7 +425,7 @@ int TuiApp::run() {
             }
             state.hint_state = HintState{};
             state.hint_state.loading = true;
-            state.view_mode = ViewMode::HintView;
+            state.push_view(ViewMode::HintView);
             state.is_running = true;
             state.active_command = base_cmd;
 
@@ -503,9 +524,14 @@ int TuiApp::run() {
 
             if (!alive->load()) return;
             auto run_command_ptr_local = run_command_ptr;
-            screen.Post([&state, run_command_ptr_local]() {
+            screen.Post([&state, run_command_ptr_local, base_cmd]() {
                 state.is_running = false;
                 state.active_command.clear();
+
+                if (base_cmd == "record" || base_cmd == "delete") {
+                    load_list_state(state, state.list_state.status_filter, state.list_state.difficulty_filter, state.list_state.source_filter);
+                }
+
                 if (!state.pending_commands.empty()) {
                     auto next = state.pending_commands.front();
                     state.pending_commands.pop_front();
@@ -548,7 +574,7 @@ int TuiApp::run() {
         if (state.view_mode == ViewMode::ConfigView) {
             auto& cs = state.config_state;
             if (event == Event::Escape) {
-                state.view_mode = ViewMode::Main;
+                state.pop_view();
                 return true;
             }
             if (event == Event::ArrowUp) {
@@ -565,7 +591,7 @@ int TuiApp::run() {
                     return true;
                 }
                 if (cs.focused_field == ConfigState::CANCEL_INDEX) {
-                    state.view_mode = ViewMode::Main;
+                    state.pop_view();
                     return true;
                 }
                 if (cs.focused_field == 0) {
@@ -609,7 +635,7 @@ int TuiApp::run() {
         if (state.view_mode == ViewMode::ListView) {
             auto& ls = state.list_state;
             if (event == Event::Escape) {
-                state.view_mode = ViewMode::Main;
+                state.pop_view();
                 return true;
             }
             if (event == Event::ArrowUp || event == Event::Character('k')) {
@@ -621,7 +647,15 @@ int TuiApp::run() {
                 return true;
             }
             if (event == Event::Character('f')) {
-                load_list_state(state, next_list_filter(ls.filter));
+                load_list_state(state, next_status_filter(ls.status_filter), ls.difficulty_filter);
+                return true;
+            }
+            if (event == Event::Character('F')) {
+                load_list_state(state, ls.status_filter, next_difficulty_filter(ls.difficulty_filter), ls.source_filter);
+                return true;
+            }
+            if (event == Event::Character('s')) {
+                load_list_state(state, ls.status_filter, ls.difficulty_filter, next_source_filter(ls.source_filter));
                 return true;
             }
             auto get_selected_tid = [&]() -> std::string {
@@ -630,29 +664,35 @@ int TuiApp::run() {
                 return "";
             };
             if (event == Event::Return && !ls.rows.empty()) {
-                state.view_mode = ViewMode::Main;
+                state.pop_view();
                 (*run_command_ptr)("/solve " + get_selected_tid(), true);
                 return true;
             }
             if (event == Event::Character('t') && !ls.rows.empty()) {
-                state.view_mode = ViewMode::Main;
+                state.pop_view();
                 (*run_command_ptr)("/test " + get_selected_tid(), true);
                 return true;
             }
             if (event == Event::Character('v') && !ls.rows.empty()) {
-                state.view_mode = ViewMode::Main;
+                state.pop_view();
                 (*run_command_ptr)("/view " + get_selected_tid(), true);
                 return true;
             }
             if (event == Event::Character('d') && !ls.rows.empty()) {
-                state.view_mode = ViewMode::Main;
+                state.pop_view();
                 (*run_command_ptr)("/delete " + get_selected_tid(), true);
                 return true;
             }
             if (event == Event::Character('h') && !ls.rows.empty()) {
                 auto tid = get_selected_tid();
-                state.view_mode = ViewMode::Main;
+                state.pop_view();
                 (*run_command_ptr)("/hint " + tid, true);
+                return true;
+            }
+            if (event == Event::Character('r') && !ls.rows.empty()) {
+                auto tid = get_selected_tid();
+                state.pop_view();
+                (*run_command_ptr)("/record " + tid, true);
                 return true;
             }
             return true;
@@ -662,7 +702,7 @@ int TuiApp::run() {
         if (state.view_mode == ViewMode::HintView) {
             auto& hs = state.hint_state;
             if (event == Event::Escape) {
-                state.view_mode = ViewMode::Main;
+                state.pop_view();
                 return true;
             }
             int max_scroll = std::max(0, static_cast<int>(hs.lines.size()) - 10);

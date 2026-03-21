@@ -142,12 +142,19 @@ void cmd_solve(CommandContext& ctx) {
     }
 }
 
-void cmd_submit(CommandContext& ctx) {
+void cmd_record(CommandContext& ctx) {
     try {
-        auto svc = Services::load(find_root_or_die());
+        auto root = find_root_or_die();
+        auto svc = Services::load(root);
+        auto prob = svc.pm->get_problem(ctx.record_pid);
 
-        if (ctx.submit_quality < 0 || ctx.submit_quality > 5) {
-            fs::path report_path = fs::path(".shuati") / "problems" / ctx.submit_pid / "test_report.json";
+        if (prob.id.empty()) {
+            std::cerr << "[!] Problem not found: " << ctx.record_pid << std::endl;
+            return;
+        }
+
+        if (ctx.record_quality < 0 || ctx.record_quality > 5) {
+            fs::path report_path = root / ".shuati" / "problems" / canonical_source(prob.source) / prob.id / "test_report.json";
             int auto_q = -1;
             if (fs::exists(report_path)) {
                 try {
@@ -166,44 +173,44 @@ void cmd_submit(CommandContext& ctx) {
             }
 
             if (ctx.is_tui) {
-                ctx.submit_quality = (auto_q >= 0) ? auto_q : 3;
-                std::cout << "[TUI] Auto-selected quality: " << ctx.submit_quality
-                          << ". Override with /submit <id> -q <0-5> if needed." << std::endl;
+                ctx.record_quality = (auto_q >= 0) ? auto_q : 3;
+                std::cout << "[TUI] Auto-selected quality: " << ctx.record_quality
+                          << ". Override with /record <id> -q <0-5> if needed." << std::endl;
             } else if (auto_q >= 0) {
                 std::cout << "Press Enter to accept [" << auto_q << "], or input 0-5 to override: ";
                 std::string val;
                 std::getline(std::cin, val);
                 if (val.empty()) {
-                    ctx.submit_quality = auto_q;
+                    ctx.record_quality = auto_q;
                 } else {
-                    try { ctx.submit_quality = std::stoi(val); } catch (...) { ctx.submit_quality = auto_q; }
+                    try { ctx.record_quality = std::stoi(val); } catch (...) { ctx.record_quality = auto_q; }
                 }
             } else {
                 std::cout << "Mastery (0=not yet, 5=fully mastered): ";
                 std::string val;
                 std::getline(std::cin, val);
-                try { ctx.submit_quality = std::stoi(val); } catch (...) { ctx.submit_quality = 3; }
+                try { ctx.record_quality = std::stoi(val); } catch (...) { ctx.record_quality = 3; }
             }
         }
 
-        if (ctx.submit_quality < 3) {
+        if (ctx.record_quality < 3) {
             if (ctx.is_tui) {
-                svc.ma->log_mistake(ctx.submit_pid, "manual-review", "Submitted from TUI with low confidence");
-                std::cout << "[TUI] Logged a low-confidence submit marker."
-                          << " Add details later with shuati submit " << ctx.submit_pid
-                          << " -q " << ctx.submit_quality << std::endl;
+                svc.ma->log_mistake(prob.id, "manual-review", "Recorded from TUI with low confidence");
+                std::cout << "[TUI] Logged a low-confidence record marker."
+                          << " Add details later with shuati record " << prob.display_id
+                          << " -q " << ctx.record_quality << std::endl;
             } else {
                 std::cout << "Mistake type (logic/detail/algorithm/TLE): ";
                 std::string type, desc;
                 std::getline(std::cin, type);
                 std::cout << "Details (or leave empty): ";
                 std::getline(std::cin, desc);
-                svc.ma->log_mistake(ctx.submit_pid, type, desc);
+                svc.ma->log_mistake(prob.id, type, desc);
             }
         }
 
-        auto review = svc.db->get_review(ctx.submit_pid);
-        review = SM2Algorithm::update(review, ctx.submit_quality);
+        auto review = svc.db->get_review(prob.id);
+        review = SM2Algorithm::update(review, ctx.record_quality);
         svc.db->upsert_review(review);
         std::cout << "[+] Recorded. Next review interval: " << review.interval << " days." << std::endl;
     } catch (const std::exception& e) {

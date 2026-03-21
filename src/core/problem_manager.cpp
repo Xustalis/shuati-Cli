@@ -62,9 +62,12 @@ void ProblemManager::pull_problem(const std::string& url) {
     // Sanitize ID to prevent path traversal
     p.id = utils::sanitize_filename(p.id);
 
-    std::string problems_dir = Config::DIR_NAME + std::string("/problems/");
-    if (!std::filesystem::exists(problems_dir)) std::filesystem::create_directories(problems_dir);
-    std::string filename = problems_dir + p.id + ".md";
+    auto root = Config::find_root();
+    if (root.empty()) throw std::runtime_error("Root not found");
+    
+    std::filesystem::path prob_dir = root / Config::DIR_NAME / "problems" / utils::canonical_source(p.source) / p.id;
+    if (!std::filesystem::exists(prob_dir)) std::filesystem::create_directories(prob_dir);
+    std::string filename = (prob_dir / "problem.md").string();
     std::ofstream out(filename);
     out << "# " << p.title << "\n\n"
         << "来源: " << url << "\n"
@@ -108,10 +111,16 @@ std::string ProblemManager::create_local(const std::string& title, const std::st
     p.difficulty = difficulty;
     p.created_at = std::time(nullptr);
 
-    std::string problems_dir = Config::DIR_NAME + std::string("/problems/");
-    if (!std::filesystem::exists(problems_dir)) std::filesystem::create_directories(problems_dir);
-    std::string filename = problems_dir + p.id + ".md";
-    std::ofstream out(filename);
+    auto root = Config::find_root();
+    std::filesystem::path prob_dir;
+    if (!root.empty()) {
+        prob_dir = root / Config::DIR_NAME / "problems" / utils::canonical_source(p.source) / p.id;
+    } else {
+        prob_dir = std::filesystem::path(Config::DIR_NAME) / "problems" / utils::canonical_source(p.source) / p.id;
+    }
+    if (!std::filesystem::exists(prob_dir)) std::filesystem::create_directories(prob_dir);
+    auto file_path = prob_dir / "problem.md";
+    std::ofstream out(file_path);
     out << "# " << title << "\n\n"
         << "标签: " << tags << "\n"
         << "难度: " << difficulty << "\n\n"
@@ -121,7 +130,7 @@ std::string ProblemManager::create_local(const std::string& title, const std::st
         << "## 示例\n\n";
     out.close();
 
-    p.content_path = std::filesystem::absolute(filename).string();
+    p.content_path = std::filesystem::absolute(file_path).string();
     db_->add_problem(p);
 
     ReviewItem r;
@@ -129,7 +138,7 @@ std::string ProblemManager::create_local(const std::string& title, const std::st
     r.next_review = std::time(nullptr) + 86400;
     db_->upsert_review(r);
 
-    fmt::print(fg(fmt::color::green), "[+] 本地题目 '{}' 已创建: {}\n", title, filename);
+    fmt::print(fg(fmt::color::green), "[+] 本地题目 '{}' 已创建: {}\n", title, p.content_path);
     return p.id;
 }
 
@@ -218,4 +227,36 @@ Problem ProblemManager::parse_html(const std::string& html, const std::string& u
     return p;
 }
 
+std::vector<Problem> ProblemManager::filter_problems(const std::vector<Problem>& problems,
+                                                     const std::string& status_filter,
+                                                     const std::string& difficulty_filter,
+                                                     const std::string& source_filter) {
+    std::vector<Problem> result = problems;
+    
+    if (status_filter == "review") {
+        auto reviews = db_->get_due_reviews(std::time(nullptr));
+        std::unordered_set<std::string> due_ids;
+        for (const auto& r : reviews) due_ids.insert(r.problem_id);
+        
+        result.erase(std::remove_if(result.begin(), result.end(),
+            [&](const Problem& p) {
+                if (due_ids.find(p.id) == due_ids.end()) return true;
+                if (difficulty_filter != "all" && p.difficulty != difficulty_filter) return true;
+                if (source_filter != "all" && utils::canonical_source(p.source) != source_filter) return true;
+                return false;
+            }), result.end());
+        return result;
+    }
+
+    result.erase(std::remove_if(result.begin(), result.end(),
+        [&](const Problem& p) {
+            if (difficulty_filter != "all" && p.difficulty != difficulty_filter) return true;
+            if (source_filter != "all" && utils::canonical_source(p.source) != source_filter) return true;
+            if (status_filter == "ac") return p.last_verdict != "AC";
+            if (status_filter == "failed") return p.last_verdict == "AC" || p.last_verdict.empty() || p.last_verdict == "SKIPPED";
+            if (status_filter == "unaudited") return !p.last_verdict.empty() && p.last_verdict != "SKIPPED";
+            return false;
+        }), result.end());
+    return result;
+}
 } // namespace shuati

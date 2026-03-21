@@ -214,9 +214,14 @@ void Database::init_indexes() {
 
 void Database::add_problem(const Problem& p) {
     SQLite::Statement q(*db_,
-        "INSERT OR REPLACE INTO problems (id,source,title,url,content_path,tags,difficulty,created_at,"
+        "INSERT INTO problems (id,source,title,url,content_path,tags,difficulty,created_at,"
         "last_verdict,pass_count,total_count,last_checked_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
+        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) "
+        "ON CONFLICT(id) DO UPDATE SET "
+        "source=excluded.source, title=excluded.title, url=excluded.url, "
+        "content_path=excluded.content_path, tags=excluded.tags, difficulty=excluded.difficulty, "
+        "created_at=excluded.created_at, last_verdict=excluded.last_verdict, "
+        "pass_count=excluded.pass_count, total_count=excluded.total_count, last_checked_at=excluded.last_checked_at");
     q.bind(1, ensure_utf8_lossy(p.id));
     q.bind(2, ensure_utf8_lossy(p.source));
     q.bind(3, ensure_utf8_lossy(p.title));

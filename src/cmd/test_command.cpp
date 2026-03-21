@@ -136,20 +136,16 @@ static std::string build_problem_text(const Problem& prob) {
 
 void cmd_test(CommandContext& ctx) {
     try {
-        auto svc = Services::load(find_root_or_die());
+        auto root = find_root_or_die();
+        auto svc = Services::load(root);
         
-        // 1. Resolve Problem
-        // Support ID or TID
-        Problem prob;
-        if (std::all_of(ctx.solve_pid.begin(), ctx.solve_pid.end(), ::isdigit)) {
-             prob = svc.db->get_problem_by_display_id(std::stoi(ctx.solve_pid));
-        }
-        if (prob.id.empty()) prob = svc.db->get_problem(ctx.solve_pid);
+        // 1. Resolve Problem via unified ID resolution (supports TID or UUID)
+        auto prob = svc.pm->get_problem(ctx.solve_pid);
 
         if (prob.id.empty()) { std::cerr << "[!] 题目不存在。" << std::endl; return; }
         
         // 2. Prepare Environment
-        fs::path prob_dir = fs::path(".shuati") / "problems" / prob.id;
+        fs::path prob_dir = root / ".shuati" / "problems" / canonical_source(prob.source) / prob.id;
         fs::create_directories(prob_dir / "data");
         fs::create_directories(prob_dir / "validator");
         fs::create_directories(prob_dir / "debug");

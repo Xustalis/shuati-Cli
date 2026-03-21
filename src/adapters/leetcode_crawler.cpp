@@ -45,7 +45,10 @@ Problem LeetCodeCrawler::fetch_problem(const std::string& url) {
             }
 
             // Difficulty
-            p.difficulty = problem_data.value("difficulty", "");
+            std::string lc_diff = problem_data.value("difficulty", "");
+            if (lc_diff == "Easy") p.difficulty = "easy";
+            else if (lc_diff == "Hard") p.difficulty = "hard";
+            else p.difficulty = "medium";
 
             // Tags
             if (problem_data.contains("topicTags") && problem_data["topicTags"].is_array()) {

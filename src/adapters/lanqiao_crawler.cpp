@@ -139,15 +139,15 @@ private:
         if (json.contains("difficulty")) {
             auto diff = json["difficulty"];
             if (diff.is_string()) {
-                p.difficulty = diff.get<std::string>();
+                std::string ds = diff.get<std::string>();
+                if (ds == "简单" || ds == "easy" || ds == "Easy") p.difficulty = "easy";
+                else if (ds == "困难" || ds == "hard" || ds == "Hard") p.difficulty = "hard";
+                else p.difficulty = "medium";
             } else if (diff.is_number_integer()) {
                 int level = diff.get<int>();
-                switch (level) {
-                    case 1: p.difficulty = "简单"; break;
-                    case 2: p.difficulty = "中等"; break;
-                    case 3: p.difficulty = "困难"; break;
-                    default: p.difficulty = fmt::format("Level {}", level); break;
-                }
+                if (level == 1) p.difficulty = "easy";
+                else if (level == 3) p.difficulty = "hard";
+                else p.difficulty = "medium";
             }
         }
 
