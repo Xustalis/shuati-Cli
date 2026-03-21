@@ -94,22 +94,15 @@ Element render_welcome(const TuiTheme& theme) {
     auto accent = theme.accent_color;
     auto dim = theme.dim_color;
 
-    // Cute cat mascot - simple & instantly recognizable
+// Cute solid pixel-art mascot (Claude Code style)
     auto panda_mascot = vbox({
-        text("   /\\   /\\") | bold | color(accent),
-        text("  /  \\_/  \\") | bold | color(accent),
-        hbox({
-            text("  | ") | color(accent),
-            text("\xe2\x8a\x99   \xe2\x8a\x99") | bold | color(panda_white),
-            text(" |") | color(accent),
-        }),
-        hbox({
-            text("  |    ") | color(accent),
-            text("\xcf\x89") | bold | color(panda_white),
-            text("   |") | color(accent),
-        }),
-        text("   \\_____/ ") | color(accent),
+        text("     \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88     ") | bold | color(accent),
+        text("   \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88   ") | bold | color(accent),
+        text("   \xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88  \xe2\x96\x88\xe2\x96\x88   ") | bold | color(accent),
+        text("   \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88   ") | bold | color(accent),
+        text("     \xe2\x96\x88\xe2\x96\x88      \xe2\x96\x88\xe2\x96\x88     ") | bold | color(accent),
     });
+
 
     auto left_col = vbox({
         panda_mascot,
