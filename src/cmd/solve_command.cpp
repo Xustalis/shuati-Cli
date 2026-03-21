@@ -86,24 +86,11 @@ void cmd_solve(CommandContext& ctx) {
             } catch (...) {
                 std::cout << "Input problem ID: ";
                 std::cin >> ctx.solve_pid;
-                try {
-                    if (std::all_of(ctx.solve_pid.begin(), ctx.solve_pid.end(), ::isdigit)) {
-                        int tid = std::stoi(ctx.solve_pid);
-                        prob = svc.db->get_problem_by_display_id(tid);
-                    } else {
-                        prob = svc.db->get_problem(ctx.solve_pid);
-                    }
-                } catch (...) {
-                }
+                prob = svc.pm->get_problem(ctx.solve_pid);
             }
 
         } else {
-            try {
-                int tid = std::stoi(ctx.solve_pid);
-                prob = svc.db->get_problem_by_display_id(tid);
-            } catch (...) {
-                prob = svc.db->get_problem(ctx.solve_pid);
-            }
+            prob = svc.pm->get_problem(ctx.solve_pid);
         }
 
         if (prob.id.empty()) {

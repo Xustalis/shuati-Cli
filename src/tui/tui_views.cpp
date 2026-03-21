@@ -441,7 +441,7 @@ Element render_list_view(const AppState& state, const TuiTheme& theme) {
         text("  h") | bold | color(theme.dim_color),
         text(" \xe6\x8f\x90\xe7\xa4\xba") | color(theme.dim_color),
         text("  r") | bold | color(theme.dim_color),
-        text(" \xe8\xae\xb0\xe5\xbd\x95") | color(theme.dim_color),
+        text(" \xe5\xa4\x8d\xe4\xb9\xa0/\xe6\xa3\x80\xe6\x9f\xa5") | color(theme.dim_color),
         text("  d") | bold | color(theme.dim_color),
         text(" \xe5\x88\xa0\xe9\x99\xa4") | color(theme.dim_color),
         text("  f/F/s") | bold | color(theme.dim_color),

@@ -15,7 +15,7 @@ std::vector<CommandSpec> tui_command_specs() {
         {"/view", "/view <id>", "查看测试详情", CommandCategory::Problem},
         {"/test", "/test <id>", "运行测试用例", CommandCategory::Problem},
         {"/hint", "/hint <id>", "获取 AI 提示", CommandCategory::AI},
-        {"/record", "/record <id>", "提交并记录掌握度", CommandCategory::Problem},
+        {"/record", "/record <id>", "复习推荐检查完成并记录", CommandCategory::Problem},
         {"/delete", "/delete <id>", "删除题目", CommandCategory::Problem},
         {"/clean", "/clean", "清理临时文件", CommandCategory::Project},
         {"/login", "/login <platform>", "配置平台登录 Cookie", CommandCategory::Project},

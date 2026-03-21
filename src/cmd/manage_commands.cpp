@@ -69,12 +69,12 @@ void cmd_delete(CommandContext& ctx) {
             }
         }
 
-        try {
-            int tid = std::stoi(ctx.solve_pid);
-            svc.pm->delete_problem(tid);
-        } catch (...) {
-            svc.pm->delete_problem(ctx.solve_pid);
+        auto prob = svc.pm->get_problem(ctx.solve_pid);
+        if (prob.id.empty()) {
+            std::cerr << "[!] 未找到题目: " << ctx.solve_pid << std::endl;
+            return;
         }
+        svc.pm->delete_problem(prob.id);
         std::cout << "[+] 题目已删除。" << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "[!] Error: " << e.what() << std::endl;
