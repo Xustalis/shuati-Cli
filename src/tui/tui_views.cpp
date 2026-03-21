@@ -89,98 +89,74 @@ Element render_buffer(const AppState& state, const TuiTheme& theme) {
 }
 
 Element render_welcome(const TuiTheme& theme) {
-    Elements lines;
+    auto panda_black = theme.text_color;
+    auto panda_white = ftxui::Color::RGB(235, 235, 235);
+    auto accent = theme.accent_color;
+    auto dim = theme.dim_color;
 
-    lines.push_back(text(""));
-    lines.push_back(text(""));
+    // Improved Panda Mascot (Better Eye Patches & Ears)
+    auto panda_mascot = vbox({
+        hbox({
+            text("  \xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x97") | bold | color(panda_black),
+            text("       "),
+            text("\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x97  ") | bold | color(panda_black),
+        }),
+        hbox({
+            text("  \xe2\x95\x9a\xe2\x95\x90\xe2\x95\xa6\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90") | color(panda_black),
+            text("\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90") | color(panda_white),
+            text("\xe2\x95\x90\xe2\x95\xa6\xe2\x95\x90\xe2\x95\x9d  ") | color(panda_black),
+        }),
+        hbox({
+            text("     \xe2\x95\x91 ") | color(panda_white),
+            text("\xe2\x96\x88\xe2\x97\x8f") | bold | color(panda_black),
+            filler(),
+            text("\xe2\x97\x8f\xe2\x96\x88") | bold | color(panda_black),
+            text(" \xe2\x95\x91     ") | color(panda_white),
+        }),
+        hbox({
+            text("     \xe2\x95\x91    \xe2\x95\xa1\xe2\x96\xbd\xe2\x95\x9e    \xe2\x95\x91     ") | color(panda_white),
+        }),
+        hbox({
+            text("     \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d     ") | color(panda_white),
+        }),
+    });
 
-    auto panda_white = ftxui::Color::RGB(220, 220, 220);
+    // Left Column: Branding
+    auto left_col = vbox({
+        hbox({ filler(), panda_mascot, filler() }),
+        text(""),
+        text("  \xe2\x95\x94\xe2\x95\x90\xe2\x95\x97 \xe2\x95\xa6 \xe2\x95\xa6 \xe2\x95\xa6 \xe2\x95\xa6 \xe2\x95\x94\xe2\x95\x90\xe2\x95\x97 \xe2\x95\x94\xe2\x95\xa6\xe2\x95\x97 \xe2\x95\xa6") | bold | color(accent),
+        text("  \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x97 \xe2\x95\xa0\xe2\x95\x90\xe2\x95\xa3 \xe2\x95\x91 \xe2\x95\x91 \xe2\x95\xa0\xe2\x95\x90\xe2\x95\xa3  \xe2\x95\x91  \xe2\x95\x91") | bold | color(accent),
+        text("  \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d \xe2\x95\xa9 \xe2\x95\xa9 \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d \xe2\x95\xa9 \xe2\x95\xa9  \xe2\x95\xa9  \xe2\x95\xa9") | bold | color(accent),
+        text(""),
+        text("  \xe6\x99\xba\xe8\x83\xbd\xe5\x88\xb7\xe9\xa2\x98\xe5\x8a\xa9\xe6\x89\x8b") | color(dim),
+        text("  for OIer & Coder") | color(dim),
+    });
 
-    // Panda mascot using box-drawing: ears + face with eye patches
-    lines.push_back(hbox({
-        text("        ") | color(theme.dim_color),
-        text("\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x97") | bold | color(theme.text_color),
-        text("    ") | color(panda_white),
-        text("\xe2\x95\x94\xe2\x95\x90\xe2\x95\x90\xe2\x95\x97") | bold | color(theme.text_color),
-    }));
-    lines.push_back(hbox({
-        text("        ") | color(theme.dim_color),
-        text("\xe2\x95\x9a\xe2\x95\x97") | bold | color(theme.text_color),
-        text(" \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d ") | color(panda_white),
-        text("\xe2\x95\x94\xe2\x95\x9d") | bold | color(theme.text_color),
-    }));
-    lines.push_back(hbox({
-        text("         ") | color(theme.dim_color),
-        text("\xe2\x95\x91") | color(panda_white),
-        text(" \xe2\x96\x88\xc2\xb7") | bold | color(theme.text_color),
-        text("    ") | color(panda_white),
-        text("\xc2\xb7\xe2\x96\x88 ") | bold | color(theme.text_color),
-        text("\xe2\x95\x91") | color(panda_white),
-    }));
-    lines.push_back(hbox({
-        text("         ") | color(theme.dim_color),
-        text("\xe2\x95\x91") | color(panda_white),
-        text("    \xe2\x96\xbd    ") | color(theme.text_color),
-        text("\xe2\x95\x91") | color(panda_white),
-    }));
-    lines.push_back(hbox({
-        text("         ") | color(theme.dim_color),
-        text("\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x90\xe2\x95\x9d") | color(panda_white),
-    }));
+    // Right Column: Tips & Quick Start
+    auto right_col = vbox({
+        text("\xe2\x9a\xa1 \xe5\xbf\xab\xe9\x80\x9f\xe5\xbc\x80\xe5\xa7\x8b") | bold | color(theme.heading_color),
+        separatorLight() | color(dim),
+        hbox({ text(" /pull ") | bold | color(accent), text(" \xe6\x8b\x89\xe5\x8f\x96\xe9\xa2\x98\xe7\x9b\xae ") | color(dim) }),
+        hbox({ text(" /list ") | bold | color(accent), text(" \xe9\xa2\x98\xe5\xba\x93\xe6\xb5\x8f\xe8\xa7\x88 ") | color(dim) }),
+        hbox({ text(" /solve") | bold | color(accent), text(" \xe5\xbc\x80\xe5\xa7\x8b\xe5\x81\x9a\xe9\xa2\x98 ") | color(dim) }),
+        text(""),
+        text("\xe2\x9a\x99 \xe5\xb8\xb8\xe7\x94\xa8\xe5\x91\xbd\xe4\xbb\xa4") | bold | color(theme.heading_color),
+        separatorLight() | color(dim),
+        hbox({ text(" /hint ") | bold | color(accent), text(" AI \xe6\x80\x9d\xe8\xb7\xaf\xe6\x8f\x90\xe7\xa4\xba ") | color(dim) }),
+        hbox({ text(" /test ") | bold | color(accent), text(" \xe6\xb5\x8b\xe8\xaf\x95\xe4\xbb\xa3\xe7\xa0\x81 ") | color(dim) }),
+        hbox({ text(" /conf ") | bold | color(accent), text(" \xe4\xbf\xae\xe6\x94\xb9\xe9\x85\x8d\xe7\xbd\xae ") | color(dim) }),
+    });
 
-    lines.push_back(text(""));
-
-    // Compact shuati logo using box-drawing characters
-    lines.push_back(text("       \xe2\x95\x94\xe2\x95\x90\xe2\x95\x97 \xe2\x95\xa6 \xe2\x95\xa6 \xe2\x95\xa6 \xe2\x95\xa6 \xe2\x95\x94\xe2\x95\x90\xe2\x95\x97 \xe2\x95\x94\xe2\x95\xa6\xe2\x95\x97 \xe2\x95\xa6") | bold | color(theme.accent_color));
-    lines.push_back(text("       \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x97 \xe2\x95\xa0\xe2\x95\x90\xe2\x95\xa3 \xe2\x95\x91 \xe2\x95\x91 \xe2\x95\xa0\xe2\x95\x90\xe2\x95\xa3  \xe2\x95\x91  \xe2\x95\x91") | bold | color(theme.accent_color));
-    lines.push_back(text("       \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d \xe2\x95\xa9 \xe2\x95\xa9 \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d \xe2\x95\xa9 \xe2\x95\xa9  \xe2\x95\xa9  \xe2\x95\xa9") | bold | color(theme.accent_color));
-
-    lines.push_back(text(""));
-    lines.push_back(text("       \xe6\x99\xba\xe8\x83\xbd\xe5\x88\xb7\xe9\xa2\x98\xe5\x8a\xa9\xe6\x89\x8b \xc2\xb7 for OIer & Coder") | color(theme.dim_color));
-
-    lines.push_back(text(""));
-
-    // Quick start section
-    lines.push_back(text("   \xe5\xbf\xab\xe9\x80\x9f\xe5\xbc\x80\xe5\xa7\x8b") | bold | color(theme.heading_color));
-    lines.push_back(text(""));
-    lines.push_back(hbox({
-        text("     /pull <url>") | bold | color(theme.prompt_color),
-        text("       \xe4\xbb\x8e URL \xe6\x8b\x89\xe5\x8f\x96\xe9\xa2\x98\xe7\x9b\xae\xe5\x88\xb0\xe6\x9c\xac\xe5\x9c\xb0\xe9\xa2\x98\xe5\xba\x93") | color(theme.dim_color),
-    }));
-    lines.push_back(hbox({
-        text("     /list") | bold | color(theme.prompt_color),
-        text("             \xe6\xb5\x8f\xe8\xa7\x88\xe6\x9c\xac\xe5\x9c\xb0\xe9\xa2\x98\xe5\xba\x93\xef\xbc\x8c\xe6\x94\xaf\xe6\x8c\x81 --filter \xe5\x92\x8c\xe5\xbf\xab\xe6\x8d\xb7\xe6\x93\x8d\xe4\xbd\x9c") | color(theme.dim_color),
-    }));
-    lines.push_back(hbox({
-        text("     /solve <id>") | bold | color(theme.prompt_color),
-        text("       \xe8\xbf\x9b\xe5\x85\xa5\xe5\x81\x9a\xe9\xa2\x98\xe5\xb7\xa5\xe4\xbd\x9c\xe6\xb5\x81\xef\xbc\x8c\xe8\x87\xaa\xe5\x8a\xa8\xe6\x89\x93\xe5\xbc\x80\xe7\xbc\x96\xe8\xbe\x91\xe5\x99\xa8") | color(theme.dim_color),
-    }));
-
-    lines.push_back(text(""));
-    lines.push_back(text("   \xe6\x9b\xb4\xe5\xa4\x9a\xe5\x91\xbd\xe4\xbb\xa4") | bold | color(theme.heading_color));
-    lines.push_back(text(""));
-    lines.push_back(hbox({
-        text("     /hint <id>") | bold | color(theme.prompt_color),
-        text("        AI \xe6\x99\xba\xe8\x83\xbd\xe5\x88\x86\xe6\x9e\x90\xe9\xa2\x98\xe7\x9b\xae\xef\xbc\x8c\xe7\xbb\x99\xe5\x87\xba\xe8\xa7\xa3\xe9\xa2\x98\xe6\x80\x9d\xe8\xb7\xaf\xe6\x8f\x90\xe7\xa4\xba") | color(theme.dim_color),
-    }));
-    lines.push_back(hbox({
-        text("     /test <id>") | bold | color(theme.prompt_color),
-        text("        \xe7\xbc\x96\xe8\xaf\x91\xe5\xb9\xb6\xe8\xbf\x90\xe8\xa1\x8c\xe6\xb5\x8b\xe8\xaf\x95\xe7\x94\xa8\xe4\xbe\x8b\xef\xbc\x8c\xe5\xaf\xb9\xe6\xaf\x94\xe9\xa2\x84\xe6\x9c\x9f\xe8\xbe\x93\xe5\x87\xba") | color(theme.dim_color),
-    }));
-    lines.push_back(hbox({
-        text("     /config") | bold | color(theme.prompt_color),
-        text("           \xe7\xbc\x96\xe8\xbe\x91\xe8\xaf\xad\xe8\xa8\x80\xe3\x80\x81\xe7\xbc\x96\xe8\xbe\x91\xe5\x99\xa8\xe3\x80\x81" "API Key \xe7\xad\x89\xe9\x85\x8d\xe7\xbd\xae") | color(theme.dim_color),
-    }));
-    lines.push_back(hbox({
-        text("     /help") | bold | color(theme.prompt_color),
-        text("             \xe6\x9f\xa5\xe7\x9c\x8b\xe5\x85\xa8\xe9\x83\xa8\xe5\x8f\xaf\xe7\x94\xa8\xe5\x91\xbd\xe4\xbb\xa4\xe5\x8f\x8a\xe8\xaf\xa6\xe7\xbb\x86\xe7\x94\xa8\xe6\xb3\x95") | color(theme.dim_color),
-    }));
-
-    lines.push_back(text(""));
-    lines.push_back(text("   \xe8\xbe\x93\xe5\x85\xa5 / \xe5\xbc\x80\xe5\xa4\xb4\xe7\x9a\x84\xe5\x91\xbd\xe4\xbb\xa4, Tab \xe8\xa1\xa5\xe5\x85\xa8, \xe2\x86\x91\xe2\x86\x93 \xe5\x8e\x86\xe5\x8f\xb2\xe8\xae\xb0\xe5\xbd\x95") | color(theme.dim_color));
-    lines.push_back(text(""));
-
-    return vbox(std::move(lines)) | center;
+    return hbox({
+        filler(),
+        left_col,
+        filler(),
+        separator(),
+        filler(),
+        right_col,
+        filler(),
+    }) | border | center;
 }
 
 Element render_top_bar(const TuiTheme& theme, const std::string& version, const std::string& project_path) {
