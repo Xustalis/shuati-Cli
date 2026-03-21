@@ -94,13 +94,21 @@ Element render_welcome(const TuiTheme& theme) {
     auto accent = theme.accent_color;
     auto dim = theme.dim_color;
 
-    // Cute panda mascot
+    // Cute cat mascot - simple & instantly recognizable
     auto panda_mascot = vbox({
-        text("    (\xe2\x97\x8f)(  )(  )(\xe2\x97\x8f)") | bold | color(panda_black),
-        text("   (  \xe2\x96\x88\xe2\x96\x88      \xe2\x96\x88\xe2\x96\x88  )") | color(panda_white),
-        text("   ( \xe2\x96\x88\xe2\x97\x8b\xe2\x96\x88  \xe2\x96\xbc  \xe2\x96\x88\xe2\x97\x8b\xe2\x96\x88 )") | color(panda_white),
-        text("    (    \xe2\x80\xa2\xcf\x89\xe2\x80\xa2    )") | color(panda_white),
-        text("     \\  \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80  /") | color(panda_white),
+        text("   /\\   /\\") | bold | color(accent),
+        text("  /  \\_/  \\") | bold | color(accent),
+        hbox({
+            text("  | ") | color(accent),
+            text("\xe2\x8a\x99   \xe2\x8a\x99") | bold | color(panda_white),
+            text(" |") | color(accent),
+        }),
+        hbox({
+            text("  |    ") | color(accent),
+            text("\xcf\x89") | bold | color(panda_white),
+            text("   |") | color(accent),
+        }),
+        text("   \\_____/ ") | color(accent),
     });
 
     auto left_col = vbox({
