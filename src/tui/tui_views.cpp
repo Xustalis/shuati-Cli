@@ -35,10 +35,10 @@ Element render_buffer_line(const BufferLine& line, const TuiTheme& theme) {
         });
     case LineType::Output:
         return text("    " + line.text) | color(theme.text_color);
-    case LineType::System:
+    case LineType::SystemLog:
         return hbox({
-            text("    ") | color(theme.dim_color),
-            text(line.text) | color(theme.system_color),
+            text("  "),
+            text(line.text) | bold | color(theme.system_color),
         });
     case LineType::Error:
         return hbox({
@@ -57,34 +57,22 @@ Element render_buffer_line(const BufferLine& line, const TuiTheme& theme) {
 }
 
 Element render_buffer(const AppState& state, const TuiTheme& theme) {
-    // Buffer is rendered as a "window" driven by AppState.scroll_offset.
-    // This makes PageUp/PageDown functional (otherwise scroll_offset had no effect).
-    constexpr int VISIBLE_BUFFER_LINES = 20;
-
+    // Determine how many lines the terminal can actually show.
+    // For now, let's stick to a reasonable default or dynamic calculation if possible.
+    // However, ftxui::Renderer usually gives us the dimensions.
+    // Since we are inside a flex container, we can just render everything and let the frame handle it.
+    
     Elements lines;
-    const int start = std::max(0, state.scroll_offset);
-    const int end_exclusive = std::min(
-        static_cast<int>(state.buffer.size()),
-        start + VISIBLE_BUFFER_LINES
-    );
-    if (start >= end_exclusive) {
-        // Avoid rendering an empty buffer area with non-empty buffer.
-        // Fallback to showing from 0.
-        lines.reserve(std::min(static_cast<int>(state.buffer.size()), VISIBLE_BUFFER_LINES));
-        const int fallback_end = std::min(static_cast<int>(state.buffer.size()), VISIBLE_BUFFER_LINES);
-        for (int i = 0; i < fallback_end; i++) {
-            lines.push_back(render_buffer_line(state.buffer[i], theme));
-        }
-    } else {
-        lines.reserve(static_cast<size_t>(end_exclusive - start));
-        for (int i = start; i < end_exclusive; i++) {
-            lines.push_back(render_buffer_line(state.buffer[static_cast<size_t>(i)], theme));
-        }
+    for (const auto& line : state.buffer) {
+        lines.push_back(render_buffer_line(line, theme));
     }
 
     if (lines.empty()) {
         return render_welcome(theme);
     }
+
+    // We use focusPositionRelative(0, 1) in tui_app.cpp which ensures 
+    // the latest output is always visible if we don't manually restrict lines here.
     return vbox(std::move(lines));
 }
 
@@ -94,7 +82,7 @@ Element render_welcome(const TuiTheme& theme) {
     auto accent = theme.accent_color;
     auto dim = theme.dim_color;
 
-// Cute solid pixel-art mascot (Claude Code style)
+// Cute solid pixel-art mascot
     auto panda_mascot = vbox({
         text("     \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88     ") | bold | color(accent),
         text("   \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88   ") | bold | color(accent),
@@ -169,6 +157,34 @@ Element render_bottom_bar(const TuiTheme& theme, bool is_running, const std::str
         parts.push_back(text("\xe2\x97\x8f \xe5\xb0\xb1\xe7\xbb\xaa ") | color(theme.success_color));
     }
     return hbox(std::move(parts));
+}
+
+Element render_sidebar(const AppState& state, const TuiTheme& theme) {
+    Elements rows;
+    rows.push_back(text("  shuati") | bold | color(theme.heading_color));
+    rows.push_back(text(""));
+    
+    for (int i = 0; i < static_cast<int>(state.sidebar_state.categories.size()); i++) {
+        bool selected = (state.sidebar_state.selected == i);
+        bool focused = (state.active_pane == 0); // pane 0 is sidebar
+        
+        auto btn = text(state.sidebar_state.categories[i]);
+        if (selected) {
+            btn = btn | bold;
+            if (focused) {
+                btn = btn | inverted; // Inverted colors for active selection
+            } else {
+                btn = btn | bgcolor(theme.selected_bg) | color(theme.accent_color);
+            }
+        } else {
+            btn = btn | color(theme.dim_color);
+        }
+        
+        rows.push_back(btn);
+        rows.push_back(text("")); // Spacing
+    }
+    
+    return vbox(std::move(rows)) | size(WIDTH, LESS_THAN, 20);
 }
 
 Element render_config_view(const AppState& state, const TuiTheme& theme) {
@@ -387,7 +403,11 @@ Element render_list_view(const AppState& state, const TuiTheme& theme) {
         });
 
         if (sel) {
-            row_el = row_el | bold | bgcolor(theme.selected_bg) | focus;
+            if (state.active_pane == 1) {
+                row_el = row_el | bold | inverted | focus;
+            } else {
+                row_el = row_el | bold | bgcolor(theme.selected_bg) | focus;
+            }
         }
 
         table_rows.push_back(row_el);
@@ -452,11 +472,21 @@ Element render_hint_view(const AppState& state, const TuiTheme& theme) {
         return vbox(std::move(rows));
     }
 
+    // Calculate visible range based on scroll_offset
+    int total_lines = static_cast<int>(hs.lines.size());
+    int visible_lines = 20; // Approximate visible lines
+    int start_idx = std::max(0, std::min(hs.scroll_offset, total_lines - 1));
+    int end_idx = std::min(start_idx + visible_lines, total_lines);
+
     Elements body_lines;
-    for (int i = 0; i < static_cast<int>(hs.lines.size()); i++) {
+    for (int i = start_idx; i < end_idx; i++) {
         auto line_el = text("    " + hs.lines[i]) | color(theme.text_color);
-        if (i == hs.scroll_offset) {
-            line_el = line_el | focus;
+        if (i == start_idx) {
+            if (state.active_pane == 1 && !hs.show_actions) {
+                line_el = line_el | inverted | focus;
+            } else {
+                line_el = line_el | focus;
+            }
         }
         body_lines.push_back(line_el);
     }
@@ -471,7 +501,264 @@ Element render_hint_view(const AppState& state, const TuiTheme& theme) {
     rows.push_back(text(""));
     rows.push_back(text(pos_info) | color(theme.dim_color));
 
+    if (!hs.loading && !hs.lines.empty()) {
+        rows.push_back(text(""));
+        Elements action_list;
+        action_list.push_back(text("   \xe5\xbf\xab\xe6\x8d\xb7\xe6\x93\x8d\xe4\xbd\x9c: ") | color(theme.dim_color));
+        for (int i = 0; i < static_cast<int>(hs.actions.size()); i++) {
+            auto item = text(" [" + hs.actions[i] + "] ");
+            if (i == hs.selected_action) {
+                if (state.active_pane == 1 && hs.show_actions) {
+                    item = item | bold | inverted;
+                } else {
+                    item = item | bold | bgcolor(theme.selected_bg) | color(theme.accent_color);
+                }
+            } else {
+                item = item | color(theme.text_color);
+            }
+            action_list.push_back(item);
+        }
+        rows.push_back(hbox(std::move(action_list)));
+    }
+
     return vbox(std::move(rows));
+}
+
+Element render_pull_view(const AppState& state, const TuiTheme& theme, Component input_comp) {
+    const auto& ps = state.pull_state;
+    Elements rows;
+
+    rows.push_back(text(""));
+    rows.push_back(hbox({
+        text("   \xe6\x8b\x89\xe5\x8f\x96\xe9\xa2\x98\xe7\x9b\xae") | bold | color(theme.heading_color),
+        filler(),
+        text("Esc \xe8\xbf\x94\xe5\x9b\x9e\xe4\xb8\xbb\xe8\x8f\x9c\xe5\x8d\x95") | color(theme.dim_color),
+        text("  "),
+    }));
+    rows.push_back(text(""));
+
+    if (!ps.finished) {
+        rows.push_back(text("    \xe8\xaf\xb7\xe7\xb2\x98\xe8\xb4\xb4\xe9\xa2\x98\xe7\x9b\xaeURL\xef\xbc\x88\xe6\x94\xaf\xe6\x8c\x81luogu.com\xe3\x80\x81leetcode-cn.com\xe7\xad\x89\xef\xbc\x89\xef\xbc\x8c\xe5\x9b\x9e\xe8\xbd\xa6\xe7\xa1\xae\xe8\xae\xa4\xef\xbc\x9a") | color(theme.dim_color));
+        rows.push_back(text(""));
+        
+        auto input_area = hbox({
+            text("    > ") | bold | color(theme.prompt_color),
+            input_comp->Render() | color(theme.input_color),
+        });
+        rows.push_back(input_area);
+        rows.push_back(text(""));
+
+        if (!ps.error.empty()) {
+            rows.push_back(text("    [!] " + ps.error) | color(theme.error_color));
+            rows.push_back(text(""));
+        }
+
+        if (ps.loading) {
+            rows.push_back(hbox({
+                text("    \xe6\xad\xa3\xe5\x9c\xa8\xe6\x8b\x89\xe5\x8f\x96: "),
+                gauge(ps.progress) | color(theme.accent_color) | size(WIDTH, EQUAL, 30),
+                text(" " + std::to_string(static_cast<int>(ps.progress * 100)) + "%"),
+            }));
+            if (!ps.status_msg.empty()) {
+                rows.push_back(text("    " + ps.status_msg) | color(theme.dim_color));
+            }
+        }
+    } else {
+        if (ps.error.empty()) {
+            rows.push_back(text("    \xe2\x88\x9a \xe6\x8b\x89\xe5\x8f\x96\xe6\x88\x90\xe5\x8a\x9f\xef\xbc\x81") | bold | color(theme.success_color));
+            rows.push_back(text(""));
+            rows.push_back(hbox({ text("    \xe9\xa2\x98\xe5\x8f\xb7: "), text(std::to_string(ps.result.tid)) | bold | color(theme.accent_color) }));
+            rows.push_back(hbox({ text("    \xe6\xa0\x87\xe9\xa2\x98: "), text(ps.result.title) | color(theme.text_color) }));
+            rows.push_back(hbox({ text("    \xe8\xb7\xaf\xe5\xbe\x84: "), text(ps.result.path) | color(theme.dim_color) }));
+        } else {
+            rows.push_back(text("    \xc3\x97 \xe6\x8b\x89\xe5\x8f\x96\xe5\xa4\xb1\xe8\xb4\xa5") | bold | color(theme.error_color));
+            rows.push_back(text(""));
+            rows.push_back(text("    \xe5\x8e\x9f\xe5\x9b\xa0: " + ps.error) | color(theme.error_color));
+            rows.push_back(text("    \xe5\xbb\xba\xe8\xae\xae: \xe8\xaf\xb7\xe6\xa3\x80\xe6\x9f\xa5\xe7\xbd\x91\xe7\xbb\x9c\xe8\xbf\x9e\xe6\x8e\xa5\xe6\x88\x96 URL \xe6\x98\xaf\xe5\x90\xa6\xe6\xad\xa3\xe7\xa1\xae\xe3\x80\x82") | color(theme.dim_color));
+        }
+        rows.push_back(text(""));
+        rows.push_back(text("    " + std::to_string(ps.countdown) + " \xe7\xa7\x92\xe5\x90\x8e\xe8\x87\xaa\xe5\x8a\xa8\xe8\xbf\x94\xe5\x9b\x9e\xe4\xb8\xbb\xe8\x8f\x9c\xe5\x8d\x95...") | color(theme.dim_color));
+    }
+
+    return vbox(std::move(rows)) | flex;
+}
+
+Element render_status_view(const AppState& state, const TuiTheme& theme) {
+    const auto& ss = state.status_state;
+    Elements rows;
+
+    rows.push_back(text(""));
+    rows.push_back(hbox({
+        text("   \xe5\xbd\x93\xe5\x89\x8d\xe7\x8a\xb6\xe6\x80\x81") | bold | color(theme.heading_color),
+        filler(),
+        text("Esc \xe8\xbf\x94\xe5\x9b\x9e") | color(theme.dim_color),
+        text("  "),
+    }));
+    rows.push_back(text(""));
+
+    if (!ss.loaded) {
+        rows.push_back(text("    \xe6\xad\xa3\xe5\x9c\xa8\xe5\x8a\xa0\xe8\xbd\xbd\xe7\xbb\x9f\xe8\xae\xa1\xe4\xbf\xa1\xe6\x81\xaf...") | color(theme.dim_color));
+        return vbox(std::move(rows));
+    }
+
+    rows.push_back(hbox({ text("    \xe6\x80\xbb\xe9\xa2\x98\xe6\x95\xb0: "), text(std::to_string(ss.total_problems)) | bold | color(theme.accent_color) }));
+    rows.push_back(hbox({ text("    \xe5\xb7\xb2\xe9\x80\x9a\xe8\xbf\x87: "), text(std::to_string(ss.ac_problems)) | bold | color(theme.success_color) }));
+    rows.push_back(hbox({ text("    \xe5\xbe\x85\xe5\xa4\x8d\xe4\xb9\xa0: "), text(std::to_string(ss.pending_reviews)) | bold | color(theme.warn_color) }));
+    rows.push_back(text(""));
+    rows.push_back(hbox({ text("    \xe6\x9c\x80\xe8\xbf\x91\xe6\xb4\xbb\xe5\x8a\xa8: "), text(ss.last_activity) | color(theme.dim_color) }));
+
+    return vbox(std::move(rows)) | flex;
+}
+
+Element render_solve_view(const AppState& state, const TuiTheme& theme, Component search_comp) {
+    const auto& ss = state.solve_state;
+    Elements rows;
+
+    rows.push_back(text(""));
+    rows.push_back(hbox({
+        text("   \xe5\x81\x9a\xe9\xa2\x98\xe6\xa8\xa1\xe5\xbc\x8f") | bold | color(theme.heading_color),
+        filler(),
+        text("Esc \xe8\xbf\x94\xe5\x9b\x9e  / \xe6\x90\x9c\xe7\xb4\xa2  Enter \xe7\xa1\xae\xe8\xae\xa4") | color(theme.dim_color),
+        text("  "),
+    }));
+    rows.push_back(text(""));
+
+    Elements filter_parts;
+    filter_parts.push_back(text("    \xe6\x9d\xa5\xe6\xba\x90: ") | color(theme.dim_color));
+    for (const auto& src : ss.sources) {
+        bool selected = std::find(ss.selected_sources.begin(), ss.selected_sources.end(), src) != ss.selected_sources.end();
+        auto el = text(" [" + src + "] ");
+        if (selected) el = el | bold | color(theme.accent_color);
+        else el = el | color(theme.dim_color);
+        filter_parts.push_back(el);
+    }
+    rows.push_back(hbox(std::move(filter_parts)));
+    
+    Elements diff_parts;
+    diff_parts.push_back(text("    \xe9\x9a\xbe\xe5\xba\xa6: ") | color(theme.dim_color));
+    for (const auto& d : {"easy", "medium", "hard"}) {
+        bool selected = std::find(ss.selected_difficulties.begin(), ss.selected_difficulties.end(), d) != ss.selected_difficulties.end();
+        auto el = text(" [" + std::string(d) + "] ");
+        if (selected) el = el | bold | color(theme.accent_color);
+        else el = el | color(theme.dim_color);
+        diff_parts.push_back(el);
+    }
+    rows.push_back(hbox(std::move(diff_parts)));
+    rows.push_back(text(""));
+
+    rows.push_back(hbox({
+        text("    \xe6\x90\x9c\xe7\xb4\xa2: ") | color(theme.dim_color),
+        search_comp->Render() | color(theme.input_color),
+    }));
+    rows.push_back(text(""));
+
+    if (ss.filtered_rows.empty()) {
+        rows.push_back(text("    \xef\xbc\x88\xe6\x9c\xaa\xe6\x89\xbe\xe5\x88\xb0\xe5\x8c\xb9\xe9\x85\x8d\xe7\x9a\x84\xe9\xa2\x98\xe7\x9b\xae\xef\xbc\x89") | color(theme.dim_color));
+    } else {
+        Elements list_items;
+        for (int i = 0; i < static_cast<int>(ss.filtered_rows.size()); i++) {
+            const auto& r = ss.filtered_rows[i];
+            bool sel = (i == ss.selected_idx);
+            auto rc = sel ? theme.text_color : theme.dim_color;
+            
+            auto row_el = hbox({
+                text(sel ? "  > " : "    ") | color(sel ? theme.prompt_color : theme.dim_color),
+                text(std::to_string(r.tid)) | size(WIDTH, EQUAL, 6) | color(rc),
+                text(r.title) | size(WIDTH, EQUAL, 30) | color(rc),
+                text(r.difficulty) | size(WIDTH, EQUAL, 10) | color(rc),
+                text(r.source) | color(theme.dim_color),
+            });
+            if (sel) {
+                if (state.active_pane == 1) {
+                    row_el = row_el | bold | inverted | focus;
+                } else {
+                    row_el = row_el | bold | bgcolor(theme.selected_bg) | focus;
+                }
+            }
+            list_items.push_back(row_el);
+        }
+        rows.push_back(vbox(std::move(list_items)) | frame | size(HEIGHT, LESS_THAN, 12));
+    }
+
+    if (ss.show_preview) {
+        rows.push_back(separatorLight() | color(theme.border_color));
+        rows.push_back(text("    \xe9\xa2\x98\xe9\x9d\xa2\xe9\xa2\x84\xe8\xa7\x88:") | bold | color(theme.heading_color));
+        rows.push_back(text(""));
+        
+        rows.push_back(text("    " + ss.preview_content) | color(theme.text_color) | frame);
+        
+        rows.push_back(text(""));
+        rows.push_back(hbox({
+            text("    [Enter] \xe6\x89\x93\xe5\xbc\x80\xe6\xa8\xa1\xe6\x9d\xbf  [T] \xe7\xbc\x96\xe8\xaf\x91\xe6\xb5\x8b\xe8\xaf\x95  [Esc] \xe8\xbf\x94\xe5\x9b\x9e\xe5\x88\x97\xe8\xa1\x8c") | color(theme.accent_color),
+        }));
+    }
+
+    return vbox(std::move(rows)) | flex;
+}
+
+Element render_menu_view(const AppState& state, const TuiTheme& theme) {
+    const auto& ms = state.menu_state;
+    Elements rows;
+
+    rows.push_back(text(""));
+    rows.push_back(hbox({
+        text("   \xe5\x91\xbd\xe4\xbb\xa4\xe8\x8f\x9c\xe5\x8d\x95") | bold | color(theme.heading_color),
+        filler(),
+        text("\xe2\x86\x91\xe2\x86\x93 \xe9\x80\x89\xe6\x8b\xa9  Enter \xe7\xa1\xae\xe8\xae\xa4  Esc \xe8\xbf\x94\xe5\x9b\x9e") | color(theme.dim_color),
+        text("  "),
+    }));
+    rows.push_back(text(""));
+
+    if (ms.categories.empty()) {
+        rows.push_back(text("    \xe2\x9c\xaa \xe6\x9a\x82\xe6\x97\xa0\xe5\x8f\xaf\xe7\x94\xa8\xe5\x91\xbd\xe4\xbb\xa4") | color(theme.dim_color));
+        return vbox(std::move(rows));
+    }
+
+    int cat_idx = 0;
+    for (const auto& cat : ms.categories) {
+        bool cat_focused = (cat_idx == ms.selected_category);
+        rows.push_back(hbox({
+            text("  ") | color(theme.dim_color),
+            text(cat.name) | bold | color(cat_focused ? theme.heading_color : theme.dim_color),
+        }));
+        rows.push_back(text(""));
+
+        for (int item_idx = 0; item_idx < static_cast<int>(cat.items.size()); item_idx++) {
+            const auto& item = cat.items[item_idx];
+            bool item_focused = cat_focused && (item_idx == ms.selected_item);
+            bool is_selected = item_focused;
+
+            std::string prefix = is_selected ? "  > " : "    ";
+            auto item_el = hbox({
+                text(prefix) | color(is_selected ? theme.prompt_color : theme.dim_color),
+                text(item.label) | bold | color(is_selected ? theme.text_color : theme.dim_color),
+                text("  -  ") | color(theme.dim_color),
+                text(item.description) | color(is_selected ? theme.text_color : theme.dim_color),
+            });
+
+            if (is_selected) {
+                if (state.active_pane == 1) {
+                    item_el = item_el | inverted;
+                } else {
+                    item_el = item_el | bgcolor(theme.selected_bg);
+                }
+            }
+            rows.push_back(item_el);
+
+            if (item.requires_args) {
+                rows.push_back(hbox({
+                    text(is_selected ? "      " : "      "),
+                    text("[") | color(theme.dim_color),
+                    text(item.args_placeholder.empty() ? "\xe9\x9c\x80\xe8\xa6\x81\xe5\x8f\x82\xe6\x95\xb0" : item.args_placeholder) | color(item.requires_args ? theme.warn_color : theme.dim_color),
+                    text("]") | color(theme.dim_color),
+                }));
+            }
+        }
+        rows.push_back(text(""));
+        cat_idx++;
+    }
+
+    return vbox(std::move(rows)) | flex;
 }
 
 } // namespace tui

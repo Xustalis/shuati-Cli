@@ -177,6 +177,13 @@ void cmd_login(CommandContext& ctx) {
         for (auto& c : platform) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
         if (platform == "lanqiao") {
+            // TUI mode cannot use stdin - guide user to CLI
+            if (ctx.is_tui) {
+                std::cout << "[!] 登录配置需要粘贴 Cookie，TUI 模式下无法完成。" << std::endl;
+                std::cout << "    请退出 TUI 后在命令行执行: shuati login lanqiao" << std::endl;
+                std::cout << "    或使用 /config 在 lanqiao_cookie 字段中直接填入。" << std::endl;
+                return;
+            }
             std::cout << "\n";
             std::cout << "══════════════════════════════════════════════════\n";
             std::cout << "  蓝桥云课 (lanqiao.cn) 登录配置向导\n";

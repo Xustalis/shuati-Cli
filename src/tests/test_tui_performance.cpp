@@ -14,7 +14,7 @@
 static long long benchmark_first_render_ms() {
     shuati::tui::AppState state;
     shuati::tui::TuiTheme theme;
-    state.append(shuati::tui::LineType::System, "bench");
+    state.append(shuati::tui::LineType::SystemLog, "bench");
 
     auto begin = std::chrono::steady_clock::now();
     auto top = shuati::tui::render_top_bar(theme, "v0.1.0-bench");
@@ -102,6 +102,43 @@ static long long benchmark_hint_view_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
 }
 
+static long long benchmark_pull_view_ms() {
+    shuati::tui::AppState state;
+    shuati::tui::TuiTheme theme;
+    state.pull_state.url = "https://www.luogu.com.cn/problem/P1001";
+    state.pull_state.loading = true;
+    state.pull_state.progress = 0.5f;
+
+    auto dummy_input = ftxui::Input(&state.pull_state.url, "");
+
+    auto begin = std::chrono::steady_clock::now();
+    auto el = shuati::tui::render_pull_view(state, theme, dummy_input);
+    auto screen = ftxui::Screen::Create(ftxui::Dimension::Fixed(120), ftxui::Dimension::Fixed(40));
+    ftxui::Render(screen, el | ftxui::flex);
+    auto end = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
+}
+
+static long long benchmark_solve_view_ms() {
+    shuati::tui::AppState state;
+    shuati::tui::TuiTheme theme;
+    for (int i = 0; i < 50; i++) {
+        state.solve_state.filtered_rows.push_back({
+            i + 1, "p-" + std::to_string(i), "Title " + std::to_string(i), "medium", "luogu"
+        });
+    }
+    state.solve_state.selected_idx = 10;
+
+    auto dummy_search = ftxui::Input(&state.solve_state.search_query, "");
+
+    auto begin = std::chrono::steady_clock::now();
+    auto el = shuati::tui::render_solve_view(state, theme, dummy_search);
+    auto screen = ftxui::Screen::Create(ftxui::Dimension::Fixed(120), ftxui::Dimension::Fixed(40));
+    ftxui::Render(screen, el | ftxui::flex);
+    auto end = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
+}
+
 static long long benchmark_input_feedback_us() {
     auto begin = std::chrono::steady_clock::now();
     auto all = shuati::tui::tui_command_candidates();
@@ -123,6 +160,8 @@ int main() {
     auto config_render     = benchmark_config_view_ms();
     auto list_render       = benchmark_list_view_ms();
     auto hint_render       = benchmark_hint_view_ms();
+    auto pull_render       = benchmark_pull_view_ms();
+    auto solve_render      = benchmark_solve_view_ms();
     auto input_feedback    = benchmark_input_feedback_us();
 
     std::cout << "first_render_ms="   << first_render   << "\n";
@@ -130,6 +169,8 @@ int main() {
     std::cout << "config_render_ms="  << config_render   << "\n";
     std::cout << "list_100_render_ms=" << list_render    << "\n";
     std::cout << "hint_500_render_ms=" << hint_render    << "\n";
+    std::cout << "pull_render_ms="    << pull_render    << "\n";
+    std::cout << "solve_render_ms="   << solve_render   << "\n";
     std::cout << "input_feedback_us=" << input_feedback  << "\n";
 
     // These are micro-bench style assertions. CI runners can have different CPU scheduling
@@ -141,6 +182,8 @@ int main() {
     const long long config_limit  = is_ci ? 2000 : 250;
     const long long list_limit    = is_ci ? 2000 : 600;
     const long long hint_limit    = is_ci ? 2000 : 600;
+    const long long pull_limit    = is_ci ? 2000 : 250;
+    const long long solve_limit   = is_ci ? 2000 : 250;
     const long long input_limit   = is_ci ? 200000 : 100000;
 
     assert(first_render   <= first_limit);
@@ -148,6 +191,8 @@ int main() {
     assert(config_render  <= config_limit);
     assert(list_render    <= list_limit);
     assert(hint_render    <= hint_limit);
+    assert(pull_render    <= pull_limit);
+    assert(solve_render   <= solve_limit);
     assert(input_feedback <= input_limit);
 
     std::cout << "All performance benchmarks passed.\n";

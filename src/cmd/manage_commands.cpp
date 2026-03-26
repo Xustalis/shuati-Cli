@@ -64,8 +64,15 @@ void cmd_delete(CommandContext& ctx) {
             if (ctx.solve_pid.empty()) return;
         }
 
-        // Confirm deletion (skip in TUI — no stdin available)
-        if (!ctx.is_tui) {
+        // Confirm deletion
+        if (ctx.is_tui) {
+            // TUI mode: require --confirm flag since stdin is unavailable
+            if (!ctx.delete_confirm) {
+                std::cout << "[!] 安全提醒: 删除操作不可恢复。" << std::endl;
+                std::cout << "    请使用 /delete " << ctx.solve_pid << " --confirm 确认删除。" << std::endl;
+                return;
+            }
+        } else {
             std::cout << "确定要删除题目 '" << ctx.solve_pid << "' 吗? [y/N] ";
             char confirm; std::cin >> confirm;
             if (confirm != 'y' && confirm != 'Y') {

@@ -135,3 +135,35 @@ jobs:
           path: release_pkg/*
           retention-days: 30
           if-no-files-found: error
+
+  tui-smoke:
+    name: TUI Smoke Job
+    runs-on: windows-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.31'
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: 'vcpkg.json'
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -B build -S . `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+
+      - name: Build and Test TUI
+        shell: pwsh
+        run: |
+          ./scripts/run_tui_regression.ps1 -BuildDir build
+          # Basic CLI smoke test
+          ./build/Release/shuati --help | Select-String "pull", "solve", "status"
+          ./build/Release/shuati status | Select-String "Total problems"

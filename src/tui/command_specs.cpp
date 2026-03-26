@@ -21,6 +21,7 @@ std::vector<CommandSpec> tui_command_specs() {
         {"/uninstall", "/uninstall", "完全清除所有初始化目录及本地环境", CommandCategory::System},
         {"/login", "/login <platform>", "配置平台登录 Cookie", CommandCategory::Project},
         {"/config", "/config [--show]", "配置工具", CommandCategory::System},
+        {"/menu", "/menu", "打开命令菜单", CommandCategory::System},
         {"/repl", "/repl", "进入 legacy 交互模式", CommandCategory::System},
         {"/tui", "/tui", "重新进入 TUI", CommandCategory::System},
         {"/exit", "/exit", "退出程序", CommandCategory::System},

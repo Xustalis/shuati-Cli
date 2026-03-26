@@ -45,6 +45,7 @@ struct CommandContext {
     std::string view_export_dir; // Directory to save test cases
     std::string login_platform;  // Platform for login command (e.g., "lanqiao")
     bool uninstall_confirm = false; // Flag for uninstall/clean-all
+    bool delete_confirm = false;     // Flag for TUI delete confirmation
     std::function<void(const std::string&)> stream_cb; // Callback for streaming outputs
     // Set to true when command is dispatched from the TUI - suppresses stdin reads,
     // FTXUI interactive menus, and editor launch to avoid TUI corruption.

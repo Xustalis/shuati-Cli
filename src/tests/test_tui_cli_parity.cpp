@@ -13,7 +13,7 @@ int main() {
     const std::set<std::string> expected_cli = {
         "init", "info", "pull", "new", "solve", "list", "delete",
         "record", "test", "hint", "view", "clean", "login",
-        "config", "repl", "tui", "exit"
+        "config", "menu", "repl", "tui", "exit"
     };
 
     auto cli_candidates = tui_cli_command_candidates();

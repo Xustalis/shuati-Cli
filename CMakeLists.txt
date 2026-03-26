@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(shuati-cli VERSION 0.1.1 LANGUAGES CXX)
+project(shuati-cli VERSION 0.1.2 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -89,6 +89,7 @@ set(TUI_SOURCES
     src/tui/command_specs.cpp
     src/tui/tui_command_catalog.cpp
     src/tui/tui_command_engine.cpp
+    src/tui/store/app_state.cpp
 )
 
 # Main executable
@@ -199,12 +200,23 @@ add_shuati_test(test_sm2_auto_quality
     EXTRA_SOURCES src/core/sm2_algorithm.cpp
 )
 
-# TUI render tests
-add_shuati_test(test_tui_render
-    src/tests/test_tui_render.cpp
-    EXTRA_SOURCES
-        src/tui/tui_views.cpp
-    LINK_LIBS ftxui::screen ftxui::dom
+set(CMD_SOURCES_NO_MAIN
+    src/cmd/commands.cpp
+    src/cmd/services.cpp
+    src/cmd/basic_commands.cpp
+    src/cmd/manage_commands.cpp
+    src/cmd/solve_command.cpp
+    src/cmd/list_command.cpp
+    src/cmd/view_command.cpp
+    src/cmd/test_command.cpp
+    src/cli/legacy_repl.cpp
+    src/router/app_router.cpp
+)
+
+# TUI Tests
+add_shuati_test(test_tui_render src/tests/test_tui_render.cpp 
+    EXTRA_SOURCES ${TUI_SOURCES} ${UTIL_SOURCES} ${CMD_SOURCES_NO_MAIN} ${CORE_SOURCES} ${ADAPTER_SOURCES} ${INFRA_SOURCES}
+    LINK_LIBS ftxui::screen ftxui::dom ftxui::component nlohmann_json::nlohmann_json CLI11::CLI11 cpr::cpr SQLiteCpp replxx::replxx httplib::httplib Threads::Threads
 )
 
 add_shuati_test(test_tui_cli_parity
@@ -218,7 +230,7 @@ add_shuati_test(test_tui_performance
     EXTRA_SOURCES
         src/tui/tui_views.cpp
         src/tui/tui_command_catalog.cpp
-    LINK_LIBS ftxui::screen ftxui::dom
+    LINK_LIBS ftxui::screen ftxui::dom ftxui::component
 )
 
 add_shuati_test(test_tui_menu_flow

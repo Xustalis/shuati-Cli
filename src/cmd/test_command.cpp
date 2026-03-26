@@ -389,7 +389,10 @@ void cmd_test(CommandContext& ctx) {
         svc.judge->cleanup_prepared(user_exe, svc.cfg.language);
 
         // AI Diagnosis
-        // std::cout << "[DEBUG] AI Enabled: " << svc.ai->enabled() << ", All AC: " << all_ac << std::endl;
+        if (!all_ac && !svc.ai->enabled()) {
+             std::cout << std::endl << "[Hint] 配置 API Key 后，测试失败时可自动触发 AI 错因分析。" << std::endl;
+             std::cout << "       运行: shuati config --api-key <your-key>" << std::endl;
+        }
         if (!all_ac && svc.ai->enabled()) {
              std::cout << std::endl << "[*] 测试未通过，正在进行AI分析..." << std::endl;
              

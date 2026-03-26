@@ -7,10 +7,12 @@
 
 #include <ftxui/dom/node.hpp>
 #include <ftxui/screen/screen.hpp>
+#include <ftxui/component/component.hpp>
 
 using shuati::tui::AppState;
 using shuati::tui::TuiTheme;
 using shuati::tui::LineType;
+using shuati::tui::ConfigState;
 using shuati::tui::render_buffer;
 using shuati::tui::render_top_bar;
 using shuati::tui::render_bottom_bar;
@@ -18,6 +20,9 @@ using shuati::tui::render_welcome;
 using shuati::tui::render_config_view;
 using shuati::tui::render_list_view;
 using shuati::tui::render_hint_view;
+using shuati::tui::render_pull_view;
+using shuati::tui::render_solve_view;
+using shuati::tui::render_status_view;
 
 static void render_to_string(ftxui::Element layout, int w, int h) {
     auto screen = ftxui::Screen::Create(
@@ -31,7 +36,7 @@ static void test_main_view(int width, int height) {
     AppState state;
     TuiTheme theme;
 
-    state.append(LineType::System, "Welcome to TUI test");
+    state.append(LineType::SystemLog, "Welcome to TUI test");
     state.append(LineType::Input, "/help");
     state.append(LineType::Heading, "Help");
     state.append(LineType::Output, "  /pull <url>  --  Pull a problem");
@@ -147,6 +152,30 @@ static void test_list_view_empty() {
     render_to_string(view, 100, 20);
 }
 
+static void test_pull_view() {
+    AppState state;
+    TuiTheme theme;
+    auto dummy_input = ftxui::Input(&state.pull_state.url, "");
+    auto view = render_pull_view(state, theme, dummy_input);
+    render_to_string(view, 100, 30);
+}
+
+static void test_solve_view() {
+    AppState state;
+    TuiTheme theme;
+    auto dummy_search = ftxui::Input(&state.solve_state.search_query, "");
+    auto view = render_solve_view(state, theme, dummy_search);
+    render_to_string(view, 100, 30);
+}
+
+static void test_status_view() {
+    AppState state;
+    TuiTheme theme;
+    state.status_state.loaded = true;
+    auto view = render_status_view(state, theme);
+    render_to_string(view, 100, 30);
+}
+
 int main() {
     std::cout << "=== TUI Render Tests ===" << std::endl;
 
@@ -175,6 +204,15 @@ int main() {
 
     test_hint_view();
     std::cout << "  [PASS] hint_view" << std::endl;
+
+    test_pull_view();
+    std::cout << "  [PASS] pull_view" << std::endl;
+
+    test_solve_view();
+    std::cout << "  [PASS] solve_view" << std::endl;
+
+    test_status_view();
+    std::cout << "  [PASS] status_view" << std::endl;
 
     std::cout << "All TUI render tests passed!" << std::endl;
     return 0;

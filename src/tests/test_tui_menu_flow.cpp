@@ -31,9 +31,9 @@ int main() {
     assert(!state.is_running);
     assert(state.scroll_offset == 0);
 
-    state.append(LineType::System, "hello");
+    state.append(LineType::SystemLog, "hello");
     assert(state.buffer.size() == 1);
-    assert(state.buffer[0].type == LineType::System);
+    assert(state.buffer[0].type == LineType::SystemLog);
     assert(state.buffer[0].text == "hello");
 
     state.append(LineType::Input, "/pull https://example.com");

@@ -38,6 +38,7 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
 
     auto del = app.add_subcommand("delete", "删除题目");
     del->add_option("id", ctx.solve_pid, "题目 ID 或 TID");
+    del->add_flag("--confirm", ctx.delete_confirm, "确认删除 (TUI 模式下必需)");
     del->callback([&](){ cmd_delete(ctx); });
 
     auto sub = app.add_subcommand("record", "记录题目复习完成及心得");
