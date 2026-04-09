@@ -21,7 +21,8 @@ namespace sandbox {
 class LinuxSandbox : public ISandbox {
 private:
     bool has_bwrap() const {
-        return system("which bwrap > /dev/null 2>&1") == 0;
+        static bool cached = system("which bwrap > /dev/null 2>&1") == 0;
+        return cached;
     }
 
 public:
@@ -105,8 +106,9 @@ public:
                 c_args.push_back("--ro-bind"); c_args.push_back("/lib"); c_args.push_back("/lib");
                 c_args.push_back("--ro-bind"); c_args.push_back("/lib64"); c_args.push_back("/lib64");
                 c_args.push_back("--ro-bind"); c_args.push_back("/bin"); c_args.push_back("/bin");
+                c_args.push_back("--ro-bind"); c_args.push_back("/usr/local"); c_args.push_back("/usr/local");
                 c_args.push_back("--proc"); c_args.push_back("/proc");
-                c_args.push_back("--dev"); c_args.push_back("/dev");
+                c_args.push_back("--dev"); c_args.push_back("/dev/shm");
                 c_args.push_back("--unshare-net"); // Disable network
                 c_args.push_back("--unshare-pid"); // Isolate PIDs
                 // Bind current dir
@@ -158,7 +160,8 @@ public:
 
                 int ret = wait4(pid, &wstatus, WNOHANG, &usage);
                 if (ret == pid) {
-                    // Process exited
+                    // Process exited — close status file before breaking
+                    status_file.close();
                     result.cpu_time_ms = usage.ru_utime.tv_sec * 1000 + usage.ru_utime.tv_usec / 1000 +
                                          usage.ru_stime.tv_sec * 1000 + usage.ru_stime.tv_usec / 1000;
                     
@@ -189,7 +192,7 @@ public:
                                 // Likely OOM or hard crash
                                 result.status = SandboxResultStatus::RuntimeError;
                                 int threshold = limits.memory_mb - (limits.memory_mb / 10);
-                                if (threshold < limits.memory_mb - 5) threshold = limits.memory_mb - 5;
+                                threshold = std::max(0, threshold - 5);
                                 if (result.memory_mb >= threshold || sig == SIGKILL) {
                                      result.status = SandboxResultStatus::MemoryLimitExceeded;
                                 }
@@ -198,7 +201,7 @@ public:
                             result.status = SandboxResultStatus::RuntimeError;
                             // Check for MLE disguised as SEGFAULT
                             int threshold = limits.memory_mb - (limits.memory_mb / 10);
-                            if (threshold < limits.memory_mb - 5) threshold = limits.memory_mb - 5;
+                            threshold = std::max(0, threshold - 5);
                             if (result.memory_mb >= threshold) {
                                 result.status = SandboxResultStatus::MemoryLimitExceeded;
                             }
@@ -212,7 +215,7 @@ public:
                     auto now = std::chrono::steady_clock::now();
                     auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
                     
-                    if (elapsed_ms > limits.cpu_time_ms + 100) { // Slight padding
+                    if (limits.cpu_time_ms > 0 && elapsed_ms > limits.cpu_time_ms + 100) { // Slight padding
                         killpg(pid, SIGKILL); // Kill entire process group
                         result.status = SandboxResultStatus::TimeLimitExceeded;
                         result.cpu_time_ms = limits.cpu_time_ms;

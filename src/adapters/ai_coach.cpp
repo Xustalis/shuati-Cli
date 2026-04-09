@@ -43,6 +43,8 @@ std::string AICoach::call_api(const std::string& system_prompt, const std::strin
                 body_str,
                 cpr::WriteCallback{
                     [&](std::string_view data, intptr_t) -> bool {
+                        // Guard against unbounded memory growth (max 50MB)
+                        if (buffer.size() > 50 * 1024 * 1024) return false;
                         buffer.append(data.data(), data.size());
                         size_t pos = 0;
                         while ((pos = buffer.find('\n')) != std::string::npos) {

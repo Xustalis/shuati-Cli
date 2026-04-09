@@ -164,6 +164,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/run_tui_regression.ps1 -BuildDir build
-          # Basic CLI smoke test
-          ./build/Release/shuati --help | Select-String "pull", "solve", "status"
-          ./build/Release/shuati status | Select-String "Total problems"
+          # Basic CLI smoke test — verify help shows key subcommands
+          ./build/Release/shuati --help | Select-String "pull", "solve", "list"
+          # 'status' subcommand does not exist; verify 'list' runs without error (DB may be empty)
+          ./build/Release/shuati list -f all 2>$null; if ($LASTEXITCODE -ne 0) { exit 1 }
