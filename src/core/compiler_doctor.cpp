@@ -5,6 +5,7 @@
 #include <sstream>
 #include <filesystem>
 #include <cstdlib>
+#include <mutex>
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
 
@@ -12,9 +13,10 @@ namespace shuati {
 
 namespace fs = std::filesystem;
 
-// Static members
+// Static members — thread-safe one-time init via call_once
 std::vector<DiagnosticRule> CompilerDoctor::rules_;
 bool CompilerDoctor::rules_loaded_ = false;
+std::once_flag rules_init_flag_;
 
 bool CompilerDoctor::load_rules(const std::string& json_path) {
     try {
@@ -72,12 +74,11 @@ Diagnosis CompilerDoctor::diagnose(const std::string& error_output) {
     d.description = "无法识别的编译错误，请检查代码逻辑。";
     d.suggestion = "请尝试阅读上方的英文报错信息，或者使用 'hint' 命令询问 AI。";
 
-    // Load rules on first use if not already loaded
-    if (!rules_loaded_) {
-        // Use platform-aware resource path resolution
+    // Load rules on first use — thread-safe via call_once
+    std::call_once(rules_init_flag_, [&]() {
         auto rules_path = get_resource_path("rules/compiler_errors.json");
-        load_rules(rules_path.string());
-    }
+        rules_loaded_ = load_rules(rules_path.string());
+    });
 
     // Try to match against loaded rules
     for (const auto& rule : rules_) {
