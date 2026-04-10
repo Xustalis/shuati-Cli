@@ -156,7 +156,7 @@ std::string strip_ansi_escapes(const std::string& input) {
 }
 
 // Simulate terminal \r (carriage return without newline = overwrite current line),
-// then strip ANSI, then trim trailing whitespace.
+// then strip ANSI, then strip markdown syntax, then trim trailing whitespace.
 std::string normalize_text(const std::string& text) {
     std::string resolved;
     resolved.reserve(text.size());
@@ -175,11 +175,65 @@ std::string normalize_text(const std::string& text) {
     if (!line.empty()) resolved += line;
 
     resolved = strip_ansi_escapes(resolved);
-    while (!resolved.empty() &&
-           (resolved.back() == '\n' || resolved.back() == ' ' || resolved.back() == '\t')) {
-        resolved.pop_back();
+
+    // Strip common markdown syntax that looks ugly in TUI
+    // Keep newlines and indentation but remove formatting chars
+    std::string stripped;
+    stripped.reserve(resolved.size());
+    size_t i = 0;
+    while (i < resolved.size()) {
+        char c = resolved[i];
+        // Skip inline code markers (`) and bold/italic markers (*_)
+        if (c == '`' || c == '*' || c == '_') {
+            // Skip runs of formatting chars, but keep line-start emphasis
+            // e.g. "**bold**" -> "bold", "## 标题" -> keep ## at line start
+            size_t j = i;
+            while (j < resolved.size() && resolved[j] == c) j++;
+            int run = (int)(j - i);
+            // "## " at line start is a heading, keep it
+            bool at_line_start = (stripped.empty() || stripped.back() == '\n');
+            // heading: run >= 2 of '#' at (possibly indented) line start, followed by non-# char
+            // Use resolved index to correctly detect line start even when preceding spaces
+            // were skipped by a previous formatting-char run
+            bool looks_like_heading = false;
+            if (at_line_start && run >= 2 && j < resolved.size() && resolved[j] != c) {
+                // verify no non-whitespace between last newline and this position in resolved
+                size_t last_nl = resolved.rfind('\n', i - 1);
+                size_t line_start = (last_nl == std::string::npos) ? 0 : (last_nl + 1);
+                bool only_ws_before = std::all_of(resolved.begin() + line_start, resolved.begin() + i,
+                    [](char ch){ return ch == ' ' || ch == '\t'; });
+                if (only_ws_before) looks_like_heading = true;
+            }
+            if (looks_like_heading) {
+                // keep the heading markers
+                for (int k = i; k < j; k++) stripped += resolved[k];
+            }
+            // Otherwise skip formatting chars
+            i = j;
+            continue;
+        }
+        stripped += c;
+        i++;
     }
-    return resolved;
+
+    // Collapse multiple blank lines into one
+    std::string collapsed;
+    int blank_count = 0;
+    for (char c : stripped) {
+        if (c == '\n') {
+            blank_count++;
+            if (blank_count <= 1) collapsed += c;
+        } else {
+            blank_count = 0;
+            collapsed += c;
+        }
+    }
+
+    while (!collapsed.empty() &&
+           (collapsed.back() == '\n' || collapsed.back() == ' ' || collapsed.back() == '\t')) {
+        collapsed.pop_back();
+    }
+    return collapsed;
 }
 
 // ---------------------------------------------------------------------------
@@ -309,23 +363,35 @@ std::string tui_execute_command_capture(const std::vector<std::string>& args,
 void tui_execute_command_stream(const std::vector<std::string>& args,
                                 const std::string& base_cmd,
                                 std::function<void(const std::string&)> stream_cb) {
+    // Wrap stream_cb to normalize markdown/ANSI before UI display
+    std::function<void(const std::string&)> wrapped_cb;
+    if (stream_cb) {
+        wrapped_cb = [stream_cb](const std::string& chunk) {
+            std::string norm = normalize_text(chunk);
+            if (!norm.empty()) stream_cb(norm);
+        };
+    } else {
+        wrapped_cb = {};
+    }
+
     if (base_cmd == "ls" || base_cmd == "dir" || base_cmd == "cd" ||
         base_cmd == "pwd" || base_cmd == "help") {
         auto result = execute_shell_command(args, base_cmd);
-        if (stream_cb && !result.empty()) stream_cb(result);
+        std::string norm = normalize_text(result);
+        if (stream_cb && !norm.empty()) stream_cb(norm);
         return;
     }
 
     {
         std::lock_guard<std::mutex> lk(stream_redirect_mutex());
-        ScopedStreamRedirect redir(stream_cb);
+        ScopedStreamRedirect redir(wrapped_cb);
 
         try {
             CLI::App app{"TUI"};
             app.allow_extras();
             shuati::cmd::CommandContext cmd_ctx;
             cmd_ctx.is_tui    = true;
-            cmd_ctx.stream_cb = stream_cb;
+            cmd_ctx.stream_cb = wrapped_cb;
             shuati::cmd::setup_commands(app, cmd_ctx);
 
             std::vector<const char*> argv;
@@ -337,7 +403,7 @@ void tui_execute_command_stream(const std::vector<std::string>& args,
                 app.exit(e);
             }
         } catch (const std::exception& e) {
-            if (stream_cb) stream_cb(std::string("[Error] ") + e.what() + "\n");
+            if (wrapped_cb) wrapped_cb(std::string("[Error] ") + e.what() + "\n");
         }
         // ScopedStreamRedirect dtor restores streams, flushing any remaining buffer
     }

@@ -15,6 +15,7 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
     static std::string v_str = shuati::current_version().to_string();
     app.set_version_flag("-v,--version", v_str, "显示版本信息");
     app.add_subcommand("info", "显示环境信息")->callback([&](){ cmd_info(ctx); });
+    app.add_subcommand("status", "显示学习统计与进度")->callback([&](){ cmd_status(ctx); });
 
     auto pull = app.add_subcommand("pull", "从 URL 拉取题目");
     pull->add_option("url", ctx.pull_url, "题目链接")->required();

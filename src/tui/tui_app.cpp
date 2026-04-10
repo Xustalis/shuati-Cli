@@ -132,6 +132,7 @@ const std::unordered_map<std::string, CmdHint>& hint_table() {
         {"/init",   {"Enter 在当前目录初始化 .shuati 项目结构", nullptr}},
         {"/uninstall", {"Enter 查看并清除所有相关记录及 .shuati 文件夹", nullptr}},
         {"/info",   {"Enter 显示当前环境和版本信息", nullptr}},
+        {"/status", {"Enter 显示学习统计与进度（AC率/难度分布/待复习）", nullptr}},
         {"/clean",  {"Enter 清理临时文件和缓存", nullptr}},
         {"/exit",   {"Enter 退出程序", nullptr}},
         {"/repl",   {"Enter 进入经典命令行模式", nullptr}},

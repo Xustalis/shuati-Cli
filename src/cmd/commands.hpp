@@ -96,6 +96,7 @@ void cmd_test(CommandContext& ctx);
 void cmd_list(CommandContext& ctx);
 void cmd_init(CommandContext& ctx);
 void cmd_info(CommandContext& ctx);
+void cmd_status(CommandContext& ctx);
 void cmd_config(CommandContext& ctx);
 void cmd_pull(CommandContext& ctx);
 void cmd_new(CommandContext& ctx);

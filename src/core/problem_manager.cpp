@@ -111,7 +111,7 @@ std::string ProblemManager::create_local(const std::string& title, const std::st
     p.source = "local";
     p.title = title;
     p.tags = tags;
-    p.difficulty = difficulty;
+    p.difficulty = difficulty.empty() ? "medium" : difficulty;
     p.created_at = std::time(nullptr);
 
     auto root = Config::find_root();
