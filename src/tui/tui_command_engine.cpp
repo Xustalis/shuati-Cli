@@ -192,7 +192,18 @@ std::string normalize_text(const std::string& text) {
             int run = (int)(j - i);
             // "## " at line start is a heading, keep it
             bool at_line_start = (stripped.empty() || stripped.back() == '\n');
-            bool looks_like_heading = (at_line_start && run >= 2 && j < resolved.size() && resolved[j] == ' ');
+            // heading: run >= 2 of '#' at (possibly indented) line start, followed by non-# char
+            // Use resolved index to correctly detect line start even when preceding spaces
+            // were skipped by a previous formatting-char run
+            bool looks_like_heading = false;
+            if (at_line_start && run >= 2 && j < resolved.size() && resolved[j] != c) {
+                // verify no non-whitespace between last newline and this position in resolved
+                size_t last_nl = resolved.rfind('\n', i - 1);
+                size_t line_start = (last_nl == std::string::npos) ? 0 : (last_nl + 1);
+                bool only_ws_before = std::all_of(resolved.begin() + line_start, resolved.begin() + i,
+                    [](char ch){ return ch == ' ' || ch == '\t'; });
+                if (only_ws_before) looks_like_heading = true;
+            }
             if (looks_like_heading) {
                 // keep the heading markers
                 for (int k = i; k < j; k++) stripped += resolved[k];
