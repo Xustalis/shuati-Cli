@@ -155,6 +155,10 @@ public:
                     } catch (...) {}
                 }
             }
+            // SSRF protection: only allow https://
+            if (url.find("https://") != 0) {
+                return cases;  // Reject non-https URLs
+            }
             // Fallback: parse from problem HTML
             std::string html = http_get(url);
             // Extract <pre> blocks that look like IO examples
@@ -169,7 +173,7 @@ public:
             while (std::getline(iss, line)) {
                 // Detect section headers
                 if (line.find("输入") != std::string::npos && line.size() < 100) { in_inp = true; in_out = false; cur_section = "in"; inp.clear(); out.clear(); continue; }
-                if (line.find("输出") != std::string::npos && line.size() < 100) { in_inp = false; in_out = true; cur_section = "out"; continue; }
+                if (line.find("输出") != std::string::npos && line.size() < 100) { in_inp = false; in_out = true; cur_section = "out"; inp.clear(); out.clear(); continue; }
                 if (line.find("示例") != std::string::npos && line.size() < 100) { inp.clear(); out.clear(); cur_section = ""; continue; }
                 if (line.find("<pre") != std::string::npos) {
                     // extract pre content
