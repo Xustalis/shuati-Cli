@@ -122,6 +122,88 @@ public:
     }
 
 private:
+public:
+    std::vector<TestCase> impl_fetch_test_cases(const std::string& url) {
+        std::vector<TestCase> cases;
+        try {
+            // Try API first
+            std::string id_str = extract_regex(url, R"(problems/(\d+))");
+            if (!id_str.empty()) {
+                std::string api_url = fmt::format("https://www.lanqiao.cn/api/v2/problems/{}/", id_str);
+                std::map<std::string, std::string> headers;
+                for (const auto& kv : get_default_headers()) {
+                    headers[kv.first] = kv.second;
+                }
+                auto resp = http_client_->get(api_url, headers, get_default_timeout_ms());
+                if (resp.status_code == 200) {
+                    try {
+                        auto json = nlohmann::json::parse(resp.text);
+                        if (json.contains("examples") && json["examples"].is_array()) {
+                            for (const auto& ex : json["examples"]) {
+                                TestCase tc;
+                                if (ex.is_object()) {
+                                    tc.input  = utils::trim(ex.value("input", ""));
+                                    tc.output = utils::trim(ex.value("output", ""));
+                                }
+                                if (!tc.input.empty() || !tc.output.empty()) {
+                                    tc.is_sample = true;
+                                    cases.push_back(tc);
+                                }
+                            }
+                            if (!cases.empty()) return cases;
+                        }
+                    } catch (...) {}
+                }
+            }
+            // Fallback: parse from problem HTML
+            std::string html = http_get(url);
+            // Extract <pre> blocks that look like IO examples
+            std::vector<std::pair<std::string, std::string>> io_pairs;
+            std::string inp, out;
+            bool in_inp = false, in_out = false;
+            // Simple state-machine: look for "输入:" / "示例输入:" / "样例1输入"
+            std::vector<std::string> lines;
+            std::istringstream iss(html);
+            std::string line;
+            std::string cur_section;
+            while (std::getline(iss, line)) {
+                // Detect section headers
+                if (line.find("输入") != std::string::npos && line.size() < 100) { in_inp = true; in_out = false; cur_section = "in"; inp.clear(); out.clear(); continue; }
+                if (line.find("输出") != std::string::npos && line.size() < 100) { in_inp = false; in_out = true; cur_section = "out"; continue; }
+                if (line.find("示例") != std::string::npos && line.size() < 100) { inp.clear(); out.clear(); cur_section = ""; continue; }
+                if (line.find("<pre") != std::string::npos) {
+                    // extract pre content
+                    auto s = line;
+                    size_t p1 = s.find('>'); if (p1 != std::string::npos) s = s.substr(p1+1);
+                    size_t p2 = s.find("</pre"); if (p2 != std::string::npos) s = s.substr(0, p2);
+                    s = utils::replace_all(s, "<br>", "\n");
+                    s = utils::replace_all(s, "<br/>", "\n");
+                    s = utils::strip_html_tags(s);
+                    s = utils::trim(s);
+                    if (!s.empty()) {
+                        if (cur_section == "in") inp += s + "\n";
+                        else if (cur_section == "out") out += s + "\n";
+                        else { inp += s + "\n"; cur_section = "in"; }
+                    }
+                    if (!inp.empty() && !out.empty()) {
+                        io_pairs.emplace_back(utils::trim(inp), utils::trim(out));
+                        inp.clear(); out.clear(); cur_section = "";
+                    }
+                }
+            }
+            // If we found pairs, use them
+            for (auto& pair : io_pairs) {
+                TestCase tc;
+                tc.input = pair.first;
+                tc.output = pair.second;
+                tc.is_sample = true;
+                cases.push_back(tc);
+                if (cases.size() >= 5) break;
+            }
+        } catch (...) {}
+        return cases;
+    }
+
     std::string cookie_; // Lanqiao session cookie
 
     void parse_api_response(const nlohmann::json& json, Problem& p, const std::string& id_str) {
@@ -256,7 +338,7 @@ Problem LanqiaoCrawler::fetch_problem(const std::string& url) {
 }
 
 std::vector<TestCase> LanqiaoCrawler::fetch_test_cases(const std::string& url) {
-    return impl_->fetch_test_cases(url);
+    return impl_->impl_fetch_test_cases(url);
 }
 
 } // namespace shuati

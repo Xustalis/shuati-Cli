@@ -8,6 +8,7 @@ std::vector<CommandSpec> tui_command_specs() {
         {"/help", "/help | /?", "查看全部指令与示例", CommandCategory::System},
         {"/init", "/init", "在当前目录初始化项目", CommandCategory::Project},
         {"/info", "/info", "显示环境信息", CommandCategory::System},
+        {"/status", "/status", "显示学习统计与进度", CommandCategory::System},
         {"/pull", "/pull <url>", "从 URL 拉取题目", CommandCategory::Problem},
         {"/new", "/new <title>", "创建本地题目", CommandCategory::Problem},
         {"/solve", "/solve [id]", "进入做题工作流", CommandCategory::Problem},

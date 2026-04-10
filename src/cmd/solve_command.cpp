@@ -25,8 +25,8 @@ void cmd_solve(CommandContext& ctx) {
         Problem prob;
         if (ctx.solve_pid.empty()) {
             if (ctx.is_tui) {
-                std::cout << "[Hint] Select a problem from /list, then run /solve <ID>.\n"
-                          << "       Example: /solve 1" << std::endl;
+                std::cout << "[Hint] 请先使用 /list 选题，然后运行 /solve <题号>。\n"
+                          << "       例如: /solve 1" << std::endl;
                 return;
             }
 
