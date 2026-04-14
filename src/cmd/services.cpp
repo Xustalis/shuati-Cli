@@ -79,7 +79,10 @@ Services Services::load(const fs::path& root, bool skip_doctor) {
 std::string make_solution_filename(const Problem& prob, const std::string& language) {
     std::string ext = (language == "python" || language == "py") ? ".py" : ".cpp";
     auto root = find_root_or_die();
-    auto dir = root / ".shuati" / "problems" / canonical_source(prob.source) / prob.id;
+    // Defense-in-depth: sanitize both fields even though they were sanitized at DB write time.
+    std::string safe_id = sanitize_filename(prob.id);
+    std::string safe_src = canonical_source(sanitize_filename(prob.source));
+    auto dir = root / ".shuati" / "problems" / safe_src / safe_id;
     if (!std::filesystem::exists(dir)) {
         std::filesystem::create_directories(dir);
     }

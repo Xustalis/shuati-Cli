@@ -86,29 +86,31 @@ private:
     std::string buf_;
 };
 
-// Serialize global std::cout/std::cerr rdbuf swapping across threads.
-static std::mutex& stream_redirect_mutex() {
-    static std::mutex mu;
-    return mu;
-}
-
 // ---------------------------------------------------------------------------
 // RAII guard that installs CallbackStreamBuf on cout+cerr for scope duration.
 // ---------------------------------------------------------------------------
 class ScopedStreamRedirect {
 public:
     explicit ScopedStreamRedirect(std::function<void(const std::string&)> cb)
-        : old_cout_(std::cout.rdbuf()),
-          old_cerr_(std::cerr.rdbuf()),
-          cb_buf_(std::move(cb), old_cout_) {
-        std::cout.rdbuf(&cb_buf_);
-        std::cerr.rdbuf(&cb_buf_);
+        // Lock first so rdbuf capture in cb_buf_ is race-free.
+        // Deferred construction via lambda ensures old_cout_ is captured
+        // inside the locked section before cb_buf_ is fully constructed.
+        : cb_buf_([&cb, this]() -> CallbackStreamBuf {
+            std::lock_guard<std::mutex> lk(stream_redirect_mutex());
+            old_cout_ = std::cout.rdbuf();
+            old_cerr_ = std::cerr.rdbuf();
+            return CallbackStreamBuf(std::move(cb), old_cout_);
+        }()) {
+        // cb_buf_ constructed with real old_cout_; restore under lock
+        std::lock_guard<std::mutex> lk(stream_redirect_mutex());
+        std::cout.rdbuf(cb_buf_.fallback_buf());
+        std::cerr.rdbuf(cb_buf_.fallback_buf());
     }
 
     ~ScopedStreamRedirect() {
-        // Flush any remaining data before restoring
         std::cout.flush();
         std::cerr.flush();
+        std::lock_guard<std::mutex> lk(stream_redirect_mutex());
         std::cout.rdbuf(old_cout_);
         std::cerr.rdbuf(old_cerr_);
     }
@@ -117,9 +119,49 @@ public:
     ScopedStreamRedirect& operator=(const ScopedStreamRedirect&) = delete;
 
 private:
-    CallbackStreamBuf cb_buf_;
     std::streambuf* old_cout_;
     std::streambuf* old_cerr_;
+// ---------------------------------------------------------------------------
+// RAII guard that installs CallbackStreamBuf on cout+cerr for scope duration.
+// All rdbuf operations are serialized by the mutex to prevent concurrent swap races.
+// Uses a recursive_mutex so that ~ScopedStreamRedirect can safely lock even if
+// called on the same thread that constructed the object.
+// ---------------------------------------------------------------------------
+class ScopedStreamRedirect {
+    static std::recursive_mutex& redirect_mutex() {
+        static std::recursive_mutex m;
+        return m;
+    }
+
+public:
+    explicit ScopedStreamRedirect(std::function<void(const std::string&)> cb) {
+        std::lock_guard<std::recursive_mutex> lk(redirect_mutex());
+        // Capture original buffers under lock — no race with other instances
+        old_cout_ = std::cout.rdbuf();
+        old_cerr_ = std::cerr.rdbuf();
+        // Build CallbackStreamBuf with real cout as its fallback buffer
+        cb_buf_ = std::make_unique<CallbackStreamBuf>(std::move(cb), old_cout_);
+        // Install it as the new rdbuf for both streams
+        std::cout.rdbuf(cb_buf_.get());
+        std::cerr.rdbuf(cb_buf_.get());
+    }
+
+    ~ScopedStreamRedirect() {
+        std::cout.flush();
+        std::cerr.flush();
+        std::lock_guard<std::recursive_mutex> lk(redirect_mutex());
+        // Restore original buffers (safe even if called on construction thread)
+        std::cout.rdbuf(old_cout_);
+        std::cerr.rdbuf(old_cerr_);
+    }
+
+    ScopedStreamRedirect(const ScopedStreamRedirect&) = delete;
+    ScopedStreamRedirect& operator=(const ScopedStreamRedirect&) = delete;
+
+private:
+    std::streambuf* old_cout_ = nullptr;
+    std::streambuf* old_cerr_ = nullptr;
+    std::unique_ptr<CallbackStreamBuf> cb_buf_;
 };
 
 // ---------------------------------------------------------------------------
@@ -328,7 +370,6 @@ std::string tui_execute_command_capture(const std::vector<std::string>& args,
 
     std::string accumulated;
     {
-        std::lock_guard<std::mutex> lk(stream_redirect_mutex());
         ScopedStreamRedirect redir([&accumulated](const std::string& chunk) {
             accumulated += chunk;
         });
@@ -383,7 +424,6 @@ void tui_execute_command_stream(const std::vector<std::string>& args,
     }
 
     {
-        std::lock_guard<std::mutex> lk(stream_redirect_mutex());
         ScopedStreamRedirect redir(wrapped_cb);
 
         try {

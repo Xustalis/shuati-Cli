@@ -96,7 +96,10 @@ void setup_commands(CLI::App& app, CommandContext& ctx) {
         app.run();
     });
     
-    app.add_subcommand("exit", "退出")->callback([](){ exit(0); });
+    // Note: do NOT call std::exit() — it bypasses RAII destructors
+    // and leaves TUI worker threads in an inconsistent state.
+    // Let the command return naturally and the REPL/TUI loop handle exit.
+    app.add_subcommand("exit", "退出")->callback([](){ /* no-op; REPL ends */ });
 }
 
 } // namespace cmd

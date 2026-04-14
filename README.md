@@ -74,11 +74,11 @@ shuati solve 1
 shuati test 1
 ```
 
-全部通过后运行 `shuati submit 1` 记录到错题本。如果测试失败且已配置 AI，工具会自动诊断代码问题。
+全部通过后运行 `shuati record 1` 记录到错题本。如果测试失败且已配置 AI，工具会自动诊断代码问题。
 
 ## TUI 交互模式
 
-Shuati CLI v0.2.0+ 引入了全新的 **全屏 TUI (Terminal User Interface)** 模式，为你提供沉浸式的刷题体验：
+Shuati CLI v0.1.0+ 引入了全新的 **全屏 TUI (Terminal User Interface)** 模式，为你提供沉浸式的刷题体验：
 
 - **二级菜单系统**：每个核心命令（pull、solve、config、status）现在都有独立的交互界面。
 - **智能 Pull**：支持 URL 实时校验，异步拉取并显示进度条，完成后自动返回。
@@ -120,7 +120,7 @@ graph LR
     B -->|shuati solve| C["编写代码"]
     C -->|shuati test| D{"本地判题"}
     D -->|失败 + AI 诊断| C
-    D -->|通过| E["shuati submit"]
+    D -->|通过| E["shuati record"]
     E -->|SM2 复习| F["间隔重复"]
 ```
 
@@ -187,7 +187,7 @@ cmake --install build
 | **做题** | `shuati test <id>` | 本地运行测试并判题 | `shuati test 1` |
 | **做题** | `shuati hint <id>` | AI 解题思路提示 | `shuati hint 1` |
 | **做题** | `shuati view <id>` | 查看测试点输出 Diff | `shuati view 1` |
-| **收尾** | `shuati submit <id>` | 记录掌握度到错题本 | `shuati submit 1` |
+| **收尾** | `shuati record <id>` | 记录掌握度到错题本 | `shuati record 1` |
 | **设置** | `shuati config` | 查看/修改配置 | `shuati config --api-key xxx` |
 | **维护** | `shuati delete <id>` | 删除题目记录 | `shuati delete 1` |
 | **维护** | `shuati clean` | 清理临时文件 | `shuati clean` |

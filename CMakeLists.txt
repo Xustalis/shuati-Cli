@@ -214,8 +214,24 @@ set(CMD_SOURCES_NO_MAIN
 )
 
 # TUI Tests
+if(WIN32)
+    set(TUI_TEST_SANDBOX src/core/sandbox/sandbox_windows.cpp)
+else()
+    set(TUI_TEST_SANDBOX src/core/sandbox/sandbox_linux.cpp)
+endif()
+
 add_shuati_test(test_tui_render src/tests/test_tui_render.cpp 
-    EXTRA_SOURCES ${TUI_SOURCES} ${UTIL_SOURCES} ${CMD_SOURCES_NO_MAIN} ${CORE_SOURCES} ${ADAPTER_SOURCES} ${INFRA_SOURCES}
+    EXTRA_SOURCES ${TUI_SOURCES} ${UTIL_SOURCES} ${CMD_SOURCES_NO_MAIN}
+        src/core/judge.cpp
+        src/core/problem_manager.cpp
+        src/core/compiler_doctor.cpp
+        src/core/boot_guard.cpp
+        src/core/memory_manager.cpp
+        src/core/mistake_analyzer.cpp
+        src/core/sm2_algorithm.cpp
+        src/core/version.cpp
+        ${TUI_TEST_SANDBOX}
+        ${ADAPTER_SOURCES} ${INFRA_SOURCES}
     LINK_LIBS ftxui::screen ftxui::dom ftxui::component nlohmann_json::nlohmann_json CLI11::CLI11 cpr::cpr SQLiteCpp replxx::replxx httplib::httplib Threads::Threads
 )
 

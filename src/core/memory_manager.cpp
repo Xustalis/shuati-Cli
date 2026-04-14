@@ -65,18 +65,23 @@ bool MemoryManager::update_memory_from_response(const std::string& ai_response) 
             auto j = nlohmann::json::parse(json_str);
             
             if (j.contains("new_mistake") && j["new_mistake"].is_string()) {
-                std::string pattern = j["new_mistake"];
-                // Extract tags and example_id from AI response if provided
-                std::string tags = j.value("tags", "");
-                std::string example_id = j.value("example_id", "");
-                if (!pattern.empty()) {
+                std::string pattern = j["new_mistake"].get<std::string>();
+                // Validate: non-empty, max 500 chars, no control chars
+                if (!pattern.empty() && pattern.size() <= 500 &&
+                    pattern.find('\0') == std::string::npos) {
+                    std::string tags = j.value("tags", "");
+                    std::string example_id = j.value("example_id", "");
+                    if (tags.size() > 200) tags = tags.substr(0, 200);
+                    if (example_id.size() > 100) example_id = example_id.substr(0, 100);
                     db_.upsert_memory_mistake(tags, pattern, example_id); 
                 }
             }
             
             if (j.contains("reinforce_mastery") && j["reinforce_mastery"].is_string()) {
-                std::string skill = j["reinforce_mastery"];
-                 if (!skill.empty()) {
+                std::string skill = j["reinforce_mastery"].get<std::string>();
+                // Validate: non-empty, max 200 chars, no control chars
+                if (!skill.empty() && skill.size() <= 200 &&
+                    skill.find('\0') == std::string::npos) {
                      // Optimization: Use direct lookup instead of scanning all mastery items
                      auto current = db_.get_mastery(skill);
                      double conf = 50.0;

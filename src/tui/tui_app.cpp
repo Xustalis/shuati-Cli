@@ -584,6 +584,7 @@ int TuiApp::run() {
 
         std::lock_guard<std::mutex> lock(workers_mutex);
         workers.emplace_back([alive, run_command_ptr, &screen, &state, args = std::move(args), base_cmd]() mutable {
+            try {
             auto buffer_mtx = std::make_shared<std::mutex>();
             auto buffer_str = std::make_shared<std::string>();
             auto last_post = std::make_shared<std::chrono::steady_clock::time_point>(std::chrono::steady_clock::now());
@@ -666,6 +667,19 @@ int TuiApp::run() {
                     (*run_command_ptr_local)(next, false);
                 }
             });
+            } catch (const std::exception& e) {
+                screen.Post([&state, err = std::string(e.what())]() {
+                    state.buffer.push_back({LineType::Error, "[!] " + err});
+                    state.is_running = false;
+                    state.active_command.clear();
+                });
+            } catch (...) {
+                screen.Post([&state]() {
+                    state.buffer.push_back({LineType::Error, "[!] Unknown error during command execution."});
+                    state.is_running = false;
+                    state.active_command.clear();
+                });
+            }
         });
     };
 

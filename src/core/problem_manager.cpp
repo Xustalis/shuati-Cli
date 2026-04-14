@@ -59,37 +59,43 @@ void ProblemManager::pull_problem(const std::string& url) {
         }
     }
 
-    // Sanitize ID to prevent path traversal
+    // Sanitize ID and source to prevent path traversal
     p.id = utils::sanitize_filename(p.id);
+    p.source = utils::sanitize_filename(p.source);
 
     auto root = Config::find_root();
     if (root.empty()) throw std::runtime_error("Root not found");
     
-    std::filesystem::path prob_dir = root / Config::DIR_NAME / "problems" / utils::canonical_source(p.source) / p.id;
+    std::filesystem::path prob_dir = root / Config::DIR_NAME / "problems" / p.source / p.id;
     if (!std::filesystem::exists(prob_dir)) std::filesystem::create_directories(prob_dir);
     std::string filename = (prob_dir / "problem.md").string();
     
-    // Save to DB first — if this fails, the file is untouched (DB is source of truth)
-    p.content_path = std::filesystem::absolute(filename).string();
-    db_->add_problem(p);
+    // DB is the authoritative store. Write all DB records under a transaction;
+    // the file is written only after the transaction commits successfully.
+    {
+        SQLite::Transaction tx(*db_);
+        p.content_path = std::filesystem::absolute(filename).string();
+        db_->add_problem(p);
 
-    // Save test cases
-    if (!cases.empty()) {
-        for (const auto& tc : cases) {
-            db_->add_test_case(p.id, tc.input, tc.output, tc.is_sample);
+        if (!cases.empty()) {
+            for (const auto& tc : cases) {
+                db_->add_test_case(p.id, tc.input, tc.output, tc.is_sample);
+            }
+            fmt::print(fg(fmt::color::cyan), "    获取到 {} 个测试用例。\n", cases.size());
         }
-        fmt::print(fg(fmt::color::cyan), "    获取到 {} 个测试用例。\n", cases.size());
+
+        ReviewItem r;
+        r.problem_id = p.id;
+        r.next_review = std::time(nullptr) + 86400; // 1 day
+        r.interval = 1;
+        r.ease_factor = 2.5;
+        r.repetitions = 0;
+        db_->upsert_review(r);
+
+        tx.commit();  // DB now consistent; safe to write derived file
     }
 
-    ReviewItem r;
-    r.problem_id = p.id;
-    r.next_review = std::time(nullptr) + 86400; // 1 day
-    r.interval = 1;
-    r.ease_factor = 2.5;
-    r.repetitions = 0;
-    db_->upsert_review(r);
-
-    // Write file only after DB insert succeeds
+    // Write file only after DB transaction commits
     std::ofstream out(filename);
     out << "# " << p.title << "\n\n"
         << "来源: " << url << "\n"
