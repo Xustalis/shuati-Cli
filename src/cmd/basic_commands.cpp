@@ -1,5 +1,6 @@
 #include "commands.hpp"
 #include "shuati/version.hpp"
+#include <fmt/core.h>
 #include <iostream>
 #include <filesystem>
 #include <fstream>
@@ -247,6 +248,67 @@ void cmd_login(CommandContext& ctx) {
             std::cout << "    目前支持: lanqiao\n";
         }
 
+    } catch (const std::exception& e) {
+        std::cerr << "[!] Error: " << e.what() << "\n";
+    }
+}
+
+void cmd_status(CommandContext& ctx) {
+    (void)ctx;
+    try {
+        auto root = find_root_or_die();
+        auto svc = Services::load(root);
+
+        auto problems = svc.pm->list_problems();
+        auto profile = svc.db->get_user_profile();
+        auto reviews = svc.db->get_due_reviews(std::time(nullptr));
+        auto mistakes = svc.db->get_mistake_stats();
+        auto mastery = svc.db->get_all_mastery();
+
+        int total = (int)problems.size();
+        int ac_count = 0, failed_count = 0, unaudited_count = 0;
+        int easy = 0, medium = 0, hard = 0;
+        for (const auto& p : problems) {
+            if (p.difficulty == "easy") easy++;
+            else if (p.difficulty == "medium") medium++;
+            else if (p.difficulty == "hard") hard++;
+            if (p.last_verdict == "AC") ac_count++;
+            else if (p.last_verdict.empty() || p.last_verdict == "SKIPPED") unaudited_count++;
+            else failed_count++;
+        }
+
+        double ac_rate = total > 0 ? (100.0 * ac_count / total) : 0.0;
+        int review_due = (int)reviews.size();
+        int total_mastery = (int)mastery.size();
+        int high_mastery = 0;
+        for (const auto& m : mastery) if (m.confidence > 70.0) high_mastery++;
+
+        std::cout << "\n";
+        std::cout << "══════════════════════════════════════\n";
+        std::cout << "   Shuati 学习统计\n";
+        std::cout << "══════════════════════════════════════\n";
+        std::cout << "  题目总数    " << total << "\n";
+        std::cout << "  ──────────────────────────\n";
+        std::cout << "  ✅ AC       " << ac_count << " (" << (total>0?fmt::format("{:.1f}", ac_rate):"0.0") << "%)\n";
+        std::cout << "  ❌ Failed   " << failed_count << "\n";
+        std::cout << "  ⬜ Unaudited " << unaudited_count << "\n";
+        std::cout << "  ──────────────────────────\n";
+        std::cout << "  难度: 简单 " << easy << "  |  中等 " << medium << "  |  困难 " << hard << "\n";
+        std::cout << "  ──────────────────────────\n";
+        std::cout << "  📅 待复习   " << review_due << " 题\n";
+        std::cout << "  📊 ELO      " << profile.elo_rating << "\n";
+        std::cout << "  🏆 掌握技能 " << high_mastery << "/" << total_mastery << "\n";
+        if (!mistakes.empty()) {
+            std::cout << "  ──────────────────────────\n";
+            std::cout << "  常见错误类型 (Top 3):\n";
+            int shown = 0;
+            for (const auto& [type, cnt] : mistakes) {
+                if (shown >= 3) break;
+                std::cout << "    · " << type << ": " << cnt << "\n";
+                shown++;
+            }
+        }
+        std::cout << "══════════════════════════════════════\n\n";
     } catch (const std::exception& e) {
         std::cerr << "[!] Error: " << e.what() << "\n";
     }
