@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmake --build build --target shuati、)",
+      "Bash(cmake --build build --target shuati)"
+    ]
+  }
+}

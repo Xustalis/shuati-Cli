@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <ctime>
 #include <memory>
@@ -305,22 +306,48 @@ int TuiApp::run() {
         if (!root.empty()) project_path = root.string();
     }
 
-    auto alive = std::make_shared<std::atomic_bool>(true);
-    std::vector<std::thread> workers;
+    auto alive = state.alive;
+    alive->store(true);
+
+    struct WorkerEntry {
+        std::thread thread;
+        std::shared_ptr<std::atomic_bool> done;
+    };
+    std::vector<WorkerEntry> workers;
     std::mutex workers_mutex;
 
     auto cleanup_workers = [&]() {
         std::lock_guard<std::mutex> lock(workers_mutex);
         for (auto it = workers.begin(); it != workers.end(); ) {
-            if (it->joinable()) {
-                // We can't easily check if a thread is done without a flag, 
-                // but for simplicity in this refactor, we just keep them.
-                // In a production app, we'd use a thread pool.
-                it++;
-            } else {
+            if (it->done->load()) {
+                if (it->thread.joinable()) it->thread.join();
                 it = workers.erase(it);
+            } else {
+                ++it;
             }
         }
+    };
+
+    auto launch_worker = [&](std::function<void()> task) {
+        auto done = std::make_shared<std::atomic_bool>(false);
+        std::thread t([task = std::move(task), done]() mutable {
+            try {
+                task();
+            } catch (...) {
+                // Keep UI alive if a background job throws unexpectedly.
+            }
+            done->store(true);
+        });
+        std::lock_guard<std::mutex> lock(workers_mutex);
+        workers.push_back(WorkerEntry{std::move(t), done});
+    };
+
+    auto join_all_workers = [&]() {
+        std::lock_guard<std::mutex> lock(workers_mutex);
+        for (auto& w : workers) {
+            if (w.thread.joinable()) w.thread.join();
+        }
+        workers.clear();
     };
 
     auto quit = [&] {
@@ -333,6 +360,49 @@ int TuiApp::run() {
 
     state.post_task = [&screen](std::function<void()> task) {
         screen.Post(std::move(task));
+    };
+
+    auto open_config_view = [&]() {
+        load_config_state(state);
+        state.push_view(ViewMode::ConfigView);
+    };
+
+    auto open_list_view = [&]() {
+        load_list_state(state);
+        state.push_view(ViewMode::ListView);
+    };
+
+    auto open_status_view = [&]() {
+        state.status_state = StatusState{};
+        state.push_view(ViewMode::StatusView);
+
+        launch_worker([alive, &screen, &state]() {
+            try {
+                auto root = Config::find_root();
+                if (root.empty()) {
+                    if (!alive->load()) return;
+                    screen.Post([&state]() { state.status_state.loaded = true; });
+                    return;
+                }
+
+                auto svc = cmd::Services::load(root);
+                auto problems = svc.pm->list_problems();
+                int ac = 0;
+                for (const auto& p : problems) if (p.last_verdict == "AC") ac++;
+                auto reviews = svc.db->get_due_reviews(std::time(nullptr));
+                if (!alive->load()) return;
+                screen.Post([&state, total = static_cast<int>(problems.size()), ac, pending = static_cast<int>(reviews.size())]() {
+                    state.status_state.total_problems = total;
+                    state.status_state.ac_problems = ac;
+                    state.status_state.pending_reviews = pending;
+                    state.status_state.last_activity = "just now";
+                    state.status_state.loaded = true;
+                });
+            } catch (...) {
+                if (!alive->load()) return;
+                screen.Post([&state]() { state.status_state.loaded = true; });
+            }
+        });
     };
 
     auto run_command_ptr = std::make_shared<std::function<void(const std::string&, bool)>>();
@@ -405,8 +475,7 @@ int TuiApp::run() {
             state.is_running = true;
             state.active_command = base_cmd;
 
-            std::lock_guard<std::mutex> lock(workers_mutex);
-            workers.emplace_back([alive, run_command_ptr, &screen, &state, args = std::move(args), base_cmd]() mutable {
+            launch_worker([alive, run_command_ptr, &screen, &state, args = std::move(args), base_cmd]() mutable {
                 auto buffer_mtx = std::make_shared<std::mutex>();
                 auto buffer_str = std::make_shared<std::string>();
                 auto last_post = std::make_shared<std::chrono::steady_clock::time_point>(std::chrono::steady_clock::now());
@@ -540,40 +609,17 @@ int TuiApp::run() {
         }
 
         if (base_cmd == "status") {
-            state.status_state = StatusState{};
-            state.push_view(ViewMode::StatusView);
-            std::lock_guard<std::mutex> lock(workers_mutex);
-            workers.emplace_back([&screen, &state]() {
-                try {
-                    auto root = Config::find_root();
-                    auto svc = cmd::Services::load(root);
-                    auto problems = svc.pm->list_problems();
-                    int ac = 0;
-                    for (const auto& p : problems) if (p.last_verdict == "AC") ac++;
-                    auto reviews = svc.db->get_due_reviews(std::time(nullptr));
-                    screen.Post([&state, total = static_cast<int>(problems.size()), ac, pending = static_cast<int>(reviews.size())]() {
-                        state.status_state.total_problems = total;
-                        state.status_state.ac_problems = ac;
-                        state.status_state.pending_reviews = pending;
-                        state.status_state.last_activity = "刚刚";
-                        state.status_state.loaded = true;
-                    });
-                } catch (...) {
-                    screen.Post([&state]() { state.status_state.loaded = true; });
-                }
-            });
+            open_status_view();
             return;
         }
 
         if (base_cmd == "config" && args.size() == 2) {
-            load_config_state(state);
-            state.push_view(ViewMode::ConfigView);
+            open_config_view();
             return;
         }
 
         if (base_cmd == "list") {
-            load_list_state(state);
-            state.push_view(ViewMode::ListView);
+            open_list_view();
             return;
         }
 
@@ -581,8 +627,7 @@ int TuiApp::run() {
         state.is_running = true;
         state.active_command = base_cmd;
 
-        std::lock_guard<std::mutex> lock(workers_mutex);
-        workers.emplace_back([alive, run_command_ptr, &screen, &state, args = std::move(args), base_cmd]() mutable {
+        launch_worker([alive, run_command_ptr, &screen, &state, args = std::move(args), base_cmd]() mutable {
             auto buffer_mtx = std::make_shared<std::mutex>();
             auto buffer_str = std::make_shared<std::string>();
             auto last_post = std::make_shared<std::chrono::steady_clock::time_point>(std::chrono::steady_clock::now());
@@ -724,11 +769,12 @@ int TuiApp::run() {
         state.pull_state.progress = 0.1f;
         state.pull_state.status_msg = "正在分析 URL...";
 
-        std::lock_guard<std::mutex> lock(workers_mutex);
-        workers.emplace_back([alive, &screen, &state, url]() mutable {
+        launch_worker([alive, &screen, &state, url]() mutable {
             try {
+                if (!alive->load()) return;
                 screen.Post([&state]() { state.pull_state.progress = 0.3f; state.pull_state.status_msg = "正在连接题库..."; });
                 tui_execute_command_stream({"shuati", "pull", url}, "pull", [&](const std::string& chunk) {
+                    if (!alive->load()) return;
                     screen.Post([&state, chunk]() {
                         if (chunk.find("Downloaded") != std::string::npos) state.pull_state.progress = 0.7f;
                         if (chunk.find("Saved") != std::string::npos) state.pull_state.progress = 0.9f;
@@ -739,6 +785,7 @@ int TuiApp::run() {
                 auto problems = svc.pm->list_problems();
                 if (!problems.empty()) {
                     const auto& p = problems.back();
+                    if (!alive->load()) return;
                     screen.Post([&state, p]() {
                         state.pull_state.result.tid = p.display_id;
                         state.pull_state.result.title = p.title;
@@ -748,6 +795,7 @@ int TuiApp::run() {
                     });
                 }
             } catch (const std::exception& e) {
+                if (!alive->load()) return;
                 screen.Post([&state, err = std::string(e.what())]() { state.pull_state.error = err; state.pull_state.finished = true; state.pull_state.loading = false; });
             }
             for (int i = 3; i > 0; i--) {
@@ -755,6 +803,7 @@ int TuiApp::run() {
                 screen.Post([&state, i]() { state.pull_state.countdown = i; });
                 std::this_thread::sleep_for(std::chrono::seconds(1));
             }
+            if (!alive->load()) return;
             screen.Post([&state]() { if (state.view_mode == ViewMode::PullView) state.pop_view(); });
         });
     };
@@ -797,17 +846,14 @@ int TuiApp::run() {
     auto global_handler = CatchEvent(main_router, [&](Event event) -> bool {
         if (event == Event::Character('\x03')) { quit(); return true; }
         
-        if (event == Event::Tab) { 
-            state.active_pane = 1 - state.active_pane; 
-            return true; 
-        }
-        if (event == Event::ArrowLeft && state.active_pane == 1) {
-            state.active_pane = 0;
-            return true;
-        }
-        if (event == Event::ArrowRight && state.active_pane == 0) {
-            state.active_pane = 1;
-            return true;
+        if (event == Event::Tab) {
+            // Keep Tab available for command autocomplete in the main input pane.
+            if (state.view_mode == ViewMode::Main && state.active_pane == 1) {
+                // Let the main input/autocomplete handler consume it.
+            } else {
+                state.active_pane = 1 - state.active_pane;
+                return true;
+            }
         }
 
         if (state.active_pane == 0) {
@@ -822,10 +868,10 @@ int TuiApp::run() {
             if (event == Event::Return) {
                 int sel = state.sidebar_state.selected;
                 if (sel == 0) state.view_mode = ViewMode::Main;
-                else if (sel == 1) { load_list_state(state); state.view_mode = ViewMode::ListView; }
+                else if (sel == 1) { open_list_view(); }
                 else if (sel == 2) { (*run_command_ptr)("/solve", false); }
-                else if (sel == 3) { (*run_command_ptr)("/status", false); }
-                else if (sel == 4) { load_config_state(state); state.view_mode = ViewMode::ConfigView; }
+                else if (sel == 3) { open_status_view(); }
+                else if (sel == 4) { open_config_view(); }
                 state.active_pane = 1;
                 return true;
             }
@@ -833,6 +879,12 @@ int TuiApp::run() {
         }
         
         if (state.view_mode == ViewMode::Main) {
+            if (event == Event::Tab && !state.is_autocomplete_open) {
+                update_autocomplete(state, specs);
+                if (state.is_autocomplete_open) return true;
+                state.active_pane = 0;
+                return true;
+            }
             if (event == Event::Character('\x0C')) { state.buffer.clear(); state.scroll_offset = 0; return true; }
             if (event == Event::Character('\x15')) { state.input.clear(); main_cursor_pos = 0; state.is_autocomplete_open = false; return true; }
             if (state.is_autocomplete_open) {
@@ -846,9 +898,9 @@ int TuiApp::run() {
                         bool jumped = false;
                         for (const auto& spec : specs) {
                             if (spec.slash == cmd) {
-                                if (cmd == "/config") { state.push_view(ViewMode::ConfigView); jumped = true; }
-                                else if (cmd == "/list") { state.push_view(ViewMode::ListView); jumped = true; }
-                                else if (cmd == "/status") { state.push_view(ViewMode::StatusView); jumped = true; }
+                                if (cmd == "/config") { open_config_view(); jumped = true; }
+                                else if (cmd == "/list") { open_list_view(); jumped = true; }
+                                else if (cmd == "/status") { open_status_view(); jumped = true; }
                                 else if (cmd == "/menu") { state.push_view(ViewMode::MenuView); jumped = true; }
                                 break;
                             }
@@ -910,9 +962,45 @@ int TuiApp::run() {
                 }
             } else if (state.view_mode == ViewMode::ListView) {
                 auto& ls = state.list_state;
+                auto run_for_selected = [&](const std::string& cmd, bool leave_list) -> bool {
+                    if (ls.rows.empty()) return true;
+                    std::string tid = std::to_string(ls.rows[ls.selected].tid);
+                    if (leave_list) state.pop_view();
+                    (*run_command_ptr)(cmd + " " + tid, true);
+                    return true;
+                };
                 if (event == Event::ArrowUp || event == Event::Character('k')) { ls.selected = std::max(0, ls.selected - 1); return true; }
                 if (event == Event::ArrowDown || event == Event::Character('j')) { ls.selected = std::min((int)ls.rows.size() - 1, ls.selected + 1); return true; }
-                if (event == Event::Return && !ls.rows.empty()) { std::string tid = std::to_string(ls.rows[ls.selected].tid); state.pop_view(); (*run_command_ptr)("/solve " + tid, true); return true; }
+                if (event == Event::Character('f')) {
+                    const std::vector<std::string> filters = {"all", "ac", "failed", "unaudited", "review"};
+                    auto it = std::find(filters.begin(), filters.end(), ls.status_filter);
+                    int idx = (it == filters.end()) ? 0 : static_cast<int>(std::distance(filters.begin(), it));
+                    ls.status_filter = filters[(idx + 1) % static_cast<int>(filters.size())];
+                    load_list_state(state, ls.status_filter, ls.difficulty_filter, ls.source_filter);
+                    return true;
+                }
+                if (event == Event::Character('F')) {
+                    const std::vector<std::string> filters = {"all", "easy", "medium", "hard"};
+                    auto it = std::find(filters.begin(), filters.end(), ls.difficulty_filter);
+                    int idx = (it == filters.end()) ? 0 : static_cast<int>(std::distance(filters.begin(), it));
+                    ls.difficulty_filter = filters[(idx + 1) % static_cast<int>(filters.size())];
+                    load_list_state(state, ls.status_filter, ls.difficulty_filter, ls.source_filter);
+                    return true;
+                }
+                if (event == Event::Character('s') || event == Event::Character('S')) {
+                    const std::vector<std::string> filters = {"all", "luogu", "leetcode", "codeforces", "lanqiao"};
+                    auto it = std::find(filters.begin(), filters.end(), ls.source_filter);
+                    int idx = (it == filters.end()) ? 0 : static_cast<int>(std::distance(filters.begin(), it));
+                    ls.source_filter = filters[(idx + 1) % static_cast<int>(filters.size())];
+                    load_list_state(state, ls.status_filter, ls.difficulty_filter, ls.source_filter);
+                    return true;
+                }
+                if (event == Event::Return) return run_for_selected("/solve", true);
+                if (event == Event::Character('t') || event == Event::Character('T')) return run_for_selected("/test", true);
+                if (event == Event::Character('v') || event == Event::Character('V')) return run_for_selected("/view", true);
+                if (event == Event::Character('h') || event == Event::Character('H')) return run_for_selected("/hint", true);
+                if (event == Event::Character('r') || event == Event::Character('R')) return run_for_selected("/record", false);
+                if (event == Event::Character('d') || event == Event::Character('D')) return run_for_selected("/delete", false);
             } else if (state.view_mode == ViewMode::HintView) {
                 auto& hs = state.hint_state;
                 if (event == Event::ArrowLeft) {
@@ -927,13 +1015,16 @@ int TuiApp::run() {
                     // Silent jump based on action
                     std::string label = hs.actions[hs.selected_action];
                     if (label.find("Solve") != std::string::npos) {
-                        state.pop_view(); state.push_view(ViewMode::SolveView);
+                        state.pop_view();
+                        (*run_command_ptr)("/solve", false);
                     } else if (label.find("Test") != std::string::npos) {
                         // For /test, we need a problem ID. Try to extract from current command context or state
                         // Actually, just go to SolveView which lists problems
-                        state.pop_view(); state.push_view(ViewMode::SolveView);
+                        state.pop_view();
+                        (*run_command_ptr)("/solve", false);
                     } else if (label.find("List") != std::string::npos) {
-                        state.pop_view(); state.push_view(ViewMode::ListView);
+                        state.pop_view();
+                        open_list_view();
                     }
                     return true;
                 }
@@ -992,13 +1083,16 @@ int TuiApp::run() {
                     if (event == Event::Return && !ss.filtered_rows.empty()) {
                         ss.show_preview = true; ss.preview_content = "正在加载题面...";
                         int tid = ss.filtered_rows[ss.selected_idx].tid;
-                        std::lock_guard<std::mutex> lock(workers_mutex);
-                        workers.emplace_back([&screen, &state, tid]() {
+                        launch_worker([alive, &screen, &state, tid]() {
                             try {
                                 auto svc = cmd::Services::load(Config::find_root());
                                 auto p = svc.pm->get_problem(std::to_string(tid));
+                                if (!alive->load()) return;
                                 screen.Post([&state, content = p.description]() { state.solve_state.preview_content = content; });
-                            } catch (...) { screen.Post([&state]() { state.solve_state.preview_content = "无法加载题面。"; }); }
+                            } catch (...) {
+                                if (!alive->load()) return;
+                                screen.Post([&state]() { state.solve_state.preview_content = "无法加载题面。"; });
+                            }
                         });
                         return true;
                     }
@@ -1063,12 +1157,12 @@ int TuiApp::run() {
                     
                     if (!item.route_id.empty() && item.route_id != "Main") {
                         // Silent jump to view
-                        if (item.route_id == "ConfigView") state.push_view(ViewMode::ConfigView);
-                        else if (item.route_id == "ListView") state.push_view(ViewMode::ListView);
+                        if (item.route_id == "ConfigView") open_config_view();
+                        else if (item.route_id == "ListView") open_list_view();
                         else if (item.route_id == "HintView") state.push_view(ViewMode::HintView);
                         else if (item.route_id == "PullView") state.push_view(ViewMode::PullView);
                         else if (item.route_id == "SolveView") state.push_view(ViewMode::SolveView);
-                        else if (item.route_id == "StatusView") state.push_view(ViewMode::StatusView);
+                        else if (item.route_id == "StatusView") open_status_view();
                         else if (item.route_id == "MenuView") state.push_view(ViewMode::MenuView);
                     } else if (item.requires_args) {
                         state.input = item.command + " ";
@@ -1106,8 +1200,7 @@ int TuiApp::run() {
 
     screen.Loop(root_layout);
     alive->store(false);
-    std::lock_guard<std::mutex> lock(workers_mutex);
-    for (auto& t : workers) if (t.joinable()) t.detach();
+    join_all_workers();
     return 0;
 }
 
