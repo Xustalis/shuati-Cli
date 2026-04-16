@@ -68,17 +68,8 @@ void ProblemManager::pull_problem(const std::string& url) {
     std::filesystem::path prob_dir = root / Config::DIR_NAME / "problems" / utils::canonical_source(p.source) / p.id;
     if (!std::filesystem::exists(prob_dir)) std::filesystem::create_directories(prob_dir);
     std::string filename = (prob_dir / "problem.md").string();
-    std::ofstream out(filename);
-    out << "# " << p.title << "\n\n"
-        << "来源: " << url << "\n"
-        << "难度: " << p.difficulty << "\n"
-        << "标签: " << p.tags << "\n\n"
-        << "## 题目描述\n\n"
-        << p.description << "\n\n"
-        << "(数据抓取自 " << p.source << ")\n\n"
-        << "## 笔记\n\n";
-    out.close();
-
+    
+    // Save to DB first — if this fails, the file is untouched (DB is source of truth)
     p.content_path = std::filesystem::absolute(filename).string();
     db_->add_problem(p);
 
@@ -98,6 +89,18 @@ void ProblemManager::pull_problem(const std::string& url) {
     r.repetitions = 0;
     db_->upsert_review(r);
 
+    // Write file only after DB insert succeeds
+    std::ofstream out(filename);
+    out << "# " << p.title << "\n\n"
+        << "来源: " << url << "\n"
+        << "难度: " << p.difficulty << "\n"
+        << "标签: " << p.tags << "\n\n"
+        << "## 题目描述\n\n"
+        << p.description << "\n\n"
+        << "(数据抓取自 " << p.source << ")\n\n"
+        << "## 笔记\n\n";
+    out.close();
+
     fmt::print(fg(fmt::color::green), "[+] 题目 '{}' 已保存至 {}\n", p.title, filename);
     fmt::print("    使用 shuati solve {} 开始练习\n", p.id);
 }
@@ -108,7 +111,7 @@ std::string ProblemManager::create_local(const std::string& title, const std::st
     p.source = "local";
     p.title = title;
     p.tags = tags;
-    p.difficulty = difficulty;
+    p.difficulty = difficulty.empty() ? "medium" : difficulty;
     p.created_at = std::time(nullptr);
 
     auto root = Config::find_root();
@@ -163,7 +166,10 @@ void ProblemManager::delete_problem(const std::string& id) {
     auto p = db_->get_problem(id);
     if (p.id.empty()) return;
 
-    // Delete problem file
+    // Delete from DB first — if this fails, files are untouched
+    if (p.display_id > 0) db_->delete_problem(p.display_id);
+
+    // Only delete files after DB deletion succeeds
     if (std::filesystem::exists(p.content_path)) {
         std::filesystem::remove(p.content_path);
     }
@@ -185,9 +191,6 @@ void ProblemManager::delete_problem(const std::string& id) {
             }
         } catch (...) {}
     }
-
-    // Delete from DB
-    if (p.display_id > 0) db_->delete_problem(p.display_id);
 
     fmt::print(fg(fmt::color::green), "[+] 题目已删除: {} (TID: {})\n", p.title, p.display_id);
 }

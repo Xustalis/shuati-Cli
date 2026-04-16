@@ -338,9 +338,8 @@ JudgeResult Judge::run_case(const std::string& executable,
         
         if (res.verdict == Verdict::WA) {
             res.message = fmt::format("Expected:\n{}\nActual:\n{}", tc.output, res.output);
-        } else {
-            res.verdict = Verdict::AC;
         }
+        // verdict is already set correctly by check_output (AC or WA)
     }
 
     return res;

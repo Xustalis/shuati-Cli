@@ -46,15 +46,16 @@ static Problem fill_problem_from_row(SQLite::Statement& q) {
     p.title = safe_column_text(q.getColumn(3));
     p.url = safe_column_text(q.getColumn(4));
     p.content_path = safe_column_text(q.getColumn(5));
-    p.tags = safe_column_text(q.getColumn(6));
-    p.difficulty = safe_column_text(q.getColumn(7));
-    p.created_at = q.getColumn(8).getInt64();
+    p.description = safe_column_text(q.getColumn(6));
+    p.tags = safe_column_text(q.getColumn(7));
+    p.difficulty = safe_column_text(q.getColumn(8));
+    p.created_at = q.getColumn(9).getInt64();
     
     // 安全获取可能为空的列
-    p.last_verdict = safe_column_text(q.getColumn(9));
-    try { p.pass_count = q.getColumn(10).getInt(); } catch(...) { p.pass_count = 0; }
-    try { p.total_count = q.getColumn(11).getInt(); } catch(...) { p.total_count = 0; }
-    try { p.last_checked_at = q.getColumn(12).getInt64(); } catch(...) { p.last_checked_at = 0; }
+    p.last_verdict = safe_column_text(q.getColumn(10));
+    try { p.pass_count = q.getColumn(11).getInt(); } catch(...) { p.pass_count = 0; }
+    try { p.total_count = q.getColumn(12).getInt(); } catch(...) { p.total_count = 0; }
+    try { p.last_checked_at = q.getColumn(13).getInt64(); } catch(...) { p.last_checked_at = 0; }
     
     return p;
 }
@@ -87,6 +88,7 @@ void Database::init_schema() {
         "  title TEXT,"
         "  url TEXT,"
         "  content_path TEXT,"
+        "  description TEXT,"
         "  tags TEXT DEFAULT '',"
         "  difficulty TEXT DEFAULT 'medium',"
         "  created_at INTEGER,"
@@ -150,11 +152,10 @@ void Database::init_schema() {
         "CREATE TABLE IF NOT EXISTS memory_mistakes ("
         "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "  tags TEXT,"
-        "  pattern TEXT,"
+        "  pattern TEXT UNIQUE,"
         "  frequency INTEGER DEFAULT 1,"
         "  last_seen INTEGER,"
-        "  example_id TEXT,"
-        "  UNIQUE(tags, pattern)" 
+        "  example_id TEXT"
         ")");
 
     db_->exec(
@@ -181,6 +182,10 @@ void Database::init_schema() {
 void Database::init_indexes() {
     // 题目查询优化索引
     db_->exec("CREATE INDEX IF NOT EXISTS idx_problems_url ON problems(url)");
+    // Add UNIQUE constraint on url to prevent duplicates (ignore error if duplicates exist)
+    try {
+        db_->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_problems_url_uniq ON problems(url)");
+    } catch (const std::exception&) {}
     db_->exec("CREATE INDEX IF NOT EXISTS idx_problems_created ON problems(created_at DESC)");
     db_->exec("CREATE INDEX IF NOT EXISTS idx_problems_difficulty ON problems(difficulty)");
     db_->exec("CREATE INDEX IF NOT EXISTS idx_problems_source ON problems(source)");
@@ -214,12 +219,13 @@ void Database::init_indexes() {
 
 void Database::add_problem(const Problem& p) {
     SQLite::Statement q(*db_,
-        "INSERT INTO problems (id,source,title,url,content_path,tags,difficulty,created_at,"
+        "INSERT INTO problems (id,source,title,url,content_path,description,tags,difficulty,created_at,"
         "last_verdict,pass_count,total_count,last_checked_at) "
-        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) "
+        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) "
         "ON CONFLICT(id) DO UPDATE SET "
         "source=excluded.source, title=excluded.title, url=excluded.url, "
-        "content_path=excluded.content_path, tags=excluded.tags, difficulty=excluded.difficulty, "
+        "content_path=excluded.content_path, description=excluded.description, "
+        "tags=excluded.tags, difficulty=excluded.difficulty, "
         "created_at=excluded.created_at, last_verdict=excluded.last_verdict, "
         "pass_count=excluded.pass_count, total_count=excluded.total_count, last_checked_at=excluded.last_checked_at");
     q.bind(1, ensure_utf8_lossy(p.id));
@@ -227,13 +233,14 @@ void Database::add_problem(const Problem& p) {
     q.bind(3, ensure_utf8_lossy(p.title));
     q.bind(4, ensure_utf8_lossy(p.url));
     q.bind(5, ensure_utf8_lossy(p.content_path));
-    q.bind(6, ensure_utf8_lossy(p.tags));
-    q.bind(7, ensure_utf8_lossy(p.difficulty));
-    q.bind(8, static_cast<int64_t>(p.created_at ? p.created_at : std::time(nullptr)));
-    q.bind(9, ensure_utf8_lossy(p.last_verdict));
-    q.bind(10, p.pass_count);
-    q.bind(11, p.total_count);
-    q.bind(12, static_cast<int64_t>(p.last_checked_at));
+    q.bind(6, ensure_utf8_lossy(p.description));
+    q.bind(7, ensure_utf8_lossy(p.tags));
+    q.bind(8, ensure_utf8_lossy(p.difficulty));
+    q.bind(9, static_cast<int64_t>(p.created_at ? p.created_at : std::time(nullptr)));
+    q.bind(10, ensure_utf8_lossy(p.last_verdict));
+    q.bind(11, p.pass_count);
+    q.bind(12, p.total_count);
+    q.bind(13, static_cast<int64_t>(p.last_checked_at));
     q.exec();
 }
 
@@ -248,7 +255,7 @@ std::vector<Problem> Database::get_all_problems() {
     out.reserve(100); // 预分配空间优化
     
     SQLite::Statement q(*db_, 
-        "SELECT rowid, id,source,title,url,content_path,tags,difficulty,created_at, "
+        "SELECT rowid, id,source,title,url,content_path,description,tags,difficulty,created_at, "
         "last_verdict, pass_count, total_count, last_checked_at "
         "FROM problems ORDER BY created_at DESC");
     while (q.executeStep()) {
@@ -259,7 +266,7 @@ std::vector<Problem> Database::get_all_problems() {
 
 Problem Database::get_problem(const std::string& id) {
     SQLite::Statement q(*db_, 
-        "SELECT rowid, id,source,title,url,content_path,tags,difficulty,created_at, "
+        "SELECT rowid, id,source,title,url,content_path,description,tags,difficulty,created_at, "
         "last_verdict, pass_count, total_count, last_checked_at "
         "FROM problems WHERE id=? LIMIT 1");
     q.bind(1, ensure_utf8_lossy(id));
@@ -271,7 +278,7 @@ Problem Database::get_problem(const std::string& id) {
 
 Problem Database::get_problem_by_display_id(int tid) {
     SQLite::Statement q(*db_, 
-        "SELECT rowid, id,source,title,url,content_path,tags,difficulty,created_at, "
+        "SELECT rowid, id,source,title,url,content_path,description,tags,difficulty,created_at, "
         "last_verdict, pass_count, total_count, last_checked_at "
         "FROM problems WHERE rowid=? LIMIT 1");
     q.bind(1, tid);
@@ -532,15 +539,22 @@ std::vector<Mastery> Database::get_all_mastery() {
 // ---- User Profile ----
 
 void Database::update_user_profile(int elo, const std::string& preferences) {
-    if (elo > 0) {
-        SQLite::Statement q(*db_, "UPDATE user_profile SET elo_rating=? WHERE id=1");
-        q.bind(1, elo);
-        q.exec();
-    }
-    if (!preferences.empty()) {
-        SQLite::Statement q(*db_, "UPDATE user_profile SET preferences=? WHERE id=1");
-        q.bind(1, ensure_utf8_lossy(preferences));
-        q.exec();
+    db_->exec("BEGIN");
+    try {
+        if (elo > 0) {
+            SQLite::Statement q(*db_, "UPDATE user_profile SET elo_rating=? WHERE id=1");
+            q.bind(1, elo);
+            q.exec();
+        }
+        if (!preferences.empty()) {
+            SQLite::Statement q(*db_, "UPDATE user_profile SET preferences=? WHERE id=1");
+            q.bind(1, ensure_utf8_lossy(preferences));
+            q.exec();
+        }
+        db_->exec("COMMIT");
+    } catch (...) {
+        db_->exec("ROLLBACK");
+        throw;
     }
 }
 
