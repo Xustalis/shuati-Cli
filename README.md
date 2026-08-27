@@ -1,3 +1,5 @@
+
+
 <div align="center">
 
 ```text
@@ -105,7 +107,6 @@ Shuati CLI v0.2.0+ 引入了全新的 **全屏 TUI (Terminal User Interface)** �
 | **test** | `shuati test <id>` | 在沙箱中运行本地代码并对比全部测试用例 |
 | **record**| `shuati record <id>`| 记录题目掌握情况，自动计算下一次复习时间 |
 | **list**  | `shuati list` | 浏览本地题库，支持通过率与难度过滤 |
-| **status**| `shuati status` | 显示当前学习统计与进度 |
 | **config**| `shuati config` | 配置编辑器路径、OJ Cookie、AI API Key 等 |
 | **hint**  | `shuati hint <id>` | 调用 AI 针对当前题目和代码给出提示或思路 |
 | **init**  | `shuati init` | 在当前文件夹初始化 .shuati 存储结构 |
