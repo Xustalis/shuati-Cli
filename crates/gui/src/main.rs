@@ -1,6 +1,7 @@
 //! shuati-gui: egui 主入口。
 
 mod app;
+mod fonts;
 mod worker;
 mod views;
 

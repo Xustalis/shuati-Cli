@@ -59,7 +59,11 @@ pub struct ShuatiApp {
 }
 
 impl ShuatiApp {
-    pub fn new(_cc: &eframe::CreationContext) -> Self {
+    pub fn new(cc: &eframe::CreationContext) -> Self {
+        // egui 默认字体无 CJK 字形，必须先装中文字体否则全屏豆腐块
+        crate::fonts::install(&cc.egui_ctx);
+        crate::fonts::tune_text_styles(&cc.egui_ctx);
+
         let root = store::Workspace::default_dir();
         let ws = store::Workspace::open(&root).expect("open workspace");
         let cfg = store::Config::load(&ws.config_path());
