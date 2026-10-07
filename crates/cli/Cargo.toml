@@ -1,0 +1,21 @@
+[package]
+name = "shuati-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "shuati"
+path = "src/main.rs"
+
+[dependencies]
+shuati-core.workspace = true
+shuati-store.workspace = true
+shuati-judge.workspace = true
+shuati-fetch.workspace = true
+shuati-ai.workspace = true
+clap = { version = "4", features = ["derive"] }
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

@@ -1,0 +1,11 @@
+[package]
+name = "shuati-fetch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+shuati-core.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+tracing.workspace = true

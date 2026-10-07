@@ -1,0 +1,23 @@
+[package]
+name = "shuati-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "shuati-gui"
+path = "src/main.rs"
+
+[dependencies]
+shuati-core.workspace = true
+shuati-store.workspace = true
+shuati-judge.workspace = true
+shuati-fetch.workspace = true
+shuati-ai.workspace = true
+eframe = "0.32"
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+notify.workspace = true
+egui = "0.32"
