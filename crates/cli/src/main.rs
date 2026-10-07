@@ -43,6 +43,37 @@ enum Cmd {
         #[arg(long)]
         slug: Option<String>,
     },
+    /// 从 URL 拉题（洛谷/Codeforces）
+    Add {
+        /// 题目链接
+        url: String,
+    },
+    /// 对拍：gen 生成器 × user 解 × oracle 标程
+    Stress {
+        /// 题目 id
+        id: Option<String>,
+        /// 生成器源文件（默认 gen/gen.*）
+        #[arg(long = "gen")]
+        generator: Option<PathBuf>,
+        /// 标程源文件（默认 solutions/brute.*）
+        #[arg(long)]
+        oracle: Option<PathBuf>,
+        /// 用户解（默认 solutions/main.*）
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// 轮数
+        #[arg(short = 'n', long, default_value = "100")]
+        rounds: u32,
+        /// 指定起始 seed（配合 -n 1 即 replay）
+        #[arg(long)]
+        seed: Option<u64>,
+        /// 并行轮数
+        #[arg(short = 'j', long, default_value = "4")]
+        jobs: usize,
+        /// 发现 hack 后继续跑
+        #[arg(long)]
+        keep_going: bool,
+    },
 }
 
 #[tokio::main]
@@ -67,6 +98,119 @@ async fn main() -> Result<()> {
         Some(Cmd::List) => cmd_list(&ws)?,
         Some(Cmd::New { title, slug }) => cmd_new(&ws, &title, slug)?,
         Some(Cmd::Test { id, file, jobs }) => cmd_test(&ws, &cfg, id, file, jobs).await?,
+        Some(Cmd::Add { url }) => cmd_add(&ws, &url).await?,
+        Some(Cmd::Stress { id, generator, oracle, file, rounds, seed, jobs, keep_going }) => {
+            cmd_stress(&ws, &cfg, id, generator, oracle, file, rounds, seed, jobs, keep_going).await?
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_add(ws: &store::Workspace, url: &str) -> Result<()> {
+    println!("[*] 正在拉取 {url} …");
+    let pd = shuati_fetch::fetch_to_dir(url, ws).await?;
+    println!("[+] {}  {}", pd.meta.id, pd.meta.title);
+    let cases = pd.load_cases()?;
+    println!("    样例 {} 组 → {}", cases.len(), pd.dir.display());
+    // 设为当前题目
+    let mut state = store::AppState::load(&ws.state_path());
+    state.current_problem = Some(pd.meta.id.to_string());
+    state.save(&ws.state_path())?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn cmd_stress(
+    ws: &store::Workspace,
+    cfg: &store::Config,
+    id: Option<String>,
+    generator: Option<PathBuf>,
+    oracle: Option<PathBuf>,
+    file: Option<PathBuf>,
+    rounds: u32,
+    seed: Option<u64>,
+    jobs: usize,
+    keep_going: bool,
+) -> Result<()> {
+    let problems = store::load_all_problems(ws);
+    let pd = match resolve_problem(&problems, id.as_deref(), ws)? {
+        Some(p) => p,
+        None => anyhow::bail!("找不到题目"),
+    };
+
+    let user_path = match file {
+        Some(f) => f,
+        None => pd.find_solution().context("solutions/ 下没有源文件")?,
+    };
+    let gen_path = match generator {
+        Some(g) => g,
+        None => judge::find_script(&pd.gen_dir(), &["gen"])
+            .context("找不到生成器（放 gen/gen.cpp|py 或 --gen 指定）")?,
+    };
+    let oracle_path = match oracle {
+        Some(o) => o,
+        None => judge::find_script(&pd.solutions_dir(), &["brute", "oracle", "std"])
+            .context("找不到标程（放 solutions/brute.cpp|py 或 --oracle 指定）")?,
+    };
+
+    let mk_src = |p: &PathBuf| -> Result<SourceFile> {
+        let lang = Lang::from_path(p).context(format!("不支持类型: {}", p.display()))?;
+        Ok(SourceFile { path: p.clone(), lang })
+    };
+    let gen_src = mk_src(&gen_path)?;
+    let user_src = mk_src(&user_path)?;
+    let oracle_src = mk_src(&oracle_path)?;
+
+    println!("[*] 对拍 {} · {} 轮", pd.meta.id, rounds);
+    println!("    gen    = {}", gen_path.display());
+    println!("    user   = {}", user_path.display());
+    println!("    oracle = {}", oracle_path.display());
+
+    let ev_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let cnt = ev_count.clone();
+    let progress = std::sync::Arc::new(move |ev: judge::StressEvent| {
+        use judge::StressEvent::*;
+        let n = cnt.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        match ev {
+            Match { seed, .. } => eprint!("\r  round {n} seed={seed} ✓        "),
+            Hack { seed, case, .. } => eprintln!("\n  [HACK] seed={seed} kind={}", case.kind),
+            GenFail { seed, msg, .. } => eprintln!("\n  [gen 异常] seed={seed}: {msg}"),
+            OracleFail { seed, msg, .. } => eprintln!("\n  [标程异常] seed={seed}: {msg}"),
+        }
+    });
+
+    let gen_limits = shuati_core::Limits { cpu_ms: 10000, wall_ms: 15000, memory_mb: 512, output_mb: 64 };
+    let params = judge::StressParams {
+        gen_src: &gen_src,
+        user_src: &user_src,
+        oracle_src: &oracle_src,
+        rounds,
+        seed_start: seed.unwrap_or(1),
+        jobs,
+        limits_run: &pd.meta.limits,
+        limits_gen: &gen_limits,
+        checker: &pd.meta.checker,
+        stop_on_fail: !keep_going,
+        progress: Some(progress),
+        cancel: None,
+    };
+
+    let engine = judge::StressEngine::new(&params, &cfg.compiler_cpp, &cfg.compiler_python)?;
+    let report = engine.run(&params).await?;
+    eprintln!();
+
+    // hack 落盘
+    for hack in &report.hacks {
+        let path = pd.save_hack(hack.seed, &hack.input, &hack.user_out, &hack.oracle_out, &format!("{}: {}", hack.kind, hack.detail))?;
+        println!("  hack 已保存 → {}", path.display());
+    }
+
+    println!(
+        "[结果] {} 轮 · ✓{} 一致 · hack {} · gen异常 {} · 标程异常 {}",
+        report.rounds_done, report.matched, report.hacks.len(), report.gen_failures, report.oracle_failures
+    );
+    if !report.hacks.is_empty() {
+        std::process::exit(1);
     }
     Ok(())
 }

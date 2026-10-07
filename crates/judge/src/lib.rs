@@ -7,6 +7,7 @@ mod compiler;
 mod runner;
 mod checker;
 mod engine;
+mod stress;
 mod watch;
 mod env;
 
@@ -15,6 +16,7 @@ pub use compiler::*;
 pub use runner::*;
 pub use checker::*;
 pub use engine::*;
+pub use stress::*;
 pub use watch::*;
 pub use env::*;
 

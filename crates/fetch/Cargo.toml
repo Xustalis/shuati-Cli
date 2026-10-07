@@ -9,3 +9,9 @@ shuati-core.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
+reqwest = { version = "0.12", features = ["rustls-tls", "json", "cookies"] }
+scraper = "0.24"
+regex = "1"
+serde_json = "1"
+tokio = "1"
+shuati-store = { version = "0.1.0", path = "../store" }

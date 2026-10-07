@@ -20,6 +20,16 @@ pub enum Event {
     RunDone(Box<TestReport>),
     /// 错误（编译/环境）
     Failed(String),
+    /// 拉题完成（problem id 字符串）
+    FetchedOk(String),
+    /// 拉题失败
+    FetchFailed(String),
+    /// 对拍：单轮进度（done, matched, hacks, gen_fail, oracle_fail）
+    StressTick(u32, u32, u32, u32, u32),
+    /// 对拍：发现反例
+    StressHack(Box<judge::HackCase>),
+    /// 对拍完成
+    StressDone(Box<judge::StressReport>),
 }
 
 /// UI → 后台 命令
@@ -34,6 +44,24 @@ pub enum Task {
         compiler_cfg: String,
         cancel: Arc<AtomicBool>,
     },
+    /// 拉题
+    FetchProblem { url: String },
+    /// 对拍
+    RunStress {
+        problem_dir: PathBuf,
+        gen_src: SourceFile,
+        user_src: SourceFile,
+        oracle_src: SourceFile,
+        rounds: u32,
+        seed_start: u64,
+        jobs: usize,
+        limits: shuati_core::Limits,
+        checker: shuati_core::CheckerSpec,
+        cpp_cfg: String,
+        py_cfg: String,
+        stop_on_fail: bool,
+        cancel: Arc<AtomicBool>,
+    },
 }
 
 pub struct Bridge {
@@ -45,12 +73,13 @@ pub struct Bridge {
 
 impl Bridge {
     /// 启动 tokio runtime 线程
-    pub fn spawn(_ws_root: PathBuf) -> Self {
+    pub fn spawn(ws_root: PathBuf) -> Self {
         let (task_tx, mut task_rx) = mpsc::unbounded_channel::<Task>();
         let (ev_tx, ev_rx) = std::sync::mpsc::channel::<Event>();
         let cancel_slot: Arc<Mutex<Option<Arc<AtomicBool>>>> = Arc::new(Mutex::new(None));
 
         let slot = cancel_slot.clone();
+        let root = ws_root.clone();
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
             rt.block_on(async move {
@@ -63,13 +92,43 @@ impl Bridge {
                                 run_test(problem_dir, problem_id, src, limits, checker, compiler_cfg, cancel, ev).await;
                             });
                         }
+                        Task::FetchProblem { url } => {
+                            let ev = ev_tx.clone();
+                            let root = root.clone();
+                            tokio::spawn(async move {
+                                let ws = match store::Workspace::open(&root) {
+                                    Ok(w) => w,
+                                    Err(e) => {
+                                        let _ = ev.send(Event::FetchFailed(format!("工作区: {e}")));
+                                        return;
+                                    }
+                                };
+                                match shuati_fetch::fetch_to_dir(&url, &ws).await {
+                                    Ok(pd) => {
+                                        let _ = ev.send(Event::FetchedOk(pd.meta.id.to_string()));
+                                    }
+                                    Err(e) => {
+                                        let _ = ev.send(Event::FetchFailed(e.to_string()));
+                                    }
+                                }
+                            });
+                        }
+                        Task::RunStress {
+                            problem_dir, gen_src, user_src, oracle_src, rounds, seed_start,
+                            jobs, limits, checker, cpp_cfg, py_cfg, stop_on_fail, cancel,
+                        } => {
+                            *slot.lock().unwrap() = Some(cancel.clone());
+                            let ev = ev_tx.clone();
+                            tokio::spawn(async move {
+                                run_stress(problem_dir, gen_src, user_src, oracle_src, rounds, seed_start,
+                                    jobs, limits, checker, cpp_cfg, py_cfg, stop_on_fail, cancel, ev).await;
+                            });
+                        }
                     }
                 }
             });
         });
 
-        // 任务处理（NewProblem/Reload 需要 store，放这里处理）
-        // —— 简化：这些走同一个 runtime 线程太重，改由 UI 线程直接做（同步 IO 很快）
         Self { tx: task_tx, rx: ev_rx, current_cancel: cancel_slot }
     }
 
@@ -110,7 +169,7 @@ async fn run_test(
     let cases = match pd.load_cases() {
         Ok(c) if !c.is_empty() => c,
         Ok(_) => {
-            let _ = ev.send(Event::Failed("tests/ 下没有用例".into()));
+            let _ = ev.send(Event::Failed("tests/ 下没有用例——去评测页下方加一个".into()));
             return;
         }
         Err(e) => {
@@ -157,6 +216,90 @@ async fn run_test(
         Ok(report) => {
             let _ = pd.save_report(&report);
             let _ = ev.send(Event::RunDone(Box::new(report)));
+        }
+        Err(judge::JudgeError::Compile(msg)) => {
+            let _ = ev.send(Event::Failed(format!("编译失败:\n{msg}")));
+        }
+        Err(e) => {
+            let _ = ev.send(Event::Failed(e.to_string()));
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_stress(
+    problem_dir: PathBuf,
+    gen_src: SourceFile,
+    user_src: SourceFile,
+    oracle_src: SourceFile,
+    rounds: u32,
+    seed_start: u64,
+    jobs: usize,
+    limits: shuati_core::Limits,
+    checker: shuati_core::CheckerSpec,
+    cpp_cfg: String,
+    py_cfg: String,
+    stop_on_fail: bool,
+    cancel: Arc<AtomicBool>,
+    ev: std::sync::mpsc::Sender<Event>,
+) {
+    let pd = match store::ProblemDir::open(&problem_dir) {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = ev.send(Event::Failed(format!("题目目录错误: {e}")));
+            return;
+        }
+    };
+
+    let counts = Arc::new(Mutex::new((0u32, 0u32, 0u32, 0u32, 0u32)));
+    let counts2 = counts.clone();
+    let ev2 = ev.clone();
+    let progress = Arc::new(move |e: judge::StressEvent| {
+        use judge::StressEvent::*;
+        let mut c = counts2.lock().unwrap();
+        c.0 += 1;
+        match &e {
+            Match { .. } => c.1 += 1,
+            Hack { case, .. } => {
+                c.2 += 1;
+                let _ = ev2.send(Event::StressHack(case.clone()));
+            }
+            GenFail { .. } => c.3 += 1,
+            OracleFail { .. } => c.4 += 1,
+        }
+        let _ = ev2.send(Event::StressTick(c.0, c.1, c.2, c.3, c.4));
+    });
+
+    let gen_limits = shuati_core::Limits { cpu_ms: 10000, wall_ms: 15000, memory_mb: 512, output_mb: 64 };
+    let params = judge::StressParams {
+        gen_src: &gen_src,
+        user_src: &user_src,
+        oracle_src: &oracle_src,
+        rounds,
+        seed_start,
+        jobs,
+        limits_run: &limits,
+        limits_gen: &gen_limits,
+        checker: &checker,
+        stop_on_fail,
+        progress: Some(progress),
+        cancel: Some(cancel),
+    };
+
+    let engine = match judge::StressEngine::new(&params, &cpp_cfg, &py_cfg) {
+        Ok(e) => e,
+        Err(e) => {
+            let _ = ev.send(Event::Failed(e.to_string()));
+            return;
+        }
+    };
+    match engine.run(&params).await {
+        Ok(report) => {
+            // hack 落盘
+            for h in &report.hacks {
+                let _ = pd.save_hack(h.seed, &h.input, &h.user_out, &h.oracle_out, &format!("{}: {}", h.kind, h.detail));
+            }
+            let _ = ev.send(Event::StressDone(Box::new(report)));
         }
         Err(judge::JudgeError::Compile(msg)) => {
             let _ = ev.send(Event::Failed(format!("编译失败:\n{msg}")));

@@ -1,4 +1,4 @@
-//! 界面视图：顶栏四屏 + 底栏环境状态 + diff 弹窗。
+//! 界面视图：顶栏四屏 + 底栏环境状态 + diff 弹窗 + 用例查看弹窗。
 
 use crate::app::{ShuatiApp, Tab};
 use egui::{Color32, RichText, Ui};
@@ -27,7 +27,6 @@ pub fn render(app: &mut ShuatiApp, ctx: &egui::Context) {
             if let Some(env) = &app.env {
                 env_item(ui, "g++", env.cpp.is_some(), env.cpp.as_ref().map(|p| p.display().to_string()));
                 env_item(ui, "python", env.python.is_some(), env.python.as_ref().map(|p| p.display().to_string()));
-                env_item(ui, "AI", app.cfg.ai.enabled(), Some("已配置".to_string()));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(RichText::new(app.ws.root.display().to_string()).weak().small());
@@ -44,6 +43,7 @@ pub fn render(app: &mut ShuatiApp, ctx: &egui::Context) {
     });
 
     diff_window(app, ctx);
+    case_view_window(app, ctx);
 }
 
 fn tab_btn(ui: &mut Ui, app: &mut ShuatiApp, tab: Tab, label: &str) {
@@ -66,132 +66,6 @@ fn env_item(ui: &mut Ui, name: &str, ok: bool, tip: Option<String>) {
     }
 }
 
-// ═══ 评测屏 ═══════════════════════════════════════════
-
-fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
-    ui.horizontal(|ui| {
-        ui.label("题目:");
-        // 题目选择下拉
-        let cur = app.state.current_problem.clone().unwrap_or_else(|| "（未选择）".into());
-        egui::ComboBox::from_id_salt("prob_sel")
-            .selected_text(&cur)
-            .show_ui(ui, |ui| {
-                let ids: Vec<String> = app.problems.iter().map(|p| p.meta.id.to_string()).collect();
-                for id in ids {
-                    let label = {
-                        let p = app.problems.iter().find(|x| x.meta.id.to_string() == id).unwrap();
-                        let verdict = app.state.last_verdicts.get(&id).cloned().unwrap_or_default();
-                        format!("{}  {}{}", id, p.meta.title, if verdict.is_empty() { "".into() } else { format!("  [{verdict}]") })
-                    };
-                    if ui.selectable_label(cur == id, label).clicked() {
-                        app.select_problem(id);
-                    }
-                }
-            });
-        if ui.button("前往题库").clicked() {
-            app.tab = Tab::Library;
-        }
-    });
-
-    ui.add_space(8.0);
-
-    // 源文件区（拖入）
-    ui.group(|ui| {
-        ui.horizontal(|ui| {
-            ui.label("源文件:");
-            let file_label = app
-                .state
-                .watch_file
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "把 .cpp/.py 拖进窗口，或在下面填路径".into());
-            ui.monospace(file_label);
-        });
-        ui.horizontal(|ui| {
-            ui.text_edit_singleline(&mut app.src_input);
-            if ui.button("选定").clicked() && !app.src_input.is_empty() {
-                let p = std::path::PathBuf::from(app.src_input.trim());
-                if p.exists() {
-                    app.set_watch_file(p);
-                } else {
-                    app.run.error = Some("文件不存在".into());
-                }
-            }
-            let mut watch = app.state.watch_enabled;
-            if ui.checkbox(&mut watch, "保存即评测").changed() {
-                app.state.watch_enabled = watch;
-                app.save_state();
-            }
-            ui.separator();
-            let can_run = app.current_problem().is_some() && app.state.watch_file.is_some() && !app.run.running;
-            if ui.add_enabled(can_run, egui::Button::new("▶ 评测")).clicked() {
-                app.trigger_test();
-            }
-            if app.run.running && ui.button("■ 停止").clicked() {
-                app.bridge.cancel_current();
-            }
-        });
-    });
-
-    ui.add_space(8.0);
-
-    // 错误信息
-    if let Some(err) = &app.run.error {
-        ui.colored_label(Color32::from_rgb(230, 90, 90), err);
-        if ui.button("清除").clicked() {
-            app.run.error = None;
-        }
-    }
-
-    // 运行状态条
-    if app.run.compiling {
-        ui.label("编译中…");
-    } else if app.run.running || app.run.report.is_some() {
-        let done = app.run.done;
-        let total = app.run.total.max(1);
-        ui.add(egui::ProgressBar::new(done as f32 / total as f32).text(format!("{done}/{total}")));
-    }
-
-    ui.add_space(4.0);
-
-    // 用例结果列表（实时）
-    let rows: Vec<(String, shuati_core::Verdict)> = if !app.run.live_cases.is_empty() {
-        app.run.live_cases.clone()
-    } else if let Some(rep) = &app.run.report {
-        rep.cases.iter().map(|c| (c.name.clone(), c.verdict)).collect()
-    } else {
-        Vec::new()
-    };
-    let summary = app.run.report.as_ref().map(|r| (r.verdict, r.pass, r.total));
-
-    egui::ScrollArea::vertical().show(ui, |ui| {
-        for (i, (name, v)) in rows.iter().enumerate() {
-            case_row(app, ui, i, name, *v);
-        }
-        if let Some((v, pass, total)) = summary {
-            ui.separator();
-            ui.label(
-                RichText::new(format!("结果 {v} · {pass}/{total}"))
-                    .color(verdict_color(v))
-                    .size(16.0),
-            );
-        }
-    });
-}
-
-fn case_row(app: &mut ShuatiApp, ui: &mut Ui, idx: usize, name: &str, v: shuati_core::Verdict) {
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(format!("{name:12}")).monospace());
-        ui.label(RichText::new(v.to_string()).color(verdict_color(v)).strong().monospace());
-        // 有报告 → 可点 diff
-        if app.run.report.is_some() {
-            if ui.small_button("diff").clicked() {
-                app.run.diff_case = Some(idx);
-            }
-        }
-    });
-}
-
 fn verdict_color(v: shuati_core::Verdict) -> Color32 {
     use shuati_core::Verdict::*;
     match v {
@@ -201,6 +75,245 @@ fn verdict_color(v: shuati_core::Verdict) -> Color32 {
         Mle => Color32::from_rgb(230, 140, 60),
         Re => Color32::from_rgb(220, 90, 160),
         Ce | Se => Color32::from_rgb(160, 160, 160),
+    }
+}
+
+// ═══ 评测屏 ═══════════════════════════════════════════
+
+fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        // 题目行
+        ui.horizontal(|ui| {
+            ui.label("题目:");
+            let cur = app.state.current_problem.clone().unwrap_or_else(|| "（未选择）".into());
+            egui::ComboBox::from_id_salt("prob_sel")
+                .selected_text(&cur)
+                .show_ui(ui, |ui| {
+                    let items: Vec<(String, String)> = app
+                        .problems
+                        .iter()
+                        .map(|p| (p.meta.id.to_string(), p.meta.title.clone()))
+                        .collect();
+                    for (id, title) in items {
+                        let verdict = app.state.last_verdicts.get(&id).cloned().unwrap_or_default();
+                        let label = format!("{id}  {title}{}", if verdict.is_empty() { String::new() } else { format!("  [{verdict}]") });
+                        if ui.selectable_label(cur == id, label).clicked() {
+                            app.select_problem(id);
+                        }
+                    }
+                });
+            if ui.button("题库").clicked() {
+                app.tab = Tab::Library;
+            }
+            if let Some(title) = app.current_problem().map(|p| p.meta.title.clone()) {
+                if ui.button("题面").clicked() {
+                    app.show_statement = !app.show_statement;
+                }
+                ui.label(RichText::new(title).weak());
+            }
+        });
+
+        // 题面（可折叠）
+        if app.show_statement {
+            if let Some(pd) = app.current_problem() {
+                let stmt = pd.read_statement().unwrap_or_default();
+                ui.group(|ui| {
+                    egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                        ui.add(egui::Label::new(RichText::new(if stmt.is_empty() { "（无题面）" } else { &stmt }).monospace()).wrap());
+                    });
+                });
+            }
+        }
+
+        ui.add_space(6.0);
+
+        // 源文件区
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.label("源文件:");
+                let file_label = app
+                    .state
+                    .watch_file
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "把 .cpp/.py 拖进窗口，或填路径".into());
+                ui.monospace(file_label);
+            });
+            ui.horizontal(|ui| {
+                ui.text_edit_singleline(&mut app.src_input);
+                if ui.button("选定").clicked() && !app.src_input.is_empty() {
+                    let p = std::path::PathBuf::from(app.src_input.trim());
+                    if p.exists() {
+                        app.set_watch_file(p);
+                    } else {
+                        app.run.error = Some("文件不存在".into());
+                    }
+                }
+                let mut watch = app.state.watch_enabled;
+                if ui.checkbox(&mut watch, "保存即评测").changed() {
+                    app.state.watch_enabled = watch;
+                    app.save_state();
+                }
+                ui.separator();
+                let can_run = app.current_problem().is_some() && app.state.watch_file.is_some() && !app.run.running;
+                if ui.add_enabled(can_run, egui::Button::new("▶ 评测")).clicked() {
+                    app.trigger_test();
+                }
+                if app.run.running && ui.button("■ 停止").clicked() {
+                    app.bridge.cancel_current();
+                }
+            });
+        });
+
+        // 错误
+        if let Some(err) = app.run.error.clone() {
+            ui.horizontal(|ui| {
+                ui.colored_label(Color32::from_rgb(230, 90, 90), &err);
+                if ui.small_button("×").clicked() {
+                    app.run.error = None;
+                }
+            });
+        }
+
+        // 运行状态
+        if app.run.compiling {
+            ui.label("编译中…");
+        } else if app.run.running || app.run.report.is_some() {
+            let done = app.run.done;
+            let total = app.run.total.max(1);
+            ui.add(egui::ProgressBar::new(done as f32 / total as f32).text(format!("{done}/{total}")));
+        }
+
+        // 用例结果
+        let rows: Vec<(String, shuati_core::Verdict)> = if !app.run.live_cases.is_empty() {
+            app.run.live_cases.clone()
+        } else if let Some(rep) = &app.run.report {
+            rep.cases.iter().map(|c| (c.name.clone(), c.verdict)).collect()
+        } else {
+            Vec::new()
+        };
+        let summary = app.run.report.as_ref().map(|r| (r.verdict, r.pass, r.total));
+
+        for (i, (name, v)) in rows.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(format!("{name:12}")).monospace());
+                ui.label(RichText::new(v.to_string()).color(verdict_color(*v)).strong().monospace());
+                if app.run.report.is_some() && ui.small_button("diff").clicked() {
+                    app.run.diff_case = Some(i);
+                }
+            });
+        }
+        if let Some((v, pass, total)) = summary {
+            ui.label(RichText::new(format!("结果 {v} · {pass}/{total}")).color(verdict_color(v)).size(16.0));
+        }
+
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(6.0);
+
+        // ── 用例管理 ──
+        case_manager(app, ui);
+    });
+}
+
+/// 用例管理：列表 + 增删 + 查看
+fn case_manager(app: &mut ShuatiApp, ui: &mut Ui) {
+    if app.current_problem().is_none() {
+        ui.label(RichText::new("选好题目后这里管理它的测试用例").weak());
+        return;
+    }
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("测试用例").strong());
+        ui.label(format!("{} 组", app.cases.cases.len()));
+        if ui.button("刷新").clicked() {
+            app.reload_cases();
+        }
+        if ui.button(if app.cases.show_add { "收起" } else { "＋ 添加" }).clicked() {
+            app.cases.show_add = !app.cases.show_add;
+        }
+    });
+    if !app.cases.msg.is_empty() {
+        ui.label(RichText::new(&app.cases.msg).weak().small());
+    }
+
+    // 列表
+    let mut to_delete: Option<String> = None;
+    let mut to_view: Option<usize> = None;
+    egui::Grid::new("case_grid").striped(true).show(ui, |ui| {
+        for (i, (name, input, output)) in app.cases.cases.iter().enumerate() {
+            ui.monospace(name);
+            ui.label(RichText::new(input_preview(input)).weak().small().monospace());
+            ui.label(RichText::new("→").weak());
+            ui.label(RichText::new(input_preview(output)).weak().small().monospace());
+            if ui.small_button("看").clicked() {
+                to_view = Some(i);
+            }
+            if ui.small_button("删").clicked() {
+                to_delete = Some(name.clone());
+            }
+            ui.end_row();
+        }
+    });
+    if let Some(i) = to_view {
+        app.cases.view_case = Some(i);
+    }
+    if let Some(n) = to_delete {
+        app.delete_case(&n);
+    }
+
+    // 添加表单
+    if app.cases.show_add {
+        ui.group(|ui| {
+            ui.label("输入 / 期望输出（粘贴样例）:");
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::multiline(&mut app.cases.new_in).desired_width(280.0).desired_rows(4).hint_text("输入…"));
+                ui.add(egui::TextEdit::multiline(&mut app.cases.new_out).desired_width(280.0).desired_rows(4).hint_text("期望输出…"));
+            });
+            if ui.button("添加用例").clicked() {
+                if app.cases.new_in.trim().is_empty() {
+                    app.cases.msg = "输入为空".into();
+                } else {
+                    let (i, o) = (app.cases.new_in.clone(), app.cases.new_out.clone());
+                    app.add_case(&i, &o);
+                    app.cases.new_in.clear();
+                    app.cases.new_out.clear();
+                }
+            }
+        });
+    }
+}
+
+fn input_preview(s: &str) -> String {
+    let one = s.lines().next().unwrap_or("");
+    if one.len() > 40 { format!("{}…", &one[..40]) } else { one.to_string() }
+}
+
+/// 用例内容查看弹窗
+fn case_view_window(app: &mut ShuatiApp, ctx: &egui::Context) {
+    let Some(idx) = app.cases.view_case else { return };
+    let Some((name, input, output)) = app.cases.cases.get(idx).cloned() else {
+        app.cases.view_case = None;
+        return;
+    };
+    let mut open = true;
+    egui::Window::new(format!("用例 {name}"))
+        .open(&mut open)
+        .default_size([640.0, 360.0])
+        .show(ctx, |ui| {
+            ui.columns(2, |cols| {
+                cols[0].label(RichText::new("输入").strong());
+                cols[1].label(RichText::new("期望输出").strong());
+            });
+            ui.separator();
+            egui::ScrollArea::both().show(ui, |ui| {
+                ui.columns(2, |cols| {
+                    cols[0].add(egui::Label::new(RichText::new(&input).monospace()).wrap());
+                    cols[1].add(egui::Label::new(RichText::new(&output).monospace()).wrap());
+                });
+            });
+        });
+    if !open {
+        app.cases.view_case = None;
     }
 }
 
@@ -243,7 +356,7 @@ fn diff_window(app: &mut ShuatiApp, ctx: &egui::Context) {
     }
 }
 
-/// 逐 token 高亮差异部分（简化 diff：逐行比对）
+/// 逐行高亮差异
 fn diff_text(ui: &mut Ui, text: &str, other: &str) {
     let lines: Vec<&str> = text.lines().collect();
     let other_lines: Vec<&str> = other.lines().collect();
@@ -259,14 +372,18 @@ fn diff_text(ui: &mut Ui, text: &str, other: &str) {
 fn library_view(app: &mut ShuatiApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.label("拉题 URL:");
-        ui.text_edit_singleline(&mut app.url_input);
-        if ui.button("获取").clicked() {
-            // M3 里程碑：接 fetch crate
-            app.lib_msg = "拉题功能在 M3 里程碑实现".into();
+        ui.add(egui::TextEdit::singleline(&mut app.url_input).desired_width(360.0).hint_text("https://www.luogu.com.cn/problem/P1001"));
+        let btn = ui.add_enabled(!app.fetching && !app.url_input.trim().is_empty(), egui::Button::new("获取"));
+        if btn.clicked() {
+            app.trigger_fetch(app.url_input.trim().to_string());
+        }
+        if app.fetching {
+            ui.spinner();
         }
     });
     if !app.lib_msg.is_empty() {
-        ui.label(&app.lib_msg);
+        let color = if app.lib_msg.contains("失败") { Color32::from_rgb(230, 90, 90) } else { Color32::from_rgb(80, 200, 120) };
+        ui.label(RichText::new(&app.lib_msg).color(color));
     }
 
     ui.horizontal(|ui| {
@@ -293,6 +410,7 @@ fn library_view(app: &mut ShuatiApp, ui: &mut Ui) {
                     app.reload_problems();
                     app.select_problem(id.to_string());
                     app.new_title.clear();
+                    app.lib_msg = format!("已创建 {id}，去评测页添加用例");
                 }
                 Err(e) => app.lib_msg = format!("创建失败: {e}"),
             }
@@ -339,14 +457,120 @@ fn library_view(app: &mut ShuatiApp, ui: &mut Ui) {
     });
 }
 
-// ═══ 对拍屏（M2 占位） ═════════════════════════════════
+// ═══ 对拍屏 ═══════════════════════════════════════════
 
 fn stress_view(app: &mut ShuatiApp, ui: &mut Ui) {
     ui.heading("对拍（深度测试）");
+    ui.label(RichText::new("生成器随机造数据 → 你的程序和暴力标程同时跑 → 输出不一致即抓到反例").weak());
     ui.add_space(8.0);
-    ui.label("M2 里程碑实现：seed 驱动循环对拍 + hack 自动落盘 + AI 生成 gen/oracle。");
-    ui.label("界面槽位已预留：gen 文件 | oracle 文件 | 轮数 | [开始] | 实时计数 | hack 列表");
-    let _ = app;
+
+    // 文件选择
+    egui::Grid::new("stress_files").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+        ui.label("生成器 gen（argv[1]=seed）:");
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut app.stress.gen_path).desired_width(340.0).hint_text("gen/gen.cpp 或 .py"));
+        });
+        ui.end_row();
+        ui.label("标程 oracle/brute:");
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut app.stress.oracle_path).desired_width(340.0).hint_text("solutions/brute.cpp 或 .py"));
+        });
+        ui.end_row();
+        ui.label("用户解:");
+        ui.monospace(
+            app.state
+                .watch_file
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "（在评测页选定源文件）".into()),
+        );
+        ui.end_row();
+    });
+
+    // 参数行
+    ui.horizontal(|ui| {
+        ui.label("轮数:");
+        ui.add(egui::TextEdit::singleline(&mut app.stress.rounds_input).desired_width(70.0));
+        ui.label("起始 seed:");
+        ui.add(egui::TextEdit::singleline(&mut app.stress.seed_input).desired_width(90.0).hint_text("随机"));
+        ui.checkbox(&mut app.stress.keep_going, "出错后继续");
+        ui.separator();
+        let can = app.current_problem().is_some() && !app.stress.running;
+        if ui.add_enabled(can, egui::Button::new("▶ 开始对拍")).clicked() {
+            app.trigger_stress();
+        }
+        if app.stress.running && ui.button("■ 停止").clicked() {
+            app.bridge.cancel_current();
+        }
+        if ui.button("自动探测文件").clicked() {
+            app.stress.gen_path.clear();
+            app.stress.oracle_path.clear();
+            app.autodetect_stress_paths();
+        }
+    });
+    if !app.stress.msg.is_empty() {
+        ui.colored_label(Color32::from_rgb(230, 90, 90), &app.stress.msg);
+    }
+
+    // 实时状态
+    if app.stress.running || app.stress.report.is_some() {
+        let total: u32 = app.stress.rounds_input.trim().parse().unwrap_or(100);
+        let frac = app.stress.done as f32 / total.max(1) as f32;
+        ui.add(egui::ProgressBar::new(frac).text(format!("{}/{}", app.stress.done, total)));
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(format!("✓ {} 一致", app.stress.matched)).color(Color32::from_rgb(80, 200, 120)));
+            ui.label(RichText::new(format!("✗ {} 反例", app.stress.hack_count)).color(Color32::from_rgb(230, 90, 90)));
+            if app.stress.gen_fail > 0 {
+                ui.label(RichText::new(format!("gen异常 {}", app.stress.gen_fail)).color(Color32::from_rgb(230, 180, 60)));
+            }
+            if app.stress.oracle_fail > 0 {
+                ui.label(RichText::new(format!("标程异常 {}", app.stress.oracle_fail)).color(Color32::from_rgb(230, 180, 60)));
+            }
+        });
+    }
+
+    ui.add_space(8.0);
+    ui.separator();
+
+    // hack 列表（克隆出来避免借用冲突）
+    let hacks = app.stress.hacks.clone();
+    if !hacks.is_empty() {
+        ui.label(RichText::new(format!("反例（{}）", hacks.len())).strong());
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for (i, h) in hacks.iter().enumerate() {
+                let open = app.stress.open_hack == Some(i);
+                ui.horizontal(|ui| {
+                    if ui.button(if open { "▼" } else { "▶" }).clicked() {
+                        app.stress.open_hack = if open { None } else { Some(i) };
+                    }
+                    ui.label(format!("seed={} [{}]", h.seed, h.kind));
+                    ui.label(RichText::new(&h.detail).weak().small());
+                    if ui.small_button("存为用例").clicked() {
+                        let input = h.input.clone();
+                        let output = h.oracle_out.clone();
+                        app.add_case(&input, &output);
+                        app.reload_cases();
+                    }
+                });
+                if open {
+                    ui.group(|ui| {
+                        ui.label(RichText::new("输入").strong().small());
+                        ui.add(egui::Label::new(RichText::new(&h.input).monospace().small()).wrap());
+                        ui.columns(2, |cols| {
+                            cols[0].label(RichText::new("你的输出").strong().small());
+                            cols[0].add(egui::Label::new(RichText::new(&h.user_out).monospace().small()).wrap());
+                            cols[1].label(RichText::new("标程输出").strong().small());
+                            cols[1].add(egui::Label::new(RichText::new(&h.oracle_out).monospace().small()).wrap());
+                        });
+                    });
+                }
+            }
+        });
+    } else if let Some(rep) = &app.stress.report {
+        if rep.is_clean() {
+            ui.label(RichText::new(format!("{} 轮全部一致，没找到反例 ✓", rep.rounds_done)).color(Color32::from_rgb(80, 200, 120)));
+        }
+    }
 }
 
 // ═══ 设置屏 ═══════════════════════════════════════════
@@ -395,4 +619,6 @@ fn settings_view(app: &mut ShuatiApp, ui: &mut Ui) {
             Err(e) => app.run.error = Some(format!("配置保存失败: {e}")),
         }
     }
+    ui.add_space(4.0);
+    ui.label(RichText::new("提示：Dev-C++ 自带的 g++ 通常在 C:\\Program Files (x86)\\Dev-Cpp\\MinGW64\\bin\\g++.exe，不在 PATH 时把完整路径填到上面").weak().small());
 }

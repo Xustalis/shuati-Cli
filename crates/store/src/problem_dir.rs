@@ -174,6 +174,19 @@ impl ProblemDir {
         self.save_manifest(&m)
     }
 
+    /// 删除用例（.in/.out + manifest 记录）
+    pub fn delete_case(&self, name: &str) -> Result<()> {
+        for ext in ["in", "out"] {
+            let p = self.tests_dir().join(format!("{name}.{ext}"));
+            if p.exists() {
+                std::fs::remove_file(&p)?;
+            }
+        }
+        let mut m = self.load_manifest().unwrap_or_default();
+        m.cases.remove(name);
+        self.save_manifest(&m)
+    }
+
     fn manifest_path(&self) -> PathBuf {
         self.tests_dir().join("manifest.toml")
     }
