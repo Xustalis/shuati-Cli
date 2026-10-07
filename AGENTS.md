@@ -26,7 +26,7 @@ crates/
 ├── ai      OpenAI 兼容客户端（DeepSeek 默认）。hint/explain/gen_scripts+repair
 │           autogen.rs = 生成→落盘→dry_run→失败回喂重试 ≤3 轮
 ├── cli     clap。命令：doctor/list/new/add/test/stress/gen/hint/setup
-└── gui     egui 四屏（评测/题库/对拍/设置）+ 保存即评测(notify) + 拖放
+└── gui     egui 五屏（快速运行/评测/题库/对拍/设置）+ 保存自动重测(notify) + 拖放
             worker.rs = tokio runtime 线程 + mpsc 事件桥，禁止裸线程
 ```
 
