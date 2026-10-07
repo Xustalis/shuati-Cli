@@ -42,6 +42,11 @@ impl Workspace {
         self.root.join("problems")
     }
 
+    /// 编译缓存目录（.cache/build/<hash>/）
+    pub fn cache_dir(&self) -> PathBuf {
+        self.root.join(".cache").join("build")
+    }
+
     /// 题目目录路径
     pub fn problem_dir(&self, id: &shuati_core::ProblemId) -> PathBuf {
         self.problems_dir().join(id.dir_name())

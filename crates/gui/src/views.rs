@@ -95,6 +95,11 @@ fn problem_edit_window(app: &mut ShuatiApp, ctx: &egui::Context) {
                 if ui.button(if app.prob_edit.edit_statement { "收起题面编辑" } else { "编辑题面" }).clicked() {
                     app.prob_edit.edit_statement = !app.prob_edit.edit_statement;
                 }
+                if ui.button("打开题目目录").on_hover_text("在文件管理器中打开（放 gen/brute/数据文件用）").clicked() {
+                    if let Some(pd) = app.current_problem() {
+                        open_in_explorer(&pd.dir);
+                    }
+                }
             });
             if app.prob_edit.edit_statement {
                 egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
@@ -213,67 +218,77 @@ fn quick_view(app: &mut ShuatiApp, ui: &mut Ui) {
         });
     }
 
-    // ── 输入 / 输出 双栏
+    // ── 输入 / 期望 / 输出 栏（对答案时三栏）
     let avail = ui.available_size();
     let out_height = (avail.y - 96.0).max(120.0);
-    ui.columns(2, |cols| {
-        for (i, col) in cols.iter_mut().enumerate() {
-            if i == 0 {
-                col.label(RichText::new("输入 (stdin)").strong());
-                let w = col.available_width();
-                col.add_sized(
-                    [w, out_height],
-                    egui::TextEdit::multiline(&mut app.quick.input)
-                        .font(egui::TextStyle::Monospace)
-                        .hint_text("把输入数据贴在这里，例如:\n5\n1 2 3 4 5"),
-                );
-            } else {
-                // 输出行：状态行 + stdout 只读框 + stderr
-                col.horizontal(|ui| {
-                    ui.label(RichText::new("输出 (stdout)").strong());
-                    if let Some(r) = &app.quick.result {
-                        match r.status {
-                            None => {
-                                ui.label(RichText::new(format!("运行结束 · {}ms · {}KB", r.cpu_ms, r.mem_kb)).weak().small());
-                            }
-                            Some(v) => {
-                                ui.label(RichText::new(format!("{} · {}ms", v, r.cpu_ms)).color(verdict_color(v)).strong().small());
-                            }
-                        }
+    let n_cols = if app.quick.show_expected { 3 } else { 2 };
+    ui.columns(n_cols, |cols| {
+        // 输入栏
+        cols[0].label(RichText::new("输入 (stdin)").strong());
+        let w = cols[0].available_width();
+        cols[0].add_sized(
+            [w, out_height],
+            egui::TextEdit::multiline(&mut app.quick.input)
+                .font(egui::TextStyle::Monospace)
+                .hint_text("把输入数据贴在这里，例如:\n5\n1 2 3 4 5"),
+        );
+        // 期望栏（可选）
+        let out_col = if app.quick.show_expected {
+            cols[1].label(RichText::new("期望输出").strong());
+            let w = cols[1].available_width();
+            cols[1].add_sized(
+                [w, out_height],
+                egui::TextEdit::multiline(&mut app.quick.expected)
+                    .font(egui::TextStyle::Monospace)
+                    .hint_text("贴上正确答案"),
+            );
+            2
+        } else {
+            1
+        };
+        // 输出栏
+        let col = &mut cols[out_col];
+        col.horizontal(|ui| {
+            ui.label(RichText::new("你的输出").strong());
+            if let Some(r) = &app.quick.result {
+                match r.status {
+                    None => {
+                        ui.label(RichText::new(format!("{}ms · {}KB", r.cpu_ms, r.mem_kb)).weak().small());
                     }
-                });
-                let mut out_text = app.quick.result.as_ref().map(|r| r.stdout.clone()).unwrap_or_default();
-                let w = col.available_width();
-                let err = app.quick.result.as_ref().map(|r| r.stderr.clone()).unwrap_or_default();
-                let out_h = if err.is_empty() { out_height } else { out_height - 60.0 };
-                col.add_sized(
-                    [w, out_h.max(60.0)],
-                    egui::TextEdit::multiline(&mut out_text)
-                        .font(egui::TextStyle::Monospace)
-                        .interactive(false)
-                        .hint_text("程序输出会出现在这里"),
-                );
-                if !err.is_empty() {
-                    col.label(RichText::new("stderr").weak().small());
-                    let mut e = err;
-                    col.add_sized(
-                        [w, 52.0],
-                        egui::TextEdit::multiline(&mut e)
-                            .font(egui::TextStyle::Monospace)
-                            .interactive(false),
-                    );
+                    Some(v) => {
+                        ui.label(RichText::new(format!("{} · {}ms", v, r.cpu_ms)).color(verdict_color(v)).strong().small());
+                    }
                 }
             }
+        });
+        let mut out_text = app.quick.result.as_ref().map(|r| r.stdout.clone()).unwrap_or_default();
+        let w = col.available_width();
+        let err = app.quick.result.as_ref().map(|r| r.stderr.clone()).unwrap_or_default();
+        let out_h = if err.is_empty() { out_height } else { out_height - 60.0 };
+        col.add_sized(
+            [w, out_h.max(60.0)],
+            egui::TextEdit::multiline(&mut out_text)
+                .font(egui::TextStyle::Monospace)
+                .interactive(false)
+                .hint_text("程序输出会出现在这里"),
+        );
+        if !err.is_empty() {
+            col.label(RichText::new("stderr").weak().small());
+            let mut e = err;
+            col.add_sized(
+                [w, 52.0],
+                egui::TextEdit::multiline(&mut e)
+                    .font(egui::TextStyle::Monospace)
+                    .interactive(false),
+            );
         }
     });
 
-    // ── 对答案 / 存用例 / 消息
+    // ── 对答案开关 / 判定 / 存用例 / 消息
     ui.horizontal(|ui| {
         ui.checkbox(&mut app.quick.show_expected, "对答案");
+        // 有结果+期望非空 → 判 AC/WA
         if app.quick.show_expected {
-            ui.label("期望:");
-            ui.add(egui::TextEdit::singleline(&mut app.quick.expected).desired_width(280.0).font(egui::TextStyle::Monospace));
-            // 有结果+期望非空 → 判 AC/WA
             if let Some(r) = &app.quick.result {
                 if r.status.is_none() && !app.quick.expected.trim().is_empty() {
                     let ctx = shuati_core::CheckCtx {
@@ -294,6 +309,7 @@ fn quick_view(app: &mut ShuatiApp, ui: &mut Ui) {
         if app.current_problem().is_none() {
             ui.label(RichText::new("选题后可存用例").weak().small());
         }
+        ui.label(RichText::new("F5 = 运行").weak().small());
     });
     if !app.quick.msg.is_empty() {
         let errish = ["失败", "先", "不支持", "没有"].iter().any(|k| app.quick.msg.contains(k));
@@ -344,14 +360,15 @@ fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
             if ui.button("题库").clicked() {
                 app.tab = Tab::Library;
             }
-            if let Some(title) = app.current_problem().map(|p| p.meta.title.clone()) {
+            if let Some(pd) = app.current_problem() {
+                let (title, cpu, mem) = (pd.meta.title.clone(), pd.meta.limits.cpu_ms, pd.meta.limits.memory_mb);
                 if ui.button("题面").clicked() {
                     app.show_statement = !app.show_statement;
                 }
                 if ui.button("题目设置").on_hover_text("编辑标题/时限/内存/判题方式/题面").clicked() {
                     app.open_problem_editor();
                 }
-                ui.label(RichText::new(title).weak());
+                ui.label(RichText::new(format!("{title}  ·  {cpu}ms/{mem}MB")).weak());
             }
         });
 
@@ -491,12 +508,16 @@ fn case_manager(app: &mut ShuatiApp, ui: &mut Ui) {
     let mut to_delete: Option<String> = None;
     let mut to_view: Option<usize> = None;
     let mut to_edit: Option<(String, String, String)> = None;
+    let mut to_debug: Option<(String, String)> = None;
     egui::Grid::new("case_grid").striped(true).show(ui, |ui| {
         for (i, (name, input, output)) in app.cases.cases.iter().enumerate() {
             ui.monospace(name);
             ui.label(RichText::new(input_preview(input)).weak().small().monospace());
             ui.label(RichText::new("→").weak());
             ui.label(RichText::new(input_preview(output)).weak().small().monospace());
+            if ui.small_button("调试").on_hover_text("把这组数据送去快速运行页单跑").clicked() {
+                to_debug = Some((input.clone(), output.clone()));
+            }
             if ui.small_button("看").clicked() {
                 to_view = Some(i);
             }
@@ -511,6 +532,9 @@ fn case_manager(app: &mut ShuatiApp, ui: &mut Ui) {
     });
     if let Some(i) = to_view {
         app.cases.view_case = Some(i);
+    }
+    if let Some((inp, outp)) = to_debug {
+        app.send_case_to_quick(inp, outp);
     }
     if let Some((n, inp, outp)) = to_edit {
         app.cases.editing = Some(n);
@@ -779,6 +803,14 @@ fn stress_view(app: &mut ShuatiApp, ui: &mut Ui) {
         return;
     }
 
+    // 当前题目指示（对拍沿用其时限/比对方式）
+    if let Some(pd) = app.current_problem() {
+        ui.horizontal(|ui| {
+            ui.label("题目:");
+            ui.label(RichText::new(format!("{} · {}", pd.meta.id, pd.meta.title)).weak());
+        });
+    }
+
     // ── 三个文件：缺什么一眼可见
     let has_gen = !app.stress.gen_path.trim().is_empty();
     let has_oracle = !app.stress.oracle_path.trim().is_empty();
@@ -936,6 +968,9 @@ fn stress_view(app: &mut ShuatiApp, ui: &mut Ui) {
                         app.stress.rounds_input = "1".into();
                         app.trigger_stress();
                     }
+                    if ui.small_button("调试").on_hover_text("把这组反例送去快速运行页单跑").clicked() {
+                        app.send_case_to_quick(h.input.clone(), h.oracle_out.clone());
+                    }
                 });
                 if open {
                     ui.group(|ui| {
@@ -956,6 +991,16 @@ fn stress_view(app: &mut ShuatiApp, ui: &mut Ui) {
             ui.label(RichText::new(format!("{} 轮全部一致，没找到反例 ✓", rep.rounds_done)).color(Color32::from_rgb(80, 200, 120)));
         }
     }
+}
+
+/// 在系统文件管理器中打开目录
+fn open_in_explorer(path: &std::path::Path) {
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(path).spawn();
+    #[cfg(target_os = "windows")]
+    let _ = std::process::Command::new("explorer").arg(path).spawn();
+    #[cfg(target_os = "linux")]
+    let _ = std::process::Command::new("xdg-open").arg(path).spawn();
 }
 
 /// 在题目目录写 gen.cpp / brute.cpp 模板骨架

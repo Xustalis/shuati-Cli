@@ -259,6 +259,7 @@ mod tests {
             lang: Lang::Cpp,
             artifact: PathBuf::from(argv[0]),
             workdir: std::env::temp_dir(),
+            cached: false,
         }
     }
 

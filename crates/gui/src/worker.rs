@@ -151,13 +151,16 @@ impl Bridge {
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
             rt.block_on(async move {
+                // 编译缓存：源文件没变就跳过 g++，重复运行秒出
+                let cache_dir = root.join(".cache").join("build");
                 while let Some(task) = task_rx.recv().await {
                     match task {
                         Task::RunTest { problem_dir, problem_id, src, limits, checker, compiler_cfg, cancel } => {
                             *slot.lock().unwrap() = Some(cancel.clone());
                             let ev = ev_tx.clone();
+                            let cd = cache_dir.clone();
                             tokio::spawn(async move {
-                                run_test(problem_dir, problem_id, src, limits, checker, compiler_cfg, cancel, ev).await;
+                                run_test(problem_dir, problem_id, src, limits, checker, compiler_cfg, cancel, ev, cd).await;
                             });
                         }
                         Task::FetchProblem { url } => {
@@ -187,9 +190,10 @@ impl Bridge {
                         } => {
                             *slot.lock().unwrap() = Some(cancel.clone());
                             let ev = ev_tx.clone();
+                            let cd = cache_dir.clone();
                             tokio::spawn(async move {
                                 run_stress(problem_dir, gen_src, user_src, oracle_src, rounds, seed_start,
-                                    jobs, limits, checker, cpp_cfg, py_cfg, stop_on_fail, cancel, ev).await;
+                                    jobs, limits, checker, cpp_cfg, py_cfg, stop_on_fail, cancel, ev, cd).await;
                             });
                         }
                         Task::AiAsk { api_base, api_key, model, statement, code, verdict_info, explain } => {
@@ -214,8 +218,9 @@ impl Bridge {
                         }
                         Task::QuickRun { src, input, limits, compiler_cfg } => {
                             let ev = ev_tx.clone();
+                            let cd = cache_dir.clone();
                             tokio::spawn(async move {
-                                match quick_run(src, input, limits, compiler_cfg).await {
+                                match quick_run(src, input, limits, compiler_cfg, cd).await {
                                     Ok(qr) => { let _ = ev.send(Event::QuickDone(Box::new(qr))); }
                                     Err(e) => { let _ = ev.send(Event::QuickFailed(e)); }
                                 }
@@ -237,8 +242,9 @@ impl Bridge {
                         }
                         Task::GenCases { problem_dir, gen_src, oracle_src, count, seed_start, limits, cpp_cfg, py_cfg } => {
                             let ev = ev_tx.clone();
+                            let cd = cache_dir.clone();
                             tokio::spawn(async move {
-                                run_gen_cases(problem_dir, gen_src, oracle_src, count, seed_start, limits, cpp_cfg, py_cfg, ev).await;
+                                run_gen_cases(problem_dir, gen_src, oracle_src, count, seed_start, limits, cpp_cfg, py_cfg, ev, cd).await;
                             });
                         }
                         Task::AiScripts { api_base, api_key, model, statement, lang, dest_dir, cpp_cfg, py_cfg } => {
@@ -287,9 +293,10 @@ async fn quick_run(
     input: String,
     limits: shuati_core::Limits,
     compiler_cfg: String,
+    cache_dir: PathBuf,
 ) -> std::result::Result<QuickResult, String> {
     let tc = judge::Toolchain::detect(src.lang, &compiler_cfg).map_err(|e| e.to_string())?;
-    let prog = judge::compile_source(&src, &tc).await.map_err(|e| format!("编译失败:\n{e}"))?;
+    let prog = judge::compile_cached(&src, &tc, &cache_dir).await.map_err(|e| format!("编译失败:\n{e}"))?;
     let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
     let stdin_path = tmp.path().join("stdin.txt");
     std::fs::write(&stdin_path, &input).map_err(|e| e.to_string())?;
@@ -322,6 +329,7 @@ async fn run_test(
     compiler_cfg: String,
     cancel: Arc<AtomicBool>,
     ev: std::sync::mpsc::Sender<Event>,
+    cache_dir: PathBuf,
 ) {
     let pd = match store::ProblemDir::open(&problem_dir) {
         Ok(p) => p,
@@ -357,7 +365,7 @@ async fn run_test(
     };
 
     let _ = ev.send(Event::Compiling);
-    let engine = judge::TestEngine::new(tc);
+    let engine = judge::TestEngine::new(tc).with_cache(cache_dir);
     let src_file = SourceFile { path: src, lang };
 
     let ev2 = ev.clone();
@@ -402,6 +410,7 @@ async fn run_gen_cases(
     cpp_cfg: String,
     py_cfg: String,
     ev: std::sync::mpsc::Sender<Event>,
+    cache_dir: PathBuf,
 ) {
     let pd = match store::ProblemDir::open(&problem_dir) {
         Ok(p) => p,
@@ -426,11 +435,11 @@ async fn run_gen_cases(
         Ok(t) => t,
         Err(e) => { let _ = ev.send(Event::Failed(e.to_string())); return; }
     };
-    let gen_prog = match judge::compile_source(&gen_src, &gen_tc).await {
+    let gen_prog = match judge::compile_cached(&gen_src, &gen_tc, &cache_dir).await {
         Ok(p) => p,
         Err(e) => { let _ = ev.send(Event::Failed(format!("gen 编译失败: {e}"))); return; }
     };
-    let oracle_prog = match judge::compile_source(&oracle_src, &oracle_tc).await {
+    let oracle_prog = match judge::compile_cached(&oracle_src, &oracle_tc, &cache_dir).await {
         Ok(p) => p,
         Err(e) => {
             judge::cleanup_program(&gen_prog);
@@ -475,6 +484,7 @@ async fn run_stress(
     stop_on_fail: bool,
     cancel: Arc<AtomicBool>,
     ev: std::sync::mpsc::Sender<Event>,
+    cache_dir: PathBuf,
 ) {
     let pd = match store::ProblemDir::open(&problem_dir) {
         Ok(p) => p,
@@ -519,7 +529,7 @@ async fn run_stress(
         cancel: Some(cancel),
     };
 
-    let engine = match judge::StressEngine::new(&params, &cpp_cfg, &py_cfg) {
+    let engine = match judge::StressEngine::new(&params, &cpp_cfg, &py_cfg).map(|e| e.with_cache(cache_dir.clone())) {
         Ok(e) => e,
         Err(e) => {
             let _ = ev.send(Event::Failed(e.to_string()));

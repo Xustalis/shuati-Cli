@@ -1,4 +1,6 @@
 //! shuati-gui: egui 主入口。
+// Windows 下 release 不弹控制台黑窗
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
 mod fonts;

@@ -30,15 +30,72 @@ impl Toolchain {
 /// - python: 不编译，Program.argv = [python, script]
 pub async fn compile_source(src: &SourceFile, tc: &Toolchain) -> Result<Program> {
     match tc.lang {
-        Lang::Cpp => compile_cpp(src, tc).await,
+        Lang::Cpp => compile_cpp(src, tc, None).await,
         Lang::Python => prepare_python(src, tc).await,
     }
 }
 
-async fn compile_cpp(src: &SourceFile, tc: &Toolchain) -> Result<Program> {
+/// 带缓存的编译：源文件 mtime+大小+编译器不变 → 直接复用产物。
+/// 缓存布局: cache_dir/<hash>/shuati_exe + meta.txt
+pub async fn compile_cached(src: &SourceFile, tc: &Toolchain, cache_dir: &std::path::Path) -> Result<Program> {
+    match tc.lang {
+        Lang::Cpp => compile_cpp(src, tc, Some(cache_dir)).await,
+        Lang::Python => prepare_python(src, tc).await,
+    }
+}
+
+/// 缓存键：源文件绝对路径 + 编译器路径 → 目录名
+fn cache_key(src_path: &std::path::Path, compiler: &std::path::Path) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    src_path.to_string_lossy().hash(&mut h);
+    compiler.to_string_lossy().hash(&mut h);
+    format!("{:016x}", h.finish())
+}
+
+/// 源文件指纹：mtime(ns) + size，变了就得重编
+fn src_fingerprint(src_path: &std::path::Path) -> String {
+    match std::fs::metadata(src_path) {
+        Ok(m) => {
+            let mt = m.modified().ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            format!("{}|{}", mt, m.len())
+        }
+        Err(_) => String::new(),
+    }
+}
+
+async fn compile_cpp(src: &SourceFile, tc: &Toolchain, cache_dir: Option<&std::path::Path>) -> Result<Program> {
     let src_path = src.path.canonicalize().unwrap_or_else(|_| src.path.clone());
-    let out_dir = src_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let (out_dir, cached) = match cache_dir {
+        Some(d) => {
+            let dir = d.join(cache_key(&src_path, &tc.executable));
+            std::fs::create_dir_all(&dir).map_err(JudgeError::Io)?;
+            (dir, true)
+        }
+        None => (
+            src_path.parent().unwrap_or_else(|| std::path::Path::new(".")).to_path_buf(),
+            false,
+        )
+    };
     let artifact = out_dir.join(if cfg!(windows) { "shuati_exe.exe" } else { "shuati_exe" });
+    let meta_path = out_dir.join("meta.txt");
+    let fingerprint = src_fingerprint(&src_path);
+
+    // 缓存命中：指纹一致且产物在 → 零编译直接返回
+    if cached && artifact.exists() {
+        if std::fs::read_to_string(&meta_path).ok().as_deref() == Some(fingerprint.as_str()) {
+            return Ok(Program {
+                argv: vec![artifact.to_string_lossy().to_string()],
+                lang: Lang::Cpp,
+                artifact,
+                workdir: src_path.parent().unwrap_or_else(|| std::path::Path::new(".")).to_path_buf(),
+                cached: true,
+            });
+        }
+    }
 
     // 标准探测：优先 c++17（兼容性最广），失败再试 c++20
     let mut last_err = String::new();
@@ -64,11 +121,15 @@ async fn compile_cpp(src: &SourceFile, tc: &Toolchain) -> Result<Program> {
         .map_err(JudgeError::Io)?;
 
         if output.status.success() && artifact.exists() {
+            if cached {
+                let _ = std::fs::write(&meta_path, &fingerprint);
+            }
             return Ok(Program {
                 argv: vec![artifact.to_string_lossy().to_string()],
                 lang: Lang::Cpp,
                 artifact,
-                workdir: out_dir.to_path_buf(),
+                workdir: src_path.parent().unwrap_or_else(|| std::path::Path::new(".")).to_path_buf(),
+                cached,
             });
         }
         last_err = String::from_utf8_lossy(&output.stderr).to_string();
@@ -111,5 +172,6 @@ async fn prepare_python(src: &SourceFile, tc: &Toolchain) -> Result<Program> {
         lang: Lang::Python,
         artifact: src_path.clone(),
         workdir: src_path.parent().unwrap_or_else(|| std::path::Path::new(".")).to_path_buf(),
+        cached: false,
     })
 }

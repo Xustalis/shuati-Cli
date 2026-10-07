@@ -143,7 +143,7 @@ async fn main() -> Result<()> {
         Some(Cmd::New { title, slug }) => cmd_new(&ws, &title, slug)?,
         Some(Cmd::Test { id, file, jobs }) => cmd_test(&ws, &cfg, id, file, jobs).await?,
         Some(Cmd::Add { url }) => cmd_add(&ws, &url).await?,
-        Some(Cmd::Run { file }) => cmd_run(&cfg, &file).await?,
+        Some(Cmd::Run { file }) => cmd_run(&ws, &cfg, &file).await?,
         Some(Cmd::Stress { id, generator, oracle, file, rounds, seed, jobs, keep_going, auto, auto_lang }) => {
             cmd_stress(&ws, &cfg, id, generator, oracle, file, rounds, seed, jobs, keep_going, auto, auto_lang).await?
         }
@@ -157,12 +157,12 @@ async fn main() -> Result<()> {
 }
 
 /// 快速运行：编译 file → stdin 透传 → stdout/stderr 直接输出
-async fn cmd_run(cfg: &store::Config, file: &PathBuf) -> Result<()> {
+async fn cmd_run(ws: &store::Workspace, cfg: &store::Config, file: &PathBuf) -> Result<()> {
     let lang = Lang::from_path(file).context("不支持的文件类型（.cpp/.py）")?;
     let tc_cfg = pick_tc(lang, cfg);
     let tc = judge::Toolchain::detect(lang, tc_cfg)?;
     println!("[*] 编译 {} …", file.display());
-    let prog = judge::compile_source(&SourceFile { path: file.clone(), lang }, &tc).await?;
+    let prog = judge::compile_cached(&SourceFile { path: file.clone(), lang }, &tc, &ws.cache_dir()).await?;
 
     let tmp = tempfile::tempdir()?;
     // 管道输入 → 读到临时文件喂给程序；TTY（交互终端）→ 直接给 EOF
@@ -271,8 +271,8 @@ async fn cmd_gen(
 
     let gen_tc = judge::Toolchain::detect(gen_src.lang, pick_tc(gen_src.lang, cfg))?;
     let oracle_tc = judge::Toolchain::detect(oracle_src.lang, pick_tc(oracle_src.lang, cfg))?;
-    let gen_prog = judge::compile_source(&gen_src, &gen_tc).await?;
-    let oracle_prog = judge::compile_source(&oracle_src, &oracle_tc).await?;
+    let gen_prog = judge::compile_cached(&gen_src, &gen_tc, &ws.cache_dir()).await?;
+    let oracle_prog = judge::compile_cached(&oracle_src, &oracle_tc, &ws.cache_dir()).await?;
 
     println!("[*] 生成 {} 组用例（seed {}..{}）…", count, seed, seed + count as u64 - 1);
     let glim = shuati_core::Limits { cpu_ms: 10000, wall_ms: 15000, memory_mb: 512, output_mb: 64 };
@@ -500,7 +500,7 @@ async fn cmd_stress(
         cancel: None,
     };
 
-    let engine = judge::StressEngine::new(&params, &cfg.compiler_cpp, &cfg.compiler_python)?;
+    let engine = judge::StressEngine::new(&params, &cfg.compiler_cpp, &cfg.compiler_python)?.with_cache(ws.cache_dir());
     let report = engine.run(&params).await?;
     eprintln!();
 
@@ -600,7 +600,7 @@ async fn cmd_test(
     println!("[*] 用例   : {} 个", cases.len());
 
     let toolchain = judge::Toolchain::detect(lang, cfg_cpp_for(cfg, lang))?;
-    let engine = judge::TestEngine::new(toolchain);
+    let engine = judge::TestEngine::new(toolchain).with_cache(ws.cache_dir());
 
     let src = SourceFile { path: src_path, lang };
     let progress: judge::ProgressFn = std::sync::Arc::new(|i, total, r| {

@@ -12,6 +12,8 @@ pub type ProgressFn = Arc<dyn Fn(usize, usize, &CaseResult) + Send + Sync>;
 
 pub struct TestEngine {
     pub toolchain: Toolchain,
+    /// 编译缓存目录（None = 不缓存）
+    cache_dir: Option<PathBuf>,
 }
 
 /// 引擎运行参数
@@ -31,13 +33,22 @@ pub struct RunParams<'a> {
 
 impl TestEngine {
     pub fn new(toolchain: Toolchain) -> Self {
-        Self { toolchain }
+        Self { toolchain, cache_dir: None }
+    }
+
+    /// 启用编译缓存：源未变时复用产物，跳过 g++ 调用
+    pub fn with_cache(mut self, dir: PathBuf) -> Self {
+        self.cache_dir = Some(dir);
+        self
     }
 
     /// 完整评测：编译一次 → 跑全部用例 → 报告
     pub async fn run(&self, p: &RunParams<'_>) -> Result<TestReport> {
-        // 1. 编译
-        let prog = compile_source(p.solution, &self.toolchain).await?;
+        // 1. 编译（有缓存目录时按 mtime+size 指纹复用）
+        let prog = match &self.cache_dir {
+            Some(d) => crate::compile_cached(p.solution, &self.toolchain, d).await?,
+            None => compile_source(p.solution, &self.toolchain).await?,
+        };
 
         let report = self.run_compiled(p, &prog).await;
         cleanup_program(&prog);
@@ -182,8 +193,11 @@ fn err_result(name: &str, msg: String) -> CaseResult {
     }
 }
 
-/// 清理编译产物（cpp exe；python 不删源文件）
+/// 清理编译产物（cpp exe；python 不删源文件；缓存产物保留复用）
 pub fn cleanup_program(prog: &crate::Program) {
+    if prog.cached {
+        return;
+    }
     if prog.lang == shuati_core::Lang::Cpp && prog.artifact.exists() {
         let _ = std::fs::remove_file(&prog.artifact);
     }

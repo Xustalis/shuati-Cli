@@ -80,6 +80,7 @@ pub struct StressEngine {
     pub gen_tc: Toolchain,
     pub user_tc: Toolchain,
     pub oracle_tc: Toolchain,
+    cache_dir: Option<std::path::PathBuf>,
 }
 
 impl StressEngine {
@@ -89,16 +90,30 @@ impl StressEngine {
             gen_tc: Toolchain::detect(p.gen_src.lang, pick(p.gen_src.lang, cfg_cpp, cfg_py))?,
             user_tc: Toolchain::detect(p.user_src.lang, pick(p.user_src.lang, cfg_cpp, cfg_py))?,
             oracle_tc: Toolchain::detect(p.oracle_src.lang, pick(p.oracle_src.lang, cfg_cpp, cfg_py))?,
+            cache_dir: None,
         })
     }
 
+    /// 启用编译缓存
+    pub fn with_cache(mut self, dir: std::path::PathBuf) -> Self {
+        self.cache_dir = Some(dir);
+        self
+    }
+
     pub async fn run(&self, p: &StressParams<'_>) -> Result<StressReport> {
-        // 编译三方（并行）
-        let (gen_r, user_r, oracle_r) = tokio::join!(
-            compile_source(p.gen_src, &self.gen_tc),
-            compile_source(p.user_src, &self.user_tc),
-            compile_source(p.oracle_src, &self.oracle_tc),
-        );
+        // 编译三方（并行；有缓存目录时按指纹复用）
+        let (gen_r, user_r, oracle_r) = match &self.cache_dir {
+            Some(d) => tokio::join!(
+                crate::compile_cached(p.gen_src, &self.gen_tc, d),
+                crate::compile_cached(p.user_src, &self.user_tc, d),
+                crate::compile_cached(p.oracle_src, &self.oracle_tc, d),
+            ),
+            None => tokio::join!(
+                compile_source(p.gen_src, &self.gen_tc),
+                compile_source(p.user_src, &self.user_tc),
+                compile_source(p.oracle_src, &self.oracle_tc),
+            ),
+        };
         let gen_prog = gen_r?;
         let user_prog = user_r?;
         let oracle_prog = oracle_r?;

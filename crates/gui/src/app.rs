@@ -580,6 +580,18 @@ impl ShuatiApp {
         });
     }
 
+    /// 把某条用例送进快速运行页（调试单组数据）
+    pub fn send_case_to_quick(&mut self, input: String, expected: String) {
+        self.quick.input = input;
+        self.quick.show_expected = !expected.trim().is_empty();
+        self.quick.expected = expected;
+        self.tab = Tab::Quick;
+        // 有源文件就直接跑
+        if self.state.watch_file.is_some() && !self.quick.running {
+            self.trigger_quick_run();
+        }
+    }
+
     /// 快速运行：编译当前源文件，贴入输入跑一次
     pub fn trigger_quick_run(&mut self) {
         let Some(src_path) = self.state.watch_file.clone() else {
@@ -849,6 +861,28 @@ impl ShuatiApp {
 impl eframe::App for ShuatiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.drain_events(ctx);
+
+        // F5 = 运行（Dev-C++ 的 F9 肌肉记忆）：按当前页派发
+        if ctx.input(|i| i.key_pressed(egui::Key::F5)) {
+            match self.tab {
+                Tab::Quick => {
+                    if !self.quick.running {
+                        self.trigger_quick_run();
+                    }
+                }
+                Tab::Test => {
+                    if !self.run.running {
+                        self.trigger_test();
+                    }
+                }
+                Tab::Stress => {
+                    if !self.stress.running {
+                        self.trigger_stress();
+                    }
+                }
+                _ => {}
+            }
+        }
 
         // 拖拽处理：.cpp/.py → 源文件；.in → 追加用例
         let dropped = ctx.input(|i| i.raw.dropped_files.clone());
