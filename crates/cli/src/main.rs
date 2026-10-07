@@ -73,7 +73,46 @@ enum Cmd {
         /// 发现 hack 后继续跑
         #[arg(long)]
         keep_going: bool,
+        /// AI 自动生成 gen+oracle（需配置 api_key），生成后自验再对拍
+        #[arg(long)]
+        auto: bool,
+        /// AI 脚本语言（默认跟用户解一致）
+        #[arg(long)]
+        auto_lang: Option<String>,
     },
+    /// 批量生成测试用例（gen + oracle → tests/）
+    Gen {
+        /// 题目 id
+        id: Option<String>,
+        /// 生成器源文件（默认 gen/gen.*）
+        #[arg(long = "gen")]
+        generator: Option<PathBuf>,
+        /// 标程源文件（默认 solutions/brute.*）
+        #[arg(long)]
+        oracle: Option<PathBuf>,
+        /// 生成几组
+        #[arg(short = 'n', long, default_value = "20")]
+        count: u32,
+        /// 起始 seed
+        #[arg(long, default_value = "1")]
+        seed: u64,
+        /// AI 自动生成 gen+oracle
+        #[arg(long)]
+        auto: bool,
+    },
+    /// AI 提示/诊断（需配置 api_key）
+    Hint {
+        /// 题目 id
+        id: Option<String>,
+        /// 源文件（默认 solutions/main.* 或 watch 文件）
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// 完整诊断（默认只给提示）
+        #[arg(long)]
+        explain: bool,
+    },
+    /// 环境初始化：写 Dev-C++ 自定义工具 / 打印集成说明
+    Setup,
 }
 
 #[tokio::main]
@@ -99,11 +138,200 @@ async fn main() -> Result<()> {
         Some(Cmd::New { title, slug }) => cmd_new(&ws, &title, slug)?,
         Some(Cmd::Test { id, file, jobs }) => cmd_test(&ws, &cfg, id, file, jobs).await?,
         Some(Cmd::Add { url }) => cmd_add(&ws, &url).await?,
-        Some(Cmd::Stress { id, generator, oracle, file, rounds, seed, jobs, keep_going }) => {
-            cmd_stress(&ws, &cfg, id, generator, oracle, file, rounds, seed, jobs, keep_going).await?
+        Some(Cmd::Stress { id, generator, oracle, file, rounds, seed, jobs, keep_going, auto, auto_lang }) => {
+            cmd_stress(&ws, &cfg, id, generator, oracle, file, rounds, seed, jobs, keep_going, auto, auto_lang).await?
         }
+        Some(Cmd::Gen { id, generator, oracle, count, seed, auto }) => {
+            cmd_gen(&ws, &cfg, id, generator, oracle, count, seed, auto).await?
+        }
+        Some(Cmd::Hint { id, file, explain }) => cmd_hint(&ws, &cfg, id, file, explain).await?,
+        Some(Cmd::Setup) => cmd_setup(),
     }
     Ok(())
+}
+
+/// AI 自动管线：生成 gen+oracle 并验证，落盘到题目目录
+async fn auto_produce(
+    pd: &store::ProblemDir,
+    cfg: &store::Config,
+    lang_hint: Option<&str>,
+) -> Result<(PathBuf, PathBuf)> {
+    let ai = &cfg.ai;
+    let client = shuati_ai::AiClient::new(&ai.api_base, &ai.api_key, &ai.model)?;
+    let statement = pd.read_statement().unwrap_or_default();
+    let lang = match lang_hint.unwrap_or(&cfg.default_lang) {
+        "python" | "py" => Lang::Python,
+        _ => Lang::Cpp,
+    };
+    println!("[*] AI 正在生成对拍脚本（{lang:?}），自动 dry-run 验证…");
+    let (gen_path, oracle_path) = shuati_ai::produce_scripts(
+        &client,
+        &statement,
+        lang,
+        &pd.dir,
+        &cfg.compiler_cpp,
+        &cfg.compiler_python,
+        |s| println!("    {s}"),
+    )
+    .await?;
+    println!("    gen    → {}", gen_path.display());
+    println!("    oracle → {}", oracle_path.display());
+    Ok((gen_path, oracle_path))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn cmd_gen(
+    ws: &store::Workspace,
+    cfg: &store::Config,
+    id: Option<String>,
+    generator: Option<PathBuf>,
+    oracle: Option<PathBuf>,
+    count: u32,
+    seed: u64,
+    auto: bool,
+) -> Result<()> {
+    let problems = store::load_all_problems(ws);
+    let pd = match resolve_problem(&problems, id.as_deref(), ws)? {
+        Some(p) => p,
+        None => anyhow::bail!("找不到题目"),
+    };
+
+    let (gen_path, oracle_path) = if auto {
+        auto_produce(&pd, cfg, None).await?
+    } else {
+        let g = generator.or_else(|| judge::find_script(&pd.gen_dir(), &["gen"]));
+        let o = oracle.or_else(|| judge::find_script(&pd.solutions_dir(), &["brute", "oracle", "std"]));
+        (g.ok_or_else(|| anyhow::anyhow!("找不到生成器（放 gen/gen.* 或用 --auto 让 AI 写）"))?,
+         o.ok_or_else(|| anyhow::anyhow!("找不到标程（放 solutions/brute.* 或用 --auto）"))?)
+    };
+
+    let mk_src = |p: &PathBuf| -> Result<SourceFile> {
+        let lang = Lang::from_path(p).context("不支持的类型")?;
+        Ok(SourceFile { path: p.clone(), lang })
+    };
+    let gen_src = mk_src(&gen_path)?;
+    let oracle_src = mk_src(&oracle_path)?;
+
+    let gen_tc = judge::Toolchain::detect(gen_src.lang, pick_tc(gen_src.lang, cfg))?;
+    let oracle_tc = judge::Toolchain::detect(oracle_src.lang, pick_tc(oracle_src.lang, cfg))?;
+    let gen_prog = judge::compile_source(&gen_src, &gen_tc).await?;
+    let oracle_prog = judge::compile_source(&oracle_src, &oracle_tc).await?;
+
+    println!("[*] 生成 {} 组用例（seed {}..{}）…", count, seed, seed + count as u64 - 1);
+    let glim = shuati_core::Limits { cpu_ms: 10000, wall_ms: 15000, memory_mb: 512, output_mb: 64 };
+    let seeds = seed..seed + count as u64;
+    let made = judge::gen_cases(&gen_prog, &oracle_prog, seeds, &pd.meta.limits, &glim).await;
+    judge::cleanup_program(&gen_prog);
+    judge::cleanup_program(&oracle_prog);
+
+    let existing = pd.load_cases()?.len() as u32;
+    for (i, (s, input, output)) in made.iter().enumerate() {
+        let name = format!("{:04}", existing + i as u32 + 1);
+        pd.write_case(&name, input, output, shuati_core::CaseOrigin::Generated)?;
+        eprint!("\r  {}/{} (seed={})", i + 1, made.len(), s);
+    }
+    eprintln!();
+    println!("[+] 生成 {} 组 → {}/tests/", made.len(), pd.dir.display());
+    Ok(())
+}
+
+fn pick_tc(lang: Lang, cfg: &store::Config) -> &str {
+    match lang {
+        Lang::Cpp => &cfg.compiler_cpp,
+        Lang::Python => &cfg.compiler_python,
+    }
+}
+
+async fn cmd_hint(
+    ws: &store::Workspace,
+    cfg: &store::Config,
+    id: Option<String>,
+    file: Option<PathBuf>,
+    explain: bool,
+) -> Result<()> {
+    let ai = &cfg.ai;
+    if !ai.enabled() {
+        anyhow::bail!("AI 未配置：在设置页或 config.toml 填 ai.api_key（DeepSeek 兼容接口）");
+    }
+    let problems = store::load_all_problems(ws);
+    let pd = match resolve_problem(&problems, id.as_deref(), ws)? {
+        Some(p) => p,
+        None => anyhow::bail!("找不到题目"),
+    };
+    let src = file.or_else(|| pd.find_solution());
+    let Some(src) = src else { anyhow::bail!("没有源文件——用 --file 指定") };
+    let code = std::fs::read_to_string(&src)?;
+    let statement = pd.read_statement().unwrap_or_default();
+
+    // 拿最近一次报告当判题上下文
+    let verdict_info = {
+        let reports_dir = pd.reports_dir();
+        let mut latest: Option<shuati_core::TestReport> = None;
+        if let Ok(entries) = std::fs::read_dir(&reports_dir) {
+            let mut paths: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|x| x.path())).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
+            paths.sort();
+            if let Some(p) = paths.last() {
+                if let Ok(t) = std::fs::read_to_string(p) {
+                    latest = serde_json::from_str(&t).ok();
+                }
+            }
+        }
+        match latest {
+            Some(r) => {
+                let fails: Vec<String> = r.cases.iter()
+                    .filter(|c| c.verdict != shuati_core::Verdict::Ac)
+                    .map(|c| format!("{}: {} （期望 {} 实际 {}）", c.name, c.verdict,
+                        c.expected.lines().next().unwrap_or(""),
+                        c.actual.lines().next().unwrap_or("")))
+                    .take(3)
+                    .collect();
+                format!("总判定 {}，{}/{}。失败点:\n{}", r.verdict, r.pass, r.total, fails.join("\n"))
+            }
+            None => "（尚未评测过）".into(),
+        }
+    };
+
+    let client = shuati_ai::AiClient::new(&ai.api_base, &ai.api_key, &ai.model)?;
+    println!("[*] AI 思考中…");
+    let text = if explain {
+        client.explain(&statement, &code, &verdict_info, "").await?
+    } else {
+        client.hint(&statement, &code, &verdict_info).await?
+    };
+    println!("{text}");
+    Ok(())
+}
+
+fn cmd_setup() {
+    println!("== shuati 集成设置 ==");
+    #[cfg(target_os = "windows")]
+    {
+        // 写 Dev-C++ Tools 配置 + 资源管理器右键
+        match setup_windows() {
+            Ok(msgs) => {
+                for m in msgs {
+                    println!("  {m}");
+                }
+            }
+            Err(e) => println!("  自动配置失败: {e}\n请按下面手动配置:"),
+        }
+    }
+    println!();
+    println!("Dev-C++ 集成（手动方式，任何平台通用思路）:");
+    println!("  1. Dev-C++ → Tools → Configure Tools → Add");
+    println!("     Title:   shuati 评测");
+    println!("     Program: <shuati.exe 路径>");
+    println!("     Working: <PROJECTPATH>");
+    println!("     Params:  test --file <SOURCEPATH>");
+    println!("  2. 这样工具菜单里就有一键评测当前文件");
+    println!();
+    println!("或者：GUI 里打开『保存即评测』，Dev-C++ 里 Ctrl+S 即触发判题（推荐萌新）");
+}
+
+#[cfg(target_os = "windows")]
+fn setup_windows() -> Result<Vec<String>> {
+    // Dev-C++ tools 存在 tools.ini / 注册表；稳妥做法只给提示不写注册表
+    Ok(vec!["Windows 下自动写 Dev-C++ 工具项尚未实现，请按下方手动步骤".to_string()])
 }
 
 async fn cmd_add(ws: &store::Workspace, url: &str) -> Result<()> {
@@ -131,6 +359,8 @@ async fn cmd_stress(
     seed: Option<u64>,
     jobs: usize,
     keep_going: bool,
+    auto: bool,
+    auto_lang: Option<String>,
 ) -> Result<()> {
     let problems = store::load_all_problems(ws);
     let pd = match resolve_problem(&problems, id.as_deref(), ws)? {
@@ -142,15 +372,20 @@ async fn cmd_stress(
         Some(f) => f,
         None => pd.find_solution().context("solutions/ 下没有源文件")?,
     };
-    let gen_path = match generator {
-        Some(g) => g,
-        None => judge::find_script(&pd.gen_dir(), &["gen"])
-            .context("找不到生成器（放 gen/gen.cpp|py 或 --gen 指定）")?,
-    };
-    let oracle_path = match oracle {
-        Some(o) => o,
-        None => judge::find_script(&pd.solutions_dir(), &["brute", "oracle", "std"])
-            .context("找不到标程（放 solutions/brute.cpp|py 或 --oracle 指定）")?,
+    let (gen_path, oracle_path) = if auto {
+        auto_produce(&pd, cfg, auto_lang.as_deref()).await?
+    } else {
+        let g = match generator {
+            Some(g) => g,
+            None => judge::find_script(&pd.gen_dir(), &["gen"])
+                .context("找不到生成器（放 gen/gen.*、--gen 指定或 --auto 让 AI 写）")?,
+        };
+        let o = match oracle {
+            Some(o) => o,
+            None => judge::find_script(&pd.solutions_dir(), &["brute", "oracle", "std"])
+                .context("找不到标程（放 solutions/brute.*、--oracle 指定或 --auto）")?,
+        };
+        (g, o)
     };
 
     let mk_src = |p: &PathBuf| -> Result<SourceFile> {
@@ -219,14 +454,15 @@ fn cmd_doctor(cfg: &store::Config) {
     let rep = judge::check_env(&cfg.compiler_cpp, &cfg.compiler_python);
     println!("== 环境自检 ==");
     match &rep.cpp {
-        Some(p) => println!("  C++ 编译器 : {} ✓", p.display()),
-        None => println!("  C++ 编译器 : ✗ 未找到（安装 MinGW/Dev-C++/Xcode CLT）"),
+        Some(p) => println!("  g++:    {} ✓", p.display()),
+        None => println!("  g++:    未找到（装 Dev-C++/MinGW 后在设置页填路径）"),
     }
     match &rep.python {
-        Some(p) => println!("  Python    : {} ✓", p.display()),
-        None => println!("  Python    : ✗ 未找到"),
+        Some(p) => println!("  python: {} ✓", p.display()),
+        None => println!("  python: 未找到（只用 C++ 可忽略）"),
     }
-    println!("  AI        : {}", if cfg.ai.enabled() { "已配置 ✓" } else { "未配置（可选）" });
+    println!("  AI:     {}", if cfg.ai.enabled() { "已配置 ✓" } else { "未配置（hint/自动脚本不可用）" });
+    println!("  题库:   {}", store::Workspace::default_dir().display());
 }
 
 fn cmd_list(ws: &store::Workspace) -> Result<()> {

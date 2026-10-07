@@ -11,3 +11,7 @@ async-trait.workspace = true
 tracing.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+reqwest = { version = "0.12", features = ["rustls-tls", "json"] }
+tokio = "1"
+shuati-judge = { version = "0.1.0", path = "../judge" }
+tempfile.workspace = true

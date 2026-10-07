@@ -30,6 +30,10 @@ pub enum Event {
     StressHack(Box<judge::HackCase>),
     /// 对拍完成
     StressDone(Box<judge::StressReport>),
+    /// AI 文本响应（hint/explain）
+    AiText(String),
+    /// AI 脚本就绪：gen 路径、oracle 路径
+    ScriptsReady(PathBuf, PathBuf),
 }
 
 /// UI → 后台 命令
@@ -61,6 +65,27 @@ pub enum Task {
         py_cfg: String,
         stop_on_fail: bool,
         cancel: Arc<AtomicBool>,
+    },
+    /// AI 提示/诊断
+    AiAsk {
+        api_base: String,
+        api_key: String,
+        model: String,
+        statement: String,
+        code: String,
+        verdict_info: String,
+        explain: bool,
+    },
+    /// AI 生成对拍脚本（自动 dry-run 验证）
+    AiScripts {
+        api_base: String,
+        api_key: String,
+        model: String,
+        statement: String,
+        lang: shuati_core::Lang,
+        dest_dir: PathBuf,
+        cpp_cfg: String,
+        py_cfg: String,
     },
 }
 
@@ -122,6 +147,41 @@ impl Bridge {
                             tokio::spawn(async move {
                                 run_stress(problem_dir, gen_src, user_src, oracle_src, rounds, seed_start,
                                     jobs, limits, checker, cpp_cfg, py_cfg, stop_on_fail, cancel, ev).await;
+                            });
+                        }
+                        Task::AiAsk { api_base, api_key, model, statement, code, verdict_info, explain } => {
+                            let ev = ev_tx.clone();
+                            tokio::spawn(async move {
+                                let r = shuati_ai::AiClient::new(&api_base, &api_key, &model);
+                                match r {
+                                    Err(e) => { let _ = ev.send(Event::AiText(format!("AI 未配置: {e}"))); }
+                                    Ok(client) => {
+                                        let out = if explain {
+                                            client.explain(&statement, &code, &verdict_info, "").await
+                                        } else {
+                                            client.hint(&statement, &code, &verdict_info).await
+                                        };
+                                        match out {
+                                            Ok(t) => { let _ = ev.send(Event::AiText(t)); }
+                                            Err(e) => { let _ = ev.send(Event::AiText(format!("AI 错误: {e}"))); }
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                        Task::AiScripts { api_base, api_key, model, statement, lang, dest_dir, cpp_cfg, py_cfg } => {
+                            let ev = ev_tx.clone();
+                            tokio::spawn(async move {
+                                let r = shuati_ai::AiClient::new(&api_base, &api_key, &model);
+                                match r {
+                                    Err(e) => { let _ = ev.send(Event::AiText(format!("AI 未配置: {e}"))); }
+                                    Ok(client) => {
+                                        match shuati_ai::produce_scripts(&client, &statement, lang, &dest_dir, &cpp_cfg, &py_cfg, |_| {}).await {
+                                            Ok((g, o)) => { let _ = ev.send(Event::ScriptsReady(g, o)); }
+                                            Err(e) => { let _ = ev.send(Event::AiText(format!("脚本生成失败: {e}"))); }
+                                        }
+                                    }
+                                }
                             });
                         }
                     }

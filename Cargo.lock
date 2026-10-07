@@ -3707,10 +3707,14 @@ name = "shuati-ai"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "reqwest",
  "serde",
  "serde_json",
  "shuati-core",
+ "shuati-judge",
+ "tempfile",
  "thiserror 2.0.21",
+ "tokio",
  "tracing",
 ]
 
@@ -3720,6 +3724,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "serde_json",
  "shuati-ai",
  "shuati-core",
  "shuati-fetch",

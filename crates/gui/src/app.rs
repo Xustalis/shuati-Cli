@@ -51,6 +51,14 @@ pub struct StressState {
     pub msg: String,
 }
 
+/// AI 状态（hint/诊断文本 + busy）
+#[derive(Default)]
+pub struct AiState {
+    pub busy: bool,
+    pub text: String,
+    pub show: bool,
+}
+
 /// 用例编辑器状态（评测屏下半区）
 #[derive(Default)]
 pub struct CaseEditor {
@@ -62,6 +70,8 @@ pub struct CaseEditor {
     pub new_in: String,
     pub new_out: String,
     pub show_add: bool,
+    /// 正在编辑的用例名（None=新增模式）
+    pub editing: Option<String>,
     /// 查看哪个用例详情
     pub view_case: Option<usize>,
     pub msg: String,
@@ -96,10 +106,15 @@ pub struct ShuatiApp {
     // ── 对拍屏
     pub stress: StressState,
 
+    // ── AI
+    pub ai: AiState,
+
     // ── 设置屏（编辑中的副本）
     pub cfg_cpp: String,
     pub cfg_py: String,
     pub cfg_api_key: String,
+    pub cfg_api_base: String,
+    pub cfg_model: String,
     pub cfg_editor: String,
     pub env: Option<shuati_judge::EnvReport>,
 }
@@ -124,6 +139,8 @@ impl ShuatiApp {
             cfg_cpp: cfg.compiler_cpp.clone(),
             cfg_py: cfg.compiler_python.clone(),
             cfg_api_key: cfg.ai.api_key.clone(),
+            cfg_api_base: cfg.ai.api_base.clone(),
+            cfg_model: cfg.ai.model.clone(),
             cfg_editor: cfg.editor.clone(),
             ws,
             cfg,
@@ -145,6 +162,7 @@ impl ShuatiApp {
                 rounds_input: "100".into(),
                 ..Default::default()
             },
+            ai: AiState::default(),
             env: None,
         };
         // 恢复 watch 状态
@@ -206,19 +224,24 @@ impl ShuatiApp {
     /// 用例编辑器：新增一个用例
     pub fn add_case(&mut self, input: &str, output: &str) {
         let Some(pd) = self.current_problem() else { return };
-        // 下一个编号
-        let next = self
-            .cases
-            .cases
-            .iter()
-            .filter_map(|(n, _, _)| n.parse::<u32>().ok())
-            .max()
-            .unwrap_or(0)
-            + 1;
-        let name = format!("{next:04}");
+        let name = if let Some(n) = &self.cases.editing {
+            n.clone()
+        } else {
+            // 下一个编号
+            let next = self
+                .cases
+                .cases
+                .iter()
+                .filter_map(|(n, _, _)| n.parse::<u32>().ok())
+                .max()
+                .unwrap_or(0)
+                + 1;
+            format!("{next:04}")
+        };
         match pd.write_case(&name, input, output, shuati_core::CaseOrigin::Sample) {
             Ok(()) => {
-                self.cases.msg = format!("已添加用例 {name}");
+                self.cases.msg = format!("已{}用例 {name}", if self.cases.editing.is_some() { "更新" } else { "添加" });
+                self.cases.editing = None;
                 self.reload_cases();
             }
             Err(e) => self.cases.msg = format!("添加失败: {e}"),
@@ -382,6 +405,91 @@ impl ShuatiApp {
         });
     }
 
+    /// 触发 AI 提示/诊断
+    pub fn trigger_ai(&mut self, explain: bool) {
+        let Some(pd) = self.current_problem() else {
+            self.ai.text = "先选题目".into();
+            self.ai.show = true;
+            return;
+        };
+        let statement = pd.read_statement().unwrap_or_default();
+        // 代码：watch 文件 > solutions/main
+        let code = self
+            .state
+            .watch_file
+            .as_ref()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .or_else(|| pd.find_solution().and_then(|p| std::fs::read_to_string(p).ok()))
+            .unwrap_or_else(|| "（无代码）".into());
+        // 判题上下文
+        let verdict_info = self
+            .run
+            .report
+            .as_ref()
+            .map(|r| {
+                let fails: Vec<String> = r
+                    .cases
+                    .iter()
+                    .filter(|c| c.verdict != Verdict::Ac)
+                    .take(3)
+                    .map(|c| {
+                        format!(
+                            "{}: {}（期望 {} 实际 {}）",
+                            c.name,
+                            c.verdict,
+                            c.expected.lines().next().unwrap_or(""),
+                            c.actual.lines().next().unwrap_or("")
+                        )
+                    })
+                    .collect();
+                format!("判定 {}，{}/{}。失败:\n{}", r.verdict, r.pass, r.total, fails.join("\n"))
+            })
+            .unwrap_or_else(|| "（尚未评测）".into());
+
+        self.ai.busy = true;
+        self.ai.show = true;
+        self.ai.text = "AI 思考中…".into();
+        self.bridge.request(Task::AiAsk {
+            api_base: self.cfg.ai.api_base.clone(),
+            api_key: self.cfg.ai.api_key.clone(),
+            model: self.cfg.ai.model.clone(),
+            statement,
+            code,
+            verdict_info,
+            explain,
+        });
+    }
+
+    /// 触发 AI 生成对拍脚本
+    pub fn trigger_ai_scripts(&mut self) {
+        let Some(pd) = self.current_problem() else {
+            self.stress.msg = "先选题目".into();
+            return;
+        };
+        let statement = pd.read_statement().unwrap_or_default();
+        let dest = pd.dir.clone();
+        // 脚本语言跟用户解一致
+        let lang = self
+            .state
+            .watch_file
+            .as_ref()
+            .and_then(|p| shuati_core::Lang::from_path(p))
+            .unwrap_or(shuati_core::Lang::Cpp);
+        self.ai.busy = true;
+        self.ai.show = true;
+        self.ai.text = "AI 生成 + dry-run 验证中，可能要 1-2 分钟…".into();
+        self.bridge.request(Task::AiScripts {
+            api_base: self.cfg.ai.api_base.clone(),
+            api_key: self.cfg.ai.api_key.clone(),
+            model: self.cfg.ai.model.clone(),
+            statement,
+            lang,
+            dest_dir: dest,
+            cpp_cfg: self.cfg.compiler_cpp.clone(),
+            py_cfg: self.cfg.compiler_python.clone(),
+        });
+    }
+
     /// 处理后台事件（每帧调用）
     fn drain_events(&mut self, ctx: &egui::Context) {
         // watch 事件 → 自动重测
@@ -440,9 +548,21 @@ impl ShuatiApp {
                     self.stress.running = false;
                     self.stress.report = Some(*report);
                 }
+                Event::AiText(t) => {
+                    self.ai.busy = false;
+                    self.ai.text = t;
+                    self.ai.show = true;
+                }
+                Event::ScriptsReady(g, o) => {
+                    self.ai.busy = false;
+                    self.ai.text = format!("脚本已生成并验证通过:\n  gen    = {}\n  oracle = {}", g.display(), o.display());
+                    self.ai.show = true;
+                    self.stress.gen_path = g.display().to_string();
+                    self.stress.oracle_path = o.display().to_string();
+                }
             }
         }
-        if self.run.running || self.stress.running || self.state.watch_enabled || self.fetching {
+        if self.run.running || self.stress.running || self.state.watch_enabled || self.fetching || self.ai.busy {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
     }
@@ -458,7 +578,8 @@ impl eframe::App for ShuatiApp {
             let Some(p) = &f.path else { continue };
             if shuati_core::Lang::from_path(p).is_some() {
                 self.set_watch_file(p.clone());
-                if self.state.watch_enabled && !self.run.running {
+                // 拖入即评测：用户意图明确，不要求先开 watch 开关
+                if !self.run.running {
                     self.trigger_test();
                 }
             } else if p.extension().is_some_and(|e| e == "in") {
