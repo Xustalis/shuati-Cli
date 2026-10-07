@@ -38,6 +38,21 @@ pub enum Event {
     GenDone(usize),
     /// AI 连接测试结果
     AiPong(Result<String, String>),
+    /// 快速运行完成
+    QuickDone(Box<QuickResult>),
+    /// 快速运行失败（编译/环境）
+    QuickFailed(String),
+}
+
+/// 快速运行结果：单次"跑一下看输出"
+#[derive(Debug)]
+pub struct QuickResult {
+    pub stdout: String,
+    pub stderr: String,
+    /// None = 正常退出；Some = TLE/MLE/RE/SE
+    pub status: Option<Verdict>,
+    pub cpu_ms: u64,
+    pub mem_kb: u64,
 }
 
 /// UI → 后台 命令
@@ -90,6 +105,13 @@ pub enum Task {
         dest_dir: PathBuf,
         cpp_cfg: String,
         py_cfg: String,
+    },
+    /// 快速运行：贴输入直接跑，不需要题目/用例
+    QuickRun {
+        src: SourceFile,
+        input: String,
+        limits: shuati_core::Limits,
+        compiler_cfg: String,
     },
     /// AI 连接测试（最小请求）
     AiPing {
@@ -190,6 +212,15 @@ impl Bridge {
                                 }
                             });
                         }
+                        Task::QuickRun { src, input, limits, compiler_cfg } => {
+                            let ev = ev_tx.clone();
+                            tokio::spawn(async move {
+                                match quick_run(src, input, limits, compiler_cfg).await {
+                                    Ok(qr) => { let _ = ev.send(Event::QuickDone(Box::new(qr))); }
+                                    Err(e) => { let _ = ev.send(Event::QuickFailed(e)); }
+                                }
+                            });
+                        }
                         Task::AiPing { api_base, api_key, model } => {
                             let ev = ev_tx.clone();
                             tokio::spawn(async move {
@@ -248,6 +279,38 @@ impl Bridge {
     pub fn try_recv(&self) -> Option<Event> {
         self.rx.try_recv().ok()
     }
+}
+
+/// 快速运行：编译一次 → 贴入输入跑一次 → 读回 stdout/stderr
+async fn quick_run(
+    src: SourceFile,
+    input: String,
+    limits: shuati_core::Limits,
+    compiler_cfg: String,
+) -> std::result::Result<QuickResult, String> {
+    let tc = judge::Toolchain::detect(src.lang, &compiler_cfg).map_err(|e| e.to_string())?;
+    let prog = judge::compile_source(&src, &tc).await.map_err(|e| format!("编译失败:\n{e}"))?;
+    let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let stdin_path = tmp.path().join("stdin.txt");
+    std::fs::write(&stdin_path, &input).map_err(|e| e.to_string())?;
+    let io = judge::Io {
+        stdin: Some(stdin_path),
+        stdout: tmp.path().join("stdout.txt"),
+        stderr: tmp.path().join("stderr.txt"),
+    };
+    let out = judge::run_program(&prog, &io, &limits).await.map_err(|e| e.to_string());
+    judge::cleanup_program(&prog);
+    let out = out?;
+    let stdout = std::fs::read_to_string(&out.stdout_path).unwrap_or_default();
+    let stderr = std::fs::read_to_string(&out.stderr_path).unwrap_or_default();
+    let status = match out.status {
+        judge::RunStatus::Ok => None,
+        judge::RunStatus::TimeLimit => Some(Verdict::Tle),
+        judge::RunStatus::MemoryLimit => Some(Verdict::Mle),
+        judge::RunStatus::RuntimeError => Some(Verdict::Re),
+        judge::RunStatus::InternalError => Some(Verdict::Se),
+    };
+    Ok(QuickResult { stdout, stderr, status, cpu_ms: out.cpu_ms, mem_kb: out.peak_mem_kb })
 }
 
 async fn run_test(

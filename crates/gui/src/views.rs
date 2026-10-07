@@ -9,6 +9,7 @@ pub fn render(app: &mut ShuatiApp, ctx: &egui::Context) {
         ui.horizontal(|ui| {
             ui.heading("刷题助手");
             ui.separator();
+            tab_btn(ui, app, Tab::Quick, "快速运行");
             tab_btn(ui, app, Tab::Test, "评测");
             tab_btn(ui, app, Tab::Library, "题库");
             tab_btn(ui, app, Tab::Stress, "对拍");
@@ -36,6 +37,7 @@ pub fn render(app: &mut ShuatiApp, ctx: &egui::Context) {
 
     // ── 主区
     egui::CentralPanel::default().show(ctx, |ui| match app.tab {
+        Tab::Quick => quick_view(app, ui),
         Tab::Test => test_view(app, ui),
         Tab::Library => library_view(app, ui),
         Tab::Stress => stress_view(app, ui),
@@ -169,6 +171,137 @@ fn verdict_color(v: shuati_core::Verdict) -> Color32 {
     }
 }
 
+// ═══ 快速运行屏 ════════════════════════════════════════
+// 贴合 Dev-C++ 习惯：拖入 cpp → 贴输入 → 跑 → 看输出，零前置。
+
+fn quick_view(app: &mut ShuatiApp, ui: &mut Ui) {
+    // ── 源文件行
+    ui.horizontal(|ui| {
+        ui.label("源文件:");
+        if let Some(p) = app.state.watch_file.clone() {
+            ui.monospace(p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())
+                .on_hover_text(p.display().to_string());
+        } else {
+            ui.label(RichText::new("（未选择）").weak());
+        }
+        if ui.button("选择文件…").clicked() {
+            if let Some(p) = rfd::FileDialog::new()
+                .add_filter("源代码", &["cpp", "cc", "cxx", "c++", "py"])
+                .pick_file()
+            {
+                app.set_watch_file(p);
+            }
+        }
+        let can_run = app.state.watch_file.is_some() && !app.quick.running;
+        if ui.add_enabled(can_run, egui::Button::new("▶ 运行").min_size(egui::vec2(76.0, 0.0))).clicked() {
+            app.trigger_quick_run();
+        }
+        if app.quick.running {
+            ui.spinner();
+            ui.label("编译运行中…");
+        }
+    });
+    if app.state.watch_file.is_none() {
+        ui.add_space(16.0);
+        ui.group(|ui| {
+            ui.label(RichText::new("怎么用").strong());
+            ui.label("1. 把 Dev-C++ 里写的 .cpp 拖进这个窗口（或点「选择文件…」）");
+            ui.label("2. 左边贴上输入数据，点「▶ 运行」");
+            ui.label("3. 右边就是你的程序输出——和按 F9 一样");
+            ui.add_space(2.0);
+            ui.label(RichText::new("要判对错就勾「对答案」贴上期望输出；做整组测试去「评测」页").weak().small());
+        });
+    }
+
+    // ── 输入 / 输出 双栏
+    let avail = ui.available_size();
+    let out_height = (avail.y - 96.0).max(120.0);
+    ui.columns(2, |cols| {
+        for (i, col) in cols.iter_mut().enumerate() {
+            if i == 0 {
+                col.label(RichText::new("输入 (stdin)").strong());
+                let w = col.available_width();
+                col.add_sized(
+                    [w, out_height],
+                    egui::TextEdit::multiline(&mut app.quick.input)
+                        .font(egui::TextStyle::Monospace)
+                        .hint_text("把输入数据贴在这里，例如:\n5\n1 2 3 4 5"),
+                );
+            } else {
+                // 输出行：状态行 + stdout 只读框 + stderr
+                col.horizontal(|ui| {
+                    ui.label(RichText::new("输出 (stdout)").strong());
+                    if let Some(r) = &app.quick.result {
+                        match r.status {
+                            None => {
+                                ui.label(RichText::new(format!("运行结束 · {}ms · {}KB", r.cpu_ms, r.mem_kb)).weak().small());
+                            }
+                            Some(v) => {
+                                ui.label(RichText::new(format!("{} · {}ms", v, r.cpu_ms)).color(verdict_color(v)).strong().small());
+                            }
+                        }
+                    }
+                });
+                let mut out_text = app.quick.result.as_ref().map(|r| r.stdout.clone()).unwrap_or_default();
+                let w = col.available_width();
+                let err = app.quick.result.as_ref().map(|r| r.stderr.clone()).unwrap_or_default();
+                let out_h = if err.is_empty() { out_height } else { out_height - 60.0 };
+                col.add_sized(
+                    [w, out_h.max(60.0)],
+                    egui::TextEdit::multiline(&mut out_text)
+                        .font(egui::TextStyle::Monospace)
+                        .interactive(false)
+                        .hint_text("程序输出会出现在这里"),
+                );
+                if !err.is_empty() {
+                    col.label(RichText::new("stderr").weak().small());
+                    let mut e = err;
+                    col.add_sized(
+                        [w, 52.0],
+                        egui::TextEdit::multiline(&mut e)
+                            .font(egui::TextStyle::Monospace)
+                            .interactive(false),
+                    );
+                }
+            }
+        }
+    });
+
+    // ── 对答案 / 存用例 / 消息
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut app.quick.show_expected, "对答案");
+        if app.quick.show_expected {
+            ui.label("期望:");
+            ui.add(egui::TextEdit::singleline(&mut app.quick.expected).desired_width(280.0).font(egui::TextStyle::Monospace));
+            // 有结果+期望非空 → 判 AC/WA
+            if let Some(r) = &app.quick.result {
+                if r.status.is_none() && !app.quick.expected.trim().is_empty() {
+                    let ctx = shuati_core::CheckCtx {
+                        input: &app.quick.input,
+                        actual: &r.stdout,
+                        expected: &app.quick.expected,
+                    };
+                    let v = shuati_judge::check(&shuati_core::CheckerSpec::Tokens, &ctx).unwrap_or(shuati_core::Verdict::Wa);
+                    ui.label(RichText::new(v.to_string()).color(verdict_color(v)).strong().size(16.0));
+                }
+            }
+        }
+        ui.separator();
+        let can_save = app.current_problem().is_some() && !app.quick.input.trim().is_empty();
+        if ui.add_enabled(can_save, egui::Button::new("存为当前题用例")).on_hover_text("输入+期望（空则用实际输出）写到当前题的 tests/").clicked() {
+            app.save_quick_as_case();
+        }
+        if app.current_problem().is_none() {
+            ui.label(RichText::new("选题后可存用例").weak().small());
+        }
+    });
+    if !app.quick.msg.is_empty() {
+        let errish = ["失败", "先", "不支持", "没有"].iter().any(|k| app.quick.msg.contains(k));
+        let color = if errish { Color32::from_rgb(230, 90, 90) } else { Color32::from_rgb(80, 200, 120) };
+        ui.colored_label(color, &app.quick.msg);
+    }
+}
+
 // ═══ 评测屏 ═══════════════════════════════════════════
 
 fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
@@ -179,8 +312,8 @@ fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
             ui.group(|ui| {
                 ui.label(RichText::new("快速开始").strong().size(18.0));
                 ui.label("1. 去【题库】页粘贴题目链接点「获取」，或新建本地题");
-                ui.label("2. 回这里把你的 .cpp 拖进窗口");
-                ui.label("3. 勾上「保存即评测」——在 Dev-C++ 里 Ctrl+S 就会自动判题");
+                ui.label("2. 回这里把你的 .cpp 拖进窗口（或点「选择文件…」）");
+                ui.label("3. 勾上「保存后自动重测」——在 Dev-C++ 里 Ctrl+S 就会自动判题");
                 ui.add_space(4.0);
                 if ui.button("去题库").clicked() {
                     app.tab = Tab::Library;
@@ -215,7 +348,7 @@ fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
                 if ui.button("题面").clicked() {
                     app.show_statement = !app.show_statement;
                 }
-                if ui.button("题设").on_hover_text("编辑标题/时限/内存/题面").clicked() {
+                if ui.button("题目设置").on_hover_text("编辑标题/时限/内存/判题方式/题面").clicked() {
                     app.open_problem_editor();
                 }
                 ui.label(RichText::new(title).weak());
@@ -240,32 +373,33 @@ fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
         ui.group(|ui| {
             ui.horizontal(|ui| {
                 ui.label("源文件:");
-                let file_label = app
-                    .state
-                    .watch_file
-                    .as_ref()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|| "把 .cpp/.py 拖进窗口，或填路径".into());
-                ui.monospace(file_label);
-            });
-            ui.horizontal(|ui| {
-                ui.text_edit_singleline(&mut app.src_input);
-                if ui.button("选定").clicked() && !app.src_input.is_empty() {
-                    let p = std::path::PathBuf::from(app.src_input.trim());
-                    if p.exists() {
+                match &app.state.watch_file {
+                    Some(p) => {
+                        ui.monospace(p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())
+                            .on_hover_text(p.display().to_string());
+                    }
+                    None => {
+                        ui.label(RichText::new("把 .cpp/.py 拖进窗口，或点右侧选择").weak());
+                    }
+                }
+                if ui.button("选择文件…").clicked() {
+                    if let Some(p) = rfd::FileDialog::new()
+                        .add_filter("源代码", &["cpp", "cc", "cxx", "c++", "py"])
+                        .pick_file()
+                    {
                         app.set_watch_file(p);
-                    } else {
-                        app.run.error = Some("文件不存在".into());
                     }
                 }
                 let mut watch = app.state.watch_enabled;
-                if ui.checkbox(&mut watch, "保存即评测").changed() {
+                if ui.checkbox(&mut watch, "保存后自动重测").on_hover_text("在 Dev-C++ 里 Ctrl+S 保存，这里自动重新评测").changed() {
                     app.state.watch_enabled = watch;
                     app.save_state();
                 }
-                ui.separator();
+            });
+            ui.horizontal(|ui| {
                 let can_run = app.current_problem().is_some() && app.state.watch_file.is_some() && !app.run.running;
-                if ui.add_enabled(can_run, egui::Button::new("▶ 评测")).clicked() {
+                let btn = egui::Button::new(RichText::new("▶ 评测").size(15.0)).min_size(egui::vec2(80.0, 26.0));
+                if ui.add_enabled(can_run, btn).clicked() {
                     app.trigger_test();
                 }
                 if app.run.running && ui.button("■ 停止").clicked() {
@@ -620,83 +754,143 @@ fn library_view(app: &mut ShuatiApp, ui: &mut Ui) {
 
 // ═══ 对拍屏 ═══════════════════════════════════════════
 
-fn stress_view(app: &mut ShuatiApp, ui: &mut Ui) {
-    ui.heading("对拍（深度测试）");
-    ui.label(RichText::new("生成器随机造数据 → 你的程序和暴力标程同时跑 → 输出不一致即抓到反例").weak());
-    ui.add_space(8.0);
+/// 文件就绪状态图标
+fn stress_file_status(ui: &mut Ui, ready: bool) {
+    if ready {
+        ui.label(RichText::new("✓").color(Color32::from_rgb(80, 200, 120)));
+    } else {
+        ui.label(RichText::new("✗").color(Color32::from_rgb(230, 90, 90)));
+    }
+}
 
-    // 文件选择
-    egui::Grid::new("stress_files").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-        ui.label("生成器 gen（argv[1]=seed）:");
+fn stress_view(app: &mut ShuatiApp, ui: &mut Ui) {
+    ui.label(RichText::new("随机数据自动造 → 你的程序和暴力标程比输出，找出让你 WA 的那组数据").weak());
+    ui.add_space(6.0);
+
+    if app.current_problem().is_none() {
+        ui.add_space(10.0);
+        ui.group(|ui| {
+            ui.label(RichText::new("先选一道题").strong());
+            ui.label("对拍需要题目来定时限和比对方式。");
+            if ui.button("去题库选题").clicked() {
+                app.tab = Tab::Library;
+            }
+        });
+        return;
+    }
+
+    // ── 三个文件：缺什么一眼可见
+    let has_gen = !app.stress.gen_path.trim().is_empty();
+    let has_oracle = !app.stress.oracle_path.trim().is_empty();
+    let has_user = app.state.watch_file.is_some();
+
+    egui::Grid::new("stress_files").num_columns(3).spacing([12.0, 6.0]).show(ui, |ui| {
+        // 你的代码
+        stress_file_status(ui, has_user);
+        ui.label("你的代码:");
         ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut app.stress.gen_path).desired_width(340.0).hint_text("gen/gen.cpp 或 .py"));
+            match &app.state.watch_file {
+                Some(p) => { ui.monospace(p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()); }
+                None => { ui.label(RichText::new("（未选择）").weak()); }
+            }
+            if ui.small_button("选择…").clicked() {
+                if let Some(p) = rfd::FileDialog::new().add_filter("源代码", &["cpp", "cc", "cxx", "py"]).pick_file() {
+                    app.set_watch_file(p);
+                }
+            }
         });
         ui.end_row();
-        ui.label("标程 oracle/brute:");
+        // 生成器
+        stress_file_status(ui, has_gen);
+        ui.label("数据生成器 gen:").on_hover_text("每次运行给它一个 seed（argv[1]），它输出一组测试数据");
         ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut app.stress.oracle_path).desired_width(340.0).hint_text("solutions/brute.cpp 或 .py"));
+            ui.add(egui::TextEdit::singleline(&mut app.stress.gen_path).desired_width(300.0).hint_text("gen/gen.cpp 或 .py"));
+            if ui.small_button("…").clicked() {
+                if let Some(p) = rfd::FileDialog::new().add_filter("源代码", &["cpp", "cc", "cxx", "py"]).pick_file() {
+                    app.stress.gen_path = p.display().to_string();
+                }
+            }
         });
         ui.end_row();
-        ui.label("用户解:");
-        ui.monospace(
-            app.state
-                .watch_file
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "（在评测页选定源文件）".into()),
-        );
+        // 标程
+        stress_file_status(ui, has_oracle);
+        ui.label("暴力标程 oracle:").on_hover_text("一个保证正确但可能慢的程序，通常写暴力解法");
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut app.stress.oracle_path).desired_width(300.0).hint_text("solutions/brute.cpp 或 .py"));
+            if ui.small_button("…").clicked() {
+                if let Some(p) = rfd::FileDialog::new().add_filter("源代码", &["cpp", "cc", "cxx", "py"]).pick_file() {
+                    app.stress.oracle_path = p.display().to_string();
+                }
+            }
+        });
         ui.end_row();
     });
 
-    // 参数行
+    // ── 缺文件 → 引导补齐；齐全 → 大开始按钮
+    if !(has_gen && has_oracle) {
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label("还没有生成器/标程？");
+            let ai_ok = app.cfg.ai.enabled() && !app.ai.busy;
+            if ui.add_enabled(ai_ok, egui::Button::new("AI 一键生成")).on_hover_text("AI 读题面写 gen+标程，自动验证能跑才给你（需配置 api_key）").clicked() {
+                app.trigger_ai_scripts();
+            }
+            if ui.button("写代码模板").on_hover_text("在题目目录生成 gen.cpp/brute.cpp 骨架，改一改就能用").clicked() {
+                write_stress_templates(app);
+            }
+        });
+    }
+
+    ui.add_space(4.0);
     ui.horizontal(|ui| {
-        ui.label("轮数:");
-        ui.add(egui::TextEdit::singleline(&mut app.stress.rounds_input).desired_width(70.0));
-        ui.label("起始 seed:");
-        ui.add(egui::TextEdit::singleline(&mut app.stress.seed_input).desired_width(90.0).hint_text("随机"));
-        ui.checkbox(&mut app.stress.keep_going, "出错后继续");
-        ui.separator();
-        let can = app.current_problem().is_some() && !app.stress.running;
-        if ui.add_enabled(can, egui::Button::new("▶ 开始对拍")).clicked() {
+        let ready = has_gen && has_oracle && has_user && !app.stress.running;
+        let btn = egui::Button::new(RichText::new("▶ 开始对拍").size(16.0)).min_size(egui::vec2(120.0, 30.0));
+        if ui.add_enabled(ready, btn).clicked() {
             app.trigger_stress();
         }
         if app.stress.running && ui.button("■ 停止").clicked() {
             app.bridge.cancel_current();
         }
-        if ui.button("自动探测文件").clicked() {
-            app.stress.gen_path.clear();
-            app.stress.oracle_path.clear();
-            app.autodetect_stress_paths();
-        }
-        ui.separator();
-        let ai_ok = app.cfg.ai.enabled() && !app.ai.busy;
-        if ui.add_enabled(ai_ok, egui::Button::new("AI 生成脚本")).on_hover_text("需要配置 api_key；生成后会自动 dry-run 验证").clicked() {
-            app.trigger_ai_scripts();
-        }
-        if ui.button("写模板").on_hover_text("在题目目录生成 gen.cpp/brute.cpp 骨架文件").clicked() {
-            write_stress_templates(app);
+        if !has_user {
+            ui.label(RichText::new("还差：选择你的代码").weak());
         }
     });
+
+    // ── 高级选项（轮数/seed/批量造例）默认收起
+    egui::CollapsingHeader::new("高级选项").default_open(false).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("轮数:");
+            ui.add(egui::TextEdit::singleline(&mut app.stress.rounds_input).desired_width(70.0));
+            ui.label("起始 seed:");
+            ui.add(egui::TextEdit::singleline(&mut app.stress.seed_input).desired_width(90.0).hint_text("随机"));
+            ui.checkbox(&mut app.stress.keep_going, "出错后继续");
+        });
+        ui.horizontal(|ui| {
+            ui.label("批量造例:");
+            ui.add(egui::TextEdit::singleline(&mut app.stress.gen_count_input).desired_width(60.0));
+            ui.label("组");
+            let can = !app.stress.genning && has_gen && has_oracle;
+            if ui.add_enabled(can, egui::Button::new("生成 → tests/")).on_hover_text("gen 产输入、标程产答案，直接落到用例库").clicked() {
+                app.trigger_gen_cases();
+            }
+            if app.stress.genning {
+                ui.spinner();
+            }
+            ui.separator();
+            if ui.button("重新探测文件").on_hover_text("按题目目录约定位置重找 gen/brute").clicked() {
+                app.stress.gen_path.clear();
+                app.stress.oracle_path.clear();
+                app.autodetect_stress_paths();
+            }
+        });
+    });
+
     if !app.stress.msg.is_empty() {
         // 消息分级：含"失败/找不到/没有/需要"显示红色，其余弱色
         let errish = ["失败", "找不到", "没有", "需要", "先选"].iter().any(|k| app.stress.msg.contains(k));
         let color = if errish { Color32::from_rgb(230, 90, 90) } else { Color32::from_rgb(150, 150, 150) };
         ui.colored_label(color, &app.stress.msg);
     }
-
-    // 批量造例行：gen+oracle → tests/ 用例
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("批量造例:").strong());
-        ui.add(egui::TextEdit::singleline(&mut app.stress.gen_count_input).desired_width(60.0));
-        ui.label("组");
-        let can = app.current_problem().is_some() && !app.stress.genning && !app.stress.gen_path.trim().is_empty() && !app.stress.oracle_path.trim().is_empty();
-        if ui.add_enabled(can, egui::Button::new("生成 → tests/")).on_hover_text("gen 产输入、oracle 产答案，直接落到用例库").clicked() {
-            app.trigger_gen_cases();
-        }
-        if app.stress.genning {
-            ui.spinner();
-        }
-    });
 
     // 实时状态
     if app.stress.running || app.stress.report.is_some() {

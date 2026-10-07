@@ -1,7 +1,7 @@
 //! 应用主状态与事件循环。
 
-use crate::worker::{Bridge, Event, Task};
-use shuati_core::{TestReport, Verdict};
+use crate::worker::{self, Bridge, Event, Task};
+use shuati_core::{Lang, SourceFile, TestReport, Verdict};
 use shuati_store as store;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -9,6 +9,8 @@ use std::sync::Arc;
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum Tab {
+    /// 快速运行（默认首屏）：贴输入直接跑
+    Quick,
     Test,
     Library,
     Stress,
@@ -52,6 +54,18 @@ pub struct StressState {
     pub gen_count_input: String,
     /// 造例进行中
     pub genning: bool,
+    pub msg: String,
+}
+
+/// 快速运行状态：贴输入直接跑，不需要题目
+#[derive(Default)]
+pub struct QuickState {
+    pub input: String,
+    pub expected: String,
+    /// 是否展开期望输出框
+    pub show_expected: bool,
+    pub running: bool,
+    pub result: Option<worker::QuickResult>,
     pub msg: String,
 }
 
@@ -109,8 +123,6 @@ pub struct ShuatiApp {
     /// watch 句柄（保持存活才有用）
     _watcher: Option<notify::RecommendedWatcher>,
     pub watch_rx: Option<std::sync::mpsc::Receiver<PathBuf>>,
-    /// 新建源文件路径输入
-    pub src_input: String,
     /// 题面是否展开
     pub show_statement: bool,
     /// 用例编辑器
@@ -121,6 +133,9 @@ pub struct ShuatiApp {
     pub url_input: String,
     pub lib_msg: String,
     pub fetching: bool,
+
+    // ── 快速运行屏
+    pub quick: QuickState,
 
     // ── 对拍屏
     pub stress: StressState,
@@ -173,12 +188,11 @@ impl ShuatiApp {
             cfg,
             state,
             problems,
-            tab: Tab::Test,
+            tab: Tab::Quick,
             bridge,
             run: RunState { error: init_err, ..Default::default() },
             _watcher: None,
             watch_rx: None,
-            src_input: String::new(),
             show_statement: false,
             cases: CaseEditor::default(),
             new_title: String::new(),
@@ -190,6 +204,7 @@ impl ShuatiApp {
                 gen_count_input: "20".into(),
                 ..Default::default()
             },
+            quick: QuickState::default(),
             ai: AiState::default(),
             prob_edit: ProblemEditor::default(),
             env: None,
@@ -565,6 +580,71 @@ impl ShuatiApp {
         });
     }
 
+    /// 快速运行：编译当前源文件，贴入输入跑一次
+    pub fn trigger_quick_run(&mut self) {
+        let Some(src_path) = self.state.watch_file.clone() else {
+            self.quick.msg = "先拖入或选择源文件（.cpp/.py）".into();
+            return;
+        };
+        let lang = match Lang::from_path(&src_path) {
+            Some(l) => l,
+            None => {
+                self.quick.msg = "文件类型不支持（.cpp/.py）".into();
+                return;
+            }
+        };
+        let compiler_cfg = match lang {
+            Lang::Cpp => self.cfg.compiler_cpp.clone(),
+            Lang::Python => self.cfg.compiler_python.clone(),
+        };
+        self.quick.running = true;
+        self.quick.result = None;
+        self.quick.msg = "编译运行中…".into();
+        let limits = self.current_problem().map(|p| p.meta.limits).unwrap_or(shuati_core::Limits {
+            cpu_ms: 5000,
+            wall_ms: 15000,
+            memory_mb: 512,
+            output_mb: 16,
+        });
+        self.bridge.request(Task::QuickRun {
+            src: SourceFile { path: src_path, lang },
+            input: self.quick.input.clone(),
+            limits,
+            compiler_cfg,
+        });
+    }
+
+    /// 把快速运行的输入/输出存为当前题的一个用例
+    pub fn save_quick_as_case(&mut self) {
+        let Some(pd) = self.current_problem() else {
+            self.quick.msg = "先在题库选一道题才能存用例".into();
+            return;
+        };
+        if self.quick.input.trim().is_empty() {
+            self.quick.msg = "输入为空".into();
+            return;
+        }
+        // 期望输出：优先用户填的，否则用程序实际输出（造用例的常见用法）
+        let expected = if self.quick.expected.trim().is_empty() {
+            self.quick.result.as_ref().map(|r| r.stdout.clone()).unwrap_or_default()
+        } else {
+            self.quick.expected.clone()
+        };
+        if expected.trim().is_empty() {
+            self.quick.msg = "没有期望输出——先跑一次或手填".into();
+            return;
+        }
+        let existing = pd.load_cases().map(|c| c.len()).unwrap_or(0) as u32;
+        let name = format!("{:04}", existing + 1);
+        match pd.write_case(&name, &self.quick.input, &expected, shuati_core::CaseOrigin::Sample) {
+            Ok(()) => {
+                self.reload_cases();
+                self.quick.msg = format!("已存为用例 {name}");
+            }
+            Err(e) => self.quick.msg = format!("存用例失败: {e}"),
+        }
+    }
+
     /// 测试 AI 连接（用输入框里的值，不要求先保存）
     pub fn trigger_ai_ping(&mut self) {
         if self.cfg_api_key.trim().is_empty() {
@@ -748,9 +828,19 @@ impl ShuatiApp {
                     self.ai_pinging = false;
                     self.cfg_msg = format!("连接失败: {e}");
                 }
+                Event::QuickDone(qr) => {
+                    self.quick.running = false;
+                    self.quick.result = Some(*qr);
+                    self.quick.msg.clear();
+                }
+                Event::QuickFailed(e) => {
+                    self.quick.running = false;
+                    self.quick.result = None;
+                    self.quick.msg = e;
+                }
             }
         }
-        if self.run.running || self.stress.running || self.state.watch_enabled || self.fetching || self.ai.busy || self.stress.genning || self.ai_pinging {
+        if self.run.running || self.stress.running || self.state.watch_enabled || self.fetching || self.ai.busy || self.stress.genning || self.ai_pinging || self.quick.running {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
     }
@@ -766,8 +856,13 @@ impl eframe::App for ShuatiApp {
             let Some(p) = &f.path else { continue };
             if shuati_core::Lang::from_path(p).is_some() {
                 self.set_watch_file(p.clone());
-                // 拖入即评测：用户意图明确，不要求先开 watch 开关
-                if !self.run.running {
+                // 拖入即跑：在快速运行页或没选题时 → 直接单次运行；
+                // 有题在评测页 → 走完整评测
+                if self.tab == Tab::Quick || self.current_problem().is_none() {
+                    if !self.quick.running {
+                        self.trigger_quick_run();
+                    }
+                } else if !self.run.running {
                     self.trigger_test();
                 }
             } else if p.extension().is_some_and(|e| e == "in") {

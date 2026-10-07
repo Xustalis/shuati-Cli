@@ -48,6 +48,11 @@ enum Cmd {
         /// 题目链接
         url: String,
     },
+    /// 快速运行：编译源文件，stdin 透传跑一次（不需要题目）
+    Run {
+        /// 源文件（.cpp/.py）
+        file: PathBuf,
+    },
     /// 对拍：gen 生成器 × user 解 × oracle 标程
     Stress {
         /// 题目 id
@@ -138,6 +143,7 @@ async fn main() -> Result<()> {
         Some(Cmd::New { title, slug }) => cmd_new(&ws, &title, slug)?,
         Some(Cmd::Test { id, file, jobs }) => cmd_test(&ws, &cfg, id, file, jobs).await?,
         Some(Cmd::Add { url }) => cmd_add(&ws, &url).await?,
+        Some(Cmd::Run { file }) => cmd_run(&cfg, &file).await?,
         Some(Cmd::Stress { id, generator, oracle, file, rounds, seed, jobs, keep_going, auto, auto_lang }) => {
             cmd_stress(&ws, &cfg, id, generator, oracle, file, rounds, seed, jobs, keep_going, auto, auto_lang).await?
         }
@@ -147,6 +153,57 @@ async fn main() -> Result<()> {
         Some(Cmd::Hint { id, file, explain }) => cmd_hint(&ws, &cfg, id, file, explain).await?,
         Some(Cmd::Setup) => cmd_setup(),
     }
+    Ok(())
+}
+
+/// 快速运行：编译 file → stdin 透传 → stdout/stderr 直接输出
+async fn cmd_run(cfg: &store::Config, file: &PathBuf) -> Result<()> {
+    let lang = Lang::from_path(file).context("不支持的文件类型（.cpp/.py）")?;
+    let tc_cfg = pick_tc(lang, cfg);
+    let tc = judge::Toolchain::detect(lang, tc_cfg)?;
+    println!("[*] 编译 {} …", file.display());
+    let prog = judge::compile_source(&SourceFile { path: file.clone(), lang }, &tc).await?;
+
+    let tmp = tempfile::tempdir()?;
+    // 管道输入 → 读到临时文件喂给程序；TTY（交互终端）→ 直接给 EOF
+    let stdin = {
+        use std::io::IsTerminal;
+        if std::io::stdin().is_terminal() {
+            None
+        } else {
+            use std::io::Read;
+            let mut buf = String::new();
+            std::io::stdin().read_to_string(&mut buf)?;
+            let p = tmp.path().join("stdin");
+            std::fs::write(&p, buf)?;
+            Some(p)
+        }
+    };
+    let io = judge::Io {
+        stdin,
+        stdout: tmp.path().join("stdout"),
+        stderr: tmp.path().join("stderr"),
+    };
+    let limits = shuati_core::Limits { cpu_ms: 5000, wall_ms: 15000, memory_mb: 512, output_mb: 16 };
+    let out = judge::run_program(&prog, &io, &limits).await;
+    judge::cleanup_program(&prog);
+    let out = out?;
+
+    // stdout 原样输出到 stdout，stderr 到 stderr
+    let stdout = std::fs::read_to_string(&out.stdout_path).unwrap_or_default();
+    let stderr = std::fs::read_to_string(&out.stderr_path).unwrap_or_default();
+    print!("{stdout}");
+    if !stderr.is_empty() {
+        eprintln!("--- stderr ---\n{stderr}");
+    }
+    let status = match out.status {
+        judge::RunStatus::Ok => format!("运行结束 · {}ms · {}KB", out.cpu_ms, out.peak_mem_kb),
+        judge::RunStatus::TimeLimit => format!("TLE · {}ms", out.cpu_ms),
+        judge::RunStatus::MemoryLimit => format!("MLE · {}KB", out.peak_mem_kb),
+        judge::RunStatus::RuntimeError => format!("RE · exit {}", out.exit_code),
+        judge::RunStatus::InternalError => format!("SE · {}", out.internal),
+    };
+    eprintln!("[{status}]");
     Ok(())
 }
 

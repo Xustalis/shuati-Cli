@@ -14,14 +14,19 @@ cargo build --release -p shuati-gui
 ./target/release/shuati-gui
 ```
 
+**最快路径（不用建题）**：【快速运行】页 —— 拖入 `main.cpp` → 左边贴输入 → 「▶ 运行」→ 右边看输出，和 Dev-C++ 按 F9 一样。
+
+**完整判题**：
+
 1. 【题库】粘贴 `https://www.luogu.com.cn/problem/P1001` → 获取
 2. 【评测】把 `main.cpp` 拖进窗口 → 自动判题
-3. 勾「保存即评测」→ Dev-C++ 里 Ctrl+S 即触发
+3. 勾「保存后自动重测」→ Dev-C++ 里 Ctrl+S 即触发
 
 ## CLI
 
 ```bash
 shuati doctor                          # 环境自检（含 Dev-C++ g++ 探测）
+shuati run main.cpp                    # 快速运行（echo "1 2" | shuati run main.cpp）
 shuati add <url>                       # 拉题
 shuati test <id> [--file main.cpp]     # 评测
 shuati stress <id> -n 200              # 对拍：gen(gen.*) × brute(solutions/brute.*)

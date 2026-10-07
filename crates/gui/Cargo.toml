@@ -22,3 +22,5 @@ tracing-subscriber.workspace = true
 notify.workspace = true
 egui = "0.32"
 ab_glyph = "0.2"
+tempfile.workspace = true
+rfd = "0.15"
