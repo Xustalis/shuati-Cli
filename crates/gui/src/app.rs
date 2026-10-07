@@ -48,6 +48,10 @@ pub struct StressState {
     pub keep_going: bool,
     /// 展开哪个 hack
     pub open_hack: Option<usize>,
+    /// 批量造例组数输入
+    pub gen_count_input: String,
+    /// 造例进行中
+    pub genning: bool,
     pub msg: String,
 }
 
@@ -74,6 +78,21 @@ pub struct CaseEditor {
     pub editing: Option<String>,
     /// 查看哪个用例详情
     pub view_case: Option<usize>,
+    pub msg: String,
+}
+
+/// 题目设置编辑器（时限/内存/题面）
+#[derive(Default)]
+pub struct ProblemEditor {
+    pub show: bool,
+    pub cpu_ms: String,
+    pub mem_mb: String,
+    pub title: String,
+    /// checker 选择（"tokens"|"exact"|"float"）
+    pub checker: String,
+    pub eps: String,
+    pub statement: String,
+    pub edit_statement: bool,
     pub msg: String,
 }
 
@@ -108,6 +127,8 @@ pub struct ShuatiApp {
 
     // ── AI
     pub ai: AiState,
+    /// 题目设置编辑器
+    pub prob_edit: ProblemEditor,
 
     // ── 设置屏（编辑中的副本）
     pub cfg_cpp: String,
@@ -116,6 +137,9 @@ pub struct ShuatiApp {
     pub cfg_api_base: String,
     pub cfg_model: String,
     pub cfg_editor: String,
+    /// AI 连接测试状态
+    pub cfg_msg: String,
+    pub ai_pinging: bool,
     pub env: Option<shuati_judge::EnvReport>,
 }
 
@@ -139,9 +163,12 @@ impl ShuatiApp {
             cfg_cpp: cfg.compiler_cpp.clone(),
             cfg_py: cfg.compiler_python.clone(),
             cfg_api_key: cfg.ai.api_key.clone(),
-            cfg_api_base: cfg.ai.api_base.clone(),
-            cfg_model: cfg.ai.model.clone(),
+            // 旧配置可能存过空串——空则回落到 DeepSeek 默认
+            cfg_api_base: if cfg.ai.api_base.is_empty() { "https://api.deepseek.com/v1".into() } else { cfg.ai.api_base.clone() },
+            cfg_model: if cfg.ai.model.is_empty() { "deepseek-chat".into() } else { cfg.ai.model.clone() },
             cfg_editor: cfg.editor.clone(),
+            cfg_msg: String::new(),
+            ai_pinging: false,
             ws,
             cfg,
             state,
@@ -160,9 +187,11 @@ impl ShuatiApp {
             fetching: false,
             stress: StressState {
                 rounds_input: "100".into(),
+                gen_count_input: "20".into(),
                 ..Default::default()
             },
             ai: AiState::default(),
+            prob_edit: ProblemEditor::default(),
             env: None,
         };
         // 恢复 watch 状态
@@ -187,7 +216,9 @@ impl ShuatiApp {
         self.state.current_problem = Some(id.clone());
         self.save_state();
         self.reload_cases();
-        // 换题时对拍路径自动重探测
+        // 换题时清空旧路径并重新探测（路径属于题目目录）
+        self.stress.gen_path.clear();
+        self.stress.oracle_path.clear();
         self.autodetect_stress_paths();
     }
 
@@ -405,6 +436,150 @@ impl ShuatiApp {
         });
     }
 
+    /// 打开题目设置编辑器（预填当前值）
+    pub fn open_problem_editor(&mut self) {
+        let Some(pd) = self.current_problem() else { return };
+        let (title, cpu, mem, stmt, checker) = (
+            pd.meta.title.clone(),
+            pd.meta.limits.cpu_ms,
+            pd.meta.limits.memory_mb,
+            pd.read_statement().unwrap_or_default(),
+            pd.meta.checker.clone(),
+        );
+        self.prob_edit.title = title;
+        self.prob_edit.cpu_ms = cpu.to_string();
+        self.prob_edit.mem_mb = mem.to_string();
+        self.prob_edit.statement = stmt;
+        let (ck, eps) = match &checker {
+            shuati_core::CheckerSpec::Tokens => ("tokens", String::new()),
+            shuati_core::CheckerSpec::Exact => ("exact", String::new()),
+            shuati_core::CheckerSpec::Float { eps } => ("float", eps.to_string()),
+            shuati_core::CheckerSpec::Spj { .. } => ("spj", String::new()),
+        };
+        self.prob_edit.checker = ck.to_string();
+        self.prob_edit.eps = eps;
+        self.prob_edit.edit_statement = false;
+        self.prob_edit.msg.clear();
+        self.prob_edit.show = true;
+    }
+
+    /// 保存题目设置
+    pub fn save_problem_editor(&mut self) {
+        let Some(pd) = self.current_problem() else { return };
+        let mut meta = pd.meta.clone();
+        meta.title = self.prob_edit.title.trim().to_string();
+        if let Ok(v) = self.prob_edit.cpu_ms.trim().parse::<u64>() {
+            meta.limits.cpu_ms = v;
+            meta.limits.wall_ms = (v * 3).max(2000);
+        }
+        if let Ok(v) = self.prob_edit.mem_mb.trim().parse::<u64>() {
+            meta.limits.memory_mb = v;
+        }
+        meta.checker = match self.prob_edit.checker.as_str() {
+            "exact" => shuati_core::CheckerSpec::Exact,
+            "float" => shuati_core::CheckerSpec::Float {
+                eps: self.prob_edit.eps.trim().parse().unwrap_or(1e-6),
+            },
+            _ => shuati_core::CheckerSpec::Tokens,
+        };
+        let dir = pd.dir.clone();
+        let pd2 = match store::ProblemDir::open(&dir) {
+            Ok(p) => p,
+            Err(e) => {
+                self.prob_edit.msg = format!("打开失败: {e}");
+                return;
+            }
+        };
+        let mut pd2 = pd2;
+        pd2.meta = meta;
+        if let Err(e) = pd2.save_meta() {
+            self.prob_edit.msg = format!("保存失败: {e}");
+            return;
+        }
+        if self.prob_edit.edit_statement {
+            if let Err(e) = pd2.write_statement(&self.prob_edit.statement) {
+                self.prob_edit.msg = format!("题面保存失败: {e}");
+                return;
+            }
+        }
+        self.reload_problems();
+        self.prob_edit.show = false;
+    }
+
+    /// 删除题目（整个目录）
+    pub fn delete_problem(&mut self, id: &str) {
+        // id 形如 "luogu:P1001"，目录名 "luogu__P1001"
+        let dir = self.ws.problems_dir().join(id.replace(':', "__"));
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => {
+                if self.state.current_problem.as_deref() == Some(id) {
+                    self.state.current_problem = None;
+                }
+                self.state.last_verdicts.remove(id);
+                self.save_state();
+                self.reload_problems();
+                self.reload_cases();
+                self.lib_msg = format!("已删除 {id}");
+            }
+            Err(e) => self.lib_msg = format!("删除失败: {e}"),
+        }
+    }
+
+    /// 触发批量造例
+    pub fn trigger_gen_cases(&mut self) {
+        let Some(pd) = self.current_problem() else {
+            self.stress.msg = "先选题目".into();
+            return;
+        };
+        let problem_dir = pd.dir.clone();
+        let limits = pd.meta.limits;
+        if self.stress.gen_path.is_empty() || self.stress.oracle_path.is_empty() {
+            self.autodetect_stress_paths();
+        }
+        let (gp, op) = (self.stress.gen_path.trim(), self.stress.oracle_path.trim());
+        if gp.is_empty() || op.is_empty() {
+            self.stress.msg = "需要生成器和标程路径".into();
+            return;
+        }
+        let mk = |p: &str| -> Option<shuati_core::SourceFile> {
+            let path = PathBuf::from(p);
+            let lang = shuati_core::Lang::from_path(&path)?;
+            Some(shuati_core::SourceFile { path, lang })
+        };
+        let (Some(g), Some(o)) = (mk(gp), mk(op)) else {
+            self.stress.msg = "文件类型不支持（.cpp/.py）".into();
+            return;
+        };
+        let count = self.stress.gen_count_input.trim().parse::<u32>().unwrap_or(20).max(1);
+        self.stress.genning = true;
+        self.stress.msg = format!("生成 {count} 组用例中…");
+        self.bridge.request(Task::GenCases {
+            problem_dir,
+            gen_src: g,
+            oracle_src: o,
+            count,
+            seed_start: (shuati_store::now_ts() as u64) % 1_000_000 + 1,
+            limits,
+            cpp_cfg: self.cfg.compiler_cpp.clone(),
+            py_cfg: self.cfg.compiler_python.clone(),
+        });
+    }
+
+    /// 测试 AI 连接（用输入框里的值，不要求先保存）
+    pub fn trigger_ai_ping(&mut self) {
+        if self.cfg_api_key.trim().is_empty() {
+            self.cfg_msg = "先填 API Key".into();
+            return;
+        }
+        self.ai_pinging = true;
+        self.cfg_msg = "测试中…".into();
+        self.bridge.request(Task::AiPing {
+            api_base: self.cfg_api_base.trim().to_string(),
+            api_key: self.cfg_api_key.trim().to_string(),
+            model: self.cfg_model.trim().to_string(),
+        });
+    }
+
     /// 触发 AI 提示/诊断
     pub fn trigger_ai(&mut self, explain: bool) {
         let Some(pd) = self.current_problem() else {
@@ -560,9 +735,22 @@ impl ShuatiApp {
                     self.stress.gen_path = g.display().to_string();
                     self.stress.oracle_path = o.display().to_string();
                 }
+                Event::GenDone(n) => {
+                    self.stress.genning = false;
+                    self.stress.msg = format!("已生成 {n} 组用例 → 评测页可见");
+                    self.reload_cases();
+                }
+                Event::AiPong(Ok(s)) => {
+                    self.ai_pinging = false;
+                    self.cfg_msg = format!("连接正常: {s}");
+                }
+                Event::AiPong(Err(e)) => {
+                    self.ai_pinging = false;
+                    self.cfg_msg = format!("连接失败: {e}");
+                }
             }
         }
-        if self.run.running || self.stress.running || self.state.watch_enabled || self.fetching || self.ai.busy {
+        if self.run.running || self.stress.running || self.state.watch_enabled || self.fetching || self.ai.busy || self.stress.genning || self.ai_pinging {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
     }

@@ -34,6 +34,10 @@ pub enum Event {
     AiText(String),
     /// AI 脚本就绪：gen 路径、oracle 路径
     ScriptsReady(PathBuf, PathBuf),
+    /// 批量造例完成（生成组数）
+    GenDone(usize),
+    /// AI 连接测试结果
+    AiPong(Result<String, String>),
 }
 
 /// UI → 后台 命令
@@ -84,6 +88,23 @@ pub enum Task {
         statement: String,
         lang: shuati_core::Lang,
         dest_dir: PathBuf,
+        cpp_cfg: String,
+        py_cfg: String,
+    },
+    /// AI 连接测试（最小请求）
+    AiPing {
+        api_base: String,
+        api_key: String,
+        model: String,
+    },
+    /// 批量生成用例 → tests/
+    GenCases {
+        problem_dir: PathBuf,
+        gen_src: SourceFile,
+        oracle_src: SourceFile,
+        count: u32,
+        seed_start: u64,
+        limits: shuati_core::Limits,
         cpp_cfg: String,
         py_cfg: String,
     },
@@ -167,6 +188,26 @@ impl Bridge {
                                         }
                                     }
                                 }
+                            });
+                        }
+                        Task::AiPing { api_base, api_key, model } => {
+                            let ev = ev_tx.clone();
+                            tokio::spawn(async move {
+                                let out = async {
+                                    let client = shuati_ai::AiClient::new(&api_base, &api_key, &model)
+                                        .map_err(|e| e.to_string())?;
+                                    client.chat("You are a connectivity probe. Reply with exactly: ok", "ping")
+                                        .await
+                                        .map(|r| format!("{} · {}", model, r.chars().take(60).collect::<String>()))
+                                        .map_err(|e| e.to_string())
+                                }.await;
+                                let _ = ev.send(Event::AiPong(out));
+                            });
+                        }
+                        Task::GenCases { problem_dir, gen_src, oracle_src, count, seed_start, limits, cpp_cfg, py_cfg } => {
+                            let ev = ev_tx.clone();
+                            tokio::spawn(async move {
+                                run_gen_cases(problem_dir, gen_src, oracle_src, count, seed_start, limits, cpp_cfg, py_cfg, ev).await;
                             });
                         }
                         Task::AiScripts { api_base, api_key, model, statement, lang, dest_dir, cpp_cfg, py_cfg } => {
@@ -284,6 +325,75 @@ async fn run_test(
             let _ = ev.send(Event::Failed(e.to_string()));
         }
     }
+}
+
+/// 批量造例：编译 gen+oracle → gen_cases → write_case 落盘
+#[allow(clippy::too_many_arguments)]
+async fn run_gen_cases(
+    problem_dir: PathBuf,
+    gen_src: SourceFile,
+    oracle_src: SourceFile,
+    count: u32,
+    seed_start: u64,
+    limits: shuati_core::Limits,
+    cpp_cfg: String,
+    py_cfg: String,
+    ev: std::sync::mpsc::Sender<Event>,
+) {
+    let pd = match store::ProblemDir::open(&problem_dir) {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = ev.send(Event::Failed(format!("题目目录错误: {e}")));
+            return;
+        }
+    };
+    let comp = match gen_src.lang {
+        Lang::Cpp => &cpp_cfg,
+        Lang::Python => &py_cfg,
+    };
+    let ocomp = match oracle_src.lang {
+        Lang::Cpp => &cpp_cfg,
+        Lang::Python => &py_cfg,
+    };
+    let gen_tc = match judge::Toolchain::detect(gen_src.lang, comp) {
+        Ok(t) => t,
+        Err(e) => { let _ = ev.send(Event::Failed(e.to_string())); return; }
+    };
+    let oracle_tc = match judge::Toolchain::detect(oracle_src.lang, ocomp) {
+        Ok(t) => t,
+        Err(e) => { let _ = ev.send(Event::Failed(e.to_string())); return; }
+    };
+    let gen_prog = match judge::compile_source(&gen_src, &gen_tc).await {
+        Ok(p) => p,
+        Err(e) => { let _ = ev.send(Event::Failed(format!("gen 编译失败: {e}"))); return; }
+    };
+    let oracle_prog = match judge::compile_source(&oracle_src, &oracle_tc).await {
+        Ok(p) => p,
+        Err(e) => {
+            judge::cleanup_program(&gen_prog);
+            let _ = ev.send(Event::Failed(format!("oracle 编译失败: {e}")));
+            return;
+        }
+    };
+
+    let glim = shuati_core::Limits { cpu_ms: 10000, wall_ms: 15000, memory_mb: 512, output_mb: 64 };
+    let made = judge::gen_cases(&gen_prog, &oracle_prog, seed_start..seed_start + count as u64, &limits, &glim).await;
+    judge::cleanup_program(&gen_prog);
+    judge::cleanup_program(&oracle_prog);
+
+    if made.is_empty() {
+        let _ = ev.send(Event::Failed("没有产出生效例（gen/oracle 可能运行失败）".into()));
+        return;
+    }
+    let existing = pd.load_cases().map(|c| c.len()).unwrap_or(0) as u32;
+    let mut n = 0;
+    for (i, (_s, input, output)) in made.iter().enumerate() {
+        let name = format!("{:04}", existing + i as u32 + 1);
+        if pd.write_case(&name, input, output, shuati_core::CaseOrigin::Generated).is_ok() {
+            n += 1;
+        }
+    }
+    let _ = ev.send(Event::GenDone(n));
 }
 
 #[allow(clippy::too_many_arguments)]

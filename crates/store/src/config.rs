@@ -19,7 +19,7 @@ pub struct Config {
     pub editor: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiConfig {
     #[serde(default)]
     pub api_key: String,
@@ -27,6 +27,16 @@ pub struct AiConfig {
     pub api_base: String,
     #[serde(default = "default_model")]
     pub model: String,
+}
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            api_base: default_api_base(),
+            model: default_model(),
+        }
+    }
 }
 
 fn default_lang() -> String {

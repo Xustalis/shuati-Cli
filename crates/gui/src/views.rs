@@ -45,6 +45,71 @@ pub fn render(app: &mut ShuatiApp, ctx: &egui::Context) {
     diff_window(app, ctx);
     case_view_window(app, ctx);
     ai_window(app, ctx);
+    problem_edit_window(app, ctx);
+}
+
+/// 题目设置弹窗：标题/时限/内存/题面
+fn problem_edit_window(app: &mut ShuatiApp, ctx: &egui::Context) {
+    if !app.prob_edit.show {
+        return;
+    }
+    let mut open = true;
+    egui::Window::new("题目设置")
+        .open(&mut open)
+        .default_size([560.0, 420.0])
+        .show(ctx, |ui| {
+            egui::Grid::new("pe_grid").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                ui.label("标题:");
+                ui.text_edit_singleline(&mut app.prob_edit.title);
+                ui.end_row();
+                ui.label("时限 (ms):");
+                ui.add(egui::TextEdit::singleline(&mut app.prob_edit.cpu_ms).desired_width(100.0));
+                ui.end_row();
+                ui.label("内存 (MB):");
+                ui.add(egui::TextEdit::singleline(&mut app.prob_edit.mem_mb).desired_width(100.0));
+                ui.end_row();
+                ui.label("判题方式:");
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt("checker_sel")
+                        .selected_text(match app.prob_edit.checker.as_str() {
+                            "exact" => "完全一致",
+                            "float" => "浮点容差",
+                            _ => "按 token 比较（默认）",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut app.prob_edit.checker, "tokens".into(), "按 token 比较");
+                            ui.selectable_value(&mut app.prob_edit.checker, "exact".into(), "完全一致");
+                            ui.selectable_value(&mut app.prob_edit.checker, "float".into(), "浮点容差");
+                        });
+                    if app.prob_edit.checker == "float" {
+                        ui.label("eps:");
+                        ui.add(egui::TextEdit::singleline(&mut app.prob_edit.eps).desired_width(80.0).hint_text("1e-6"));
+                    }
+                });
+                ui.end_row();
+            });
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button(if app.prob_edit.edit_statement { "收起题面编辑" } else { "编辑题面" }).clicked() {
+                    app.prob_edit.edit_statement = !app.prob_edit.edit_statement;
+                }
+            });
+            if app.prob_edit.edit_statement {
+                egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+                    ui.add(egui::TextEdit::multiline(&mut app.prob_edit.statement).desired_width(f32::INFINITY).desired_rows(10));
+                });
+            }
+            if !app.prob_edit.msg.is_empty() {
+                ui.colored_label(Color32::from_rgb(230, 90, 90), &app.prob_edit.msg);
+            }
+            ui.add_space(6.0);
+            if ui.button("保存").clicked() {
+                app.save_problem_editor();
+            }
+        });
+    if !open {
+        app.prob_edit.show = false;
+    }
 }
 
 /// AI 回答浮窗
@@ -150,6 +215,9 @@ fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
                 if ui.button("题面").clicked() {
                     app.show_statement = !app.show_statement;
                 }
+                if ui.button("题设").on_hover_text("编辑标题/时限/内存/题面").clicked() {
+                    app.open_problem_editor();
+                }
                 ui.label(RichText::new(title).weak());
             }
         });
@@ -214,10 +282,10 @@ fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
             });
         });
 
-        // 错误
+        // 错误（编译错误可能很长，要换行显示）
         if let Some(err) = app.run.error.clone() {
             ui.horizontal(|ui| {
-                ui.colored_label(Color32::from_rgb(230, 90, 90), &err);
+                ui.add(egui::Label::new(RichText::new(&err).color(Color32::from_rgb(230, 90, 90)).monospace().small()).wrap());
                 if ui.small_button("×").clicked() {
                     app.run.error = None;
                 }
@@ -406,17 +474,19 @@ fn diff_window(app: &mut ShuatiApp, ctx: &egui::Context) {
     let mut open = true;
     egui::Window::new(format!("差异 · {}", case.name))
         .open(&mut open)
-        .default_size([700.0, 420.0])
+        .default_size([780.0, 440.0])
         .show(ctx, |ui| {
-            ui.columns(2, |cols| {
-                cols[0].label(RichText::new("你的输出").strong());
-                cols[1].label(RichText::new("期望输出").strong());
+            ui.columns(3, |cols| {
+                cols[0].label(RichText::new("输入").strong());
+                cols[1].label(RichText::new("你的输出").strong());
+                cols[2].label(RichText::new("期望输出").strong());
             });
             ui.separator();
             egui::ScrollArea::both().show(ui, |ui| {
-                ui.columns(2, |cols| {
-                    diff_text(&mut cols[0], &case.actual, &case.expected);
-                    diff_text(&mut cols[1], &case.expected, &case.actual);
+                ui.columns(3, |cols| {
+                    diff_text(&mut cols[0], &case.input, "");
+                    diff_text(&mut cols[1], &case.actual, &case.expected);
+                    diff_text(&mut cols[2], &case.expected, &case.actual);
                 });
             });
             if !case.message.is_empty() {
@@ -445,9 +515,11 @@ fn diff_text(ui: &mut Ui, text: &str, other: &str) {
 fn library_view(app: &mut ShuatiApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.label("拉题 URL:");
-        ui.add(egui::TextEdit::singleline(&mut app.url_input).desired_width(360.0).hint_text("https://www.luogu.com.cn/problem/P1001"));
+        let resp = ui.add(egui::TextEdit::singleline(&mut app.url_input).desired_width(360.0).hint_text("https://www.luogu.com.cn/problem/P1001"));
+        // 回车 = 获取
+        let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let btn = ui.add_enabled(!app.fetching && !app.url_input.trim().is_empty(), egui::Button::new("获取"));
-        if btn.clicked() {
+        if btn.clicked() || (enter && !app.url_input.trim().is_empty()) {
             app.trigger_fetch(app.url_input.trim().to_string());
         }
         if app.fetching {
@@ -515,16 +587,32 @@ fn library_view(app: &mut ShuatiApp, ui: &mut Ui) {
                     )
                 })
                 .collect();
+            let mut to_delete: Option<String> = None;
             for (id, title, src, verdict) in items {
                 ui.monospace(&id);
                 ui.label(&title);
                 ui.label(src);
                 ui.label(verdict);
-                if ui.button("选中").clicked() {
-                    app.select_problem(id);
-                    app.tab = Tab::Test;
-                }
+                ui.horizontal(|ui| {
+                    if ui.button("选中").clicked() {
+                        app.select_problem(id.clone());
+                        app.tab = Tab::Test;
+                    }
+                    // 删除：连点两次确认
+                    let confirming = app.state.last_verdicts.get("__confirm_del__").map(|v| v == &id).unwrap_or(false);
+                    if ui.small_button(if confirming { "确认删?" } else { "删" }).clicked() {
+                        if confirming {
+                            to_delete = Some(id.clone());
+                            app.state.last_verdicts.remove("__confirm_del__");
+                        } else {
+                            app.state.last_verdicts.insert("__confirm_del__".into(), id.clone());
+                        }
+                    }
+                });
                 ui.end_row();
+            }
+            if let Some(id) = to_delete {
+                app.delete_problem(&id);
             }
         });
     });
@@ -595,6 +683,20 @@ fn stress_view(app: &mut ShuatiApp, ui: &mut Ui) {
         let color = if errish { Color32::from_rgb(230, 90, 90) } else { Color32::from_rgb(150, 150, 150) };
         ui.colored_label(color, &app.stress.msg);
     }
+
+    // 批量造例行：gen+oracle → tests/ 用例
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("批量造例:").strong());
+        ui.add(egui::TextEdit::singleline(&mut app.stress.gen_count_input).desired_width(60.0));
+        ui.label("组");
+        let can = app.current_problem().is_some() && !app.stress.genning && !app.stress.gen_path.trim().is_empty() && !app.stress.oracle_path.trim().is_empty();
+        if ui.add_enabled(can, egui::Button::new("生成 → tests/")).on_hover_text("gen 产输入、oracle 产答案，直接落到用例库").clicked() {
+            app.trigger_gen_cases();
+        }
+        if app.stress.genning {
+            ui.spinner();
+        }
+    });
 
     // 实时状态
     if app.stress.running || app.stress.report.is_some() {
@@ -735,16 +837,37 @@ fn settings_view(app: &mut ShuatiApp, ui: &mut Ui) {
         });
         ui.end_row();
 
+        ui.label("AI 服务商:");
+        ui.horizontal(|ui| {
+            for (name, base, model) in [
+                ("DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat"),
+                ("Kimi", "https://api.moonshot.cn/v1", "moonshot-v1-8k"),
+                ("通义", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus"),
+                ("OpenAI", "https://api.openai.com/v1", "gpt-4o-mini"),
+            ] {
+                if ui.small_button(name).clicked() {
+                    app.cfg_api_base = base.to_string();
+                    app.cfg_model = model.to_string();
+                }
+            }
+            ui.label(RichText::new("点一下自动填地址和模型").weak().small());
+        });
+        ui.end_row();
+
         ui.label("AI API Key:");
         ui.add(egui::TextEdit::singleline(&mut app.cfg_api_key).password(true).hint_text("sk-..."));
         ui.end_row();
 
         ui.label("AI 接口地址:");
-        ui.add(egui::TextEdit::singleline(&mut app.cfg_api_base).desired_width(320.0).hint_text("https://api.deepseek.com/v1"));
+        ui.add(egui::TextEdit::singleline(&mut app.cfg_api_base).desired_width(340.0).hint_text("https://api.deepseek.com/v1"));
         ui.end_row();
 
         ui.label("AI 模型:");
         ui.add(egui::TextEdit::singleline(&mut app.cfg_model).desired_width(200.0).hint_text("deepseek-chat"));
+        ui.end_row();
+
+        ui.label("");
+        ui.label(RichText::new("留空 api_key 时 AI 功能不可用；其余功能不受影响").weak().small());
         ui.end_row();
 
         ui.label("题库目录:");
@@ -753,18 +876,33 @@ fn settings_view(app: &mut ShuatiApp, ui: &mut Ui) {
     });
 
     ui.add_space(8.0);
-    if ui.button("保存").clicked() {
-        app.cfg.compiler_cpp = app.cfg_cpp.trim().to_string();
-        app.cfg.compiler_python = app.cfg_py.trim().to_string();
-        app.cfg.ai.api_key = app.cfg_api_key.trim().to_string();
-        app.cfg.ai.api_base = app.cfg_api_base.trim().to_string();
-        app.cfg.ai.model = app.cfg_model.trim().to_string();
-        app.cfg.editor = app.cfg_editor.trim().to_string();
-        match app.cfg.save(&app.ws.config_path()) {
-            Ok(()) => app.refresh_env(),
-            Err(e) => app.run.error = Some(format!("配置保存失败: {e}")),
+    ui.horizontal(|ui| {
+        if ui.button("保存").clicked() {
+            app.cfg.compiler_cpp = app.cfg_cpp.trim().to_string();
+            app.cfg.compiler_python = app.cfg_py.trim().to_string();
+            app.cfg.ai.api_key = app.cfg_api_key.trim().to_string();
+            app.cfg.ai.api_base = app.cfg_api_base.trim().to_string();
+            app.cfg.ai.model = app.cfg_model.trim().to_string();
+            app.cfg.editor = app.cfg_editor.trim().to_string();
+            match app.cfg.save(&app.ws.config_path()) {
+                Ok(()) => {
+                    app.cfg_msg = "已保存".into();
+                    app.refresh_env();
+                }
+                Err(e) => app.run.error = Some(format!("配置保存失败: {e}")),
+            }
         }
-    }
+        if ui.add_enabled(!app.ai_pinging, egui::Button::new("测试连接")).on_hover_text("用当前输入的地址/密钥/模型发一个最小请求").clicked() {
+            app.trigger_ai_ping();
+        }
+        if app.ai_pinging {
+            ui.spinner();
+        }
+        if !app.cfg_msg.is_empty() {
+            let ok = app.cfg_msg.starts_with("连接正常") || app.cfg_msg == "已保存";
+            ui.colored_label(if ok { Color32::from_rgb(80, 200, 120) } else { Color32::from_rgb(230, 90, 90) }, &app.cfg_msg);
+        }
+    });
     ui.add_space(4.0);
     ui.label(RichText::new("提示：Dev-C++ 自带的 g++ 通常在 C:\\Program Files (x86)\\Dev-Cpp\\MinGW64\\bin\\g++.exe，不在 PATH 时把完整路径填到上面").weak().small());
 }

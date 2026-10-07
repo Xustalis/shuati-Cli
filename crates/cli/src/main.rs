@@ -207,7 +207,7 @@ async fn cmd_gen(
 
     let mk_src = |p: &PathBuf| -> Result<SourceFile> {
         let lang = Lang::from_path(p).context("不支持的类型")?;
-        Ok(SourceFile { path: p.clone(), lang })
+        Ok(SourceFile { path: resolve_rel(&pd.dir, p), lang })
     };
     let gen_src = mk_src(&gen_path)?;
     let oracle_src = mk_src(&oracle_path)?;
@@ -233,6 +233,19 @@ async fn cmd_gen(
     eprintln!();
     println!("[+] 生成 {} 组 → {}/tests/", made.len(), pd.dir.display());
     Ok(())
+}
+
+/// 相对路径优先按题目目录解析；不存在则按 CWD 原样使用
+fn resolve_rel(problem_dir: &std::path::Path, p: &PathBuf) -> PathBuf {
+    if p.is_absolute() {
+        return p.clone();
+    }
+    let cand = problem_dir.join(p);
+    if cand.exists() {
+        cand
+    } else {
+        p.clone()
+    }
 }
 
 fn pick_tc(lang: Lang, cfg: &store::Config) -> &str {
@@ -390,7 +403,7 @@ async fn cmd_stress(
 
     let mk_src = |p: &PathBuf| -> Result<SourceFile> {
         let lang = Lang::from_path(p).context(format!("不支持类型: {}", p.display()))?;
-        Ok(SourceFile { path: p.clone(), lang })
+        Ok(SourceFile { path: resolve_rel(&pd.dir, p), lang })
     };
     let gen_src = mk_src(&gen_path)?;
     let user_src = mk_src(&user_path)?;
