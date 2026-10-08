@@ -1,5 +1,5 @@
-//! shuati CLI：引擎的薄壳。
-//! 无参数 → 提示（GUI 由 shuati-gui 提供）；有参数 → 子命令。
+//! shuati-cli：引擎的薄壳。
+//! 无参数 → 拉起同目录的 shuati（GUI 主入口）；有参数 → 子命令。
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -9,7 +9,7 @@ use shuati_store as store;
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
-#[command(name = "shuati", about = "本地评测小助手 · shuati v2", version)]
+#[command(name = "shuati-cli", about = "本地评测小助手 · shuati v2", version)]
 struct Cli {
     /// 题库根目录（默认：exe 同级 shuati-data/）
     #[arg(long, global = true)]
@@ -148,11 +148,7 @@ async fn main() -> Result<()> {
     let cfg = store::Config::load(&ws.config_path());
 
     match cli.cmd {
-        None => {
-            eprintln!("shuati v2 — 本地评测小助手");
-            eprintln!("用法: shuati <命令>（--help 查看全部）");
-            eprintln!("GUI: 运行 shuati-gui");
-        }
+        None => launch_gui_or_help(&root),
         Some(Cmd::Doctor) => cmd_doctor(&ws, &cfg),
         Some(Cmd::List) => cmd_list(&ws)?,
         Some(Cmd::New { title, slug }) => cmd_new(&ws, &title, slug)?,
@@ -171,6 +167,28 @@ async fn main() -> Result<()> {
         Some(Cmd::Setup) => cmd_setup(),
     }
     Ok(())
+}
+
+/// 无参启动：拉起 exe 同目录的 shuati（GUI 主入口）；找不到或拉起失败才打帮助。
+/// spawn 后立刻返回（GUI 是独立进程），stdio 置空让终端立刻可用；--root 透传。
+fn launch_gui_or_help(root: &std::path::Path) {
+    let gui = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|d| d.join(format!("shuati{}", std::env::consts::EXE_SUFFIX))))
+        .filter(|p| p.is_file());
+    let launched = gui.is_some_and(|g| {
+        let mut c = std::process::Command::new(&g);
+        c.args(["--root".as_ref(), root.as_os_str()])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        c.spawn().is_ok()
+    });
+    if !launched {
+        eprintln!("shuati v2 — 本地评测小助手");
+        eprintln!("用法: shuati-cli <命令>（--help 查看全部）");
+        eprintln!("GUI: 运行 shuati");
+    }
 }
 
 /// stderr + 滚动文件双写日志（<root>/logs/shuati.log）
@@ -600,7 +618,7 @@ fn setup_windows() -> Result<Vec<String>> {
     let exe = std::env::current_exe()?.to_string_lossy().into_owned();
     let gui_exe = std::env::current_exe()?
         .parent()
-        .map(|p| p.join("shuati-gui.exe"))
+        .map(|p| p.join("shuati.exe"))
         .filter(|p| p.exists())
         .map(|p| p.to_string_lossy().into_owned());
 

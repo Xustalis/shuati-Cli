@@ -5,10 +5,10 @@ Dev-C++ 萌新的本地评测助手。Rust workspace，GUI 为主 CLI 为辅。
 ## 构建/测试
 
 ```bash
-cargo build --workspace       # 全量构建（两个 bin：shuati, shuati-gui）
+cargo build --workspace       # 全量构建（两个 bin：shuati=GUI 主入口, shuati-cli）
 cargo test --workspace        # 全部测试
-cargo run -p shuati-cli       # CLI
-cargo run -p shuati-gui       # GUI
+cargo run -p shuati-cli       # CLI（无参会拉起同目录 GUI）
+cargo run -p shuati-gui       # GUI（带子命令参数会转发给同目录 shuati-cli）
 ```
 
 ## 架构
@@ -42,7 +42,7 @@ crates/
 ## 冒烟清单
 
 ```bash
-B=target/debug/shuati; W=/tmp/s2ws
+B=target/debug/shuati-cli; W=/tmp/s2ws
 $B --root $W add https://www.luogu.com.cn/problem/P1001
 $B --root $W test luogu:P1001 --file <解>
 $B --root $W stress luogu:P1001 -n 50        # gen/gen.* + solutions/brute.*

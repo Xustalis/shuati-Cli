@@ -10,8 +10,8 @@
 ## 30 秒上手（GUI）
 
 ```bash
-cargo build --release -p shuati-gui
-./target/release/shuati-gui
+cargo build --release
+./target/release/shuati        # GUI 主入口（双 exe 同目录：shuati + shuati-cli）
 ```
 
 **最快路径（不用建题）**：【快速运行】页 —— 拖入 `main.cpp` → 左边贴输入 → 「▶ 运行」→ 右边看输出，和 Dev-C++ 按 F9 一样。
@@ -39,8 +39,9 @@ shuati new <标题> / shuati list        # 本地题（list 显示用例数和�
 shuati case <id> --in a.in --out a.out # 手动加用例（CF 抓不到样例时用）
 shuati open <id>                       # 文件管理器打开题目目录
 shuati setup                           # Dev-C++ 集成（Windows 自动写 tools.ini，其余打手动步骤）
-shuati                                 # 无参 → 拉起同目录 shuati-gui
 ```
+
+> 两个 exe 互认：`shuati` 是 GUI 主入口；给 `shuati` 带子命令参数会自动转发给同目录 `shuati-cli`（退出码透传）；`shuati-cli` 无参则拉起 GUI。所以文档里 `shuati <命令>` 都能跑。
 
 源文件首行写 `// shuati: luogu P1001` 可绑定题目——`test`/`stress` 拖错文件也不判错题。
 

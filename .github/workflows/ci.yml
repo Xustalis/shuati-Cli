@@ -55,7 +55,7 @@ jobs:
       - name: doctor + 判题冒烟
         shell: pwsh
         run: |
-          $B = "target\debug\shuati.exe"
+          $B = "target\debug\shuati-cli.exe"
           & $B --root "$env:TEMP\s2ws" doctor
           New-Item -ItemType Directory -Force "$env:TEMP\s2ws\problems\local__ab\tests" | Out-Null
           Set-Content "$env:TEMP\s2ws\problems\local__ab\tests\0001.in" "1 2"

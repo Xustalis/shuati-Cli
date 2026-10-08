@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "shuati-gui"
+name = "shuati"
 path = "src/main.rs"
 
 [dependencies]
