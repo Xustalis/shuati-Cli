@@ -659,7 +659,51 @@ fn setup_windows() -> Result<Vec<String>> {
     if !wrote {
         msgs.push("没找到 Dev-C++ 配置目录（%APPDATA%\\Dev-Cpp 等），请按下方手动步骤".into());
     }
+
+    // §7.3：.cpp 右键菜单「用 shuati 评测」（HKCU 免管理员，可逆）
+    println!();
+    println!("资源管理器右键菜单：.cpp 上右键可直接「用 shuati 评测」");
+    if ask_yes_no("要现在添加吗？[Y/n] ") {
+        match add_context_menu(&exe, gui_exe.as_deref()) {
+            Ok(()) => msgs.push("右键菜单已添加（HKCU\\…\\SystemFileAssociations\\.cpp\\shell\\shuati）".into()),
+            Err(e) => msgs.push(format!("右键菜单写入失败: {e}")),
+        }
+    }
     Ok(msgs)
+}
+
+#[cfg(target_os = "windows")]
+fn ask_yes_no(prompt: &str) -> bool {
+    use std::io::Write;
+    print!("{prompt}");
+    let _ = std::io::stdout().flush();
+    let mut line = String::new();
+    if std::io::stdin().read_line(&mut line).is_err() {
+        return false;
+    }
+    !matches!(line.trim().to_lowercase().as_str(), "n" | "no")
+}
+
+/// .cpp 右键 → `shuati-cli test --file "%1"`；cmd /c + pause 防结果窗一闪就关。
+/// SystemFileAssociations 是官方兜底路径，跟 .cpp 是否已有 ProgID 关联无关。
+#[cfg(target_os = "windows")]
+fn add_context_menu(cli_exe: &str, gui_exe: Option<&str>) -> Result<()> {
+    let icon = gui_exe.unwrap_or(cli_exe);
+    let base = r"HKCU\Software\Classes\SystemFileAssociations\.cpp\shell\shuati";
+    let run = format!("cmd.exe /c \"\"{cli_exe}\" test --file \"%1\" & pause\"");
+    let steps: [(String, Vec<String>, String); 3] = [
+        (base.into(), vec!["/ve".into()], "用 shuati 评测".into()),
+        (base.into(), vec!["/v".into(), "Icon".into()], icon.into()),
+        (format!("{base}\\command"), vec!["/ve".into()], run),
+    ];
+    for (key, flags, data) in &steps {
+        let out =
+            std::process::Command::new("reg").arg("add").arg(key).args(flags).arg("/d").arg(data).arg("/f").output()?;
+        if !out.status.success() {
+            anyhow::bail!("reg add {key}: {}", String::from_utf8_lossy(&out.stderr));
+        }
+    }
+    Ok(())
 }
 
 /// Dev-C++ 各版本的配置目录候选（只返回真实存在的）

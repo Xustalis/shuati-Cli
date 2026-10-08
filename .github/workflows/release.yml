@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows-x86_64, os: windows-latest, ext: ".exe" }
+          - { name: linux-x86_64, os: ubuntu-latest, ext: "" }
+          - { name: macos-aarch64, os: macos-latest, ext: "" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo build --release -p shuati-cli -p shuati-gui
+
+      - name: package
+        shell: pwsh
+        run: |
+          $name = "shuati-${{ matrix.name }}"
+          New-Item -ItemType Directory -Force dist/$name | Out-Null
+          Copy-Item "target/release/shuati${{ matrix.ext }}" dist/$name/
+          Copy-Item "target/release/shuati-cli${{ matrix.ext }}" dist/$name/
+          Copy-Item README.md dist/$name/
+          if ("${{ matrix.os }}" -eq "windows-latest") {
+            Compress-Archive "dist/$name" "dist/$name.zip"
+          } else {
+            tar -C dist -czf "dist/$name.tar.gz" $name
+          }
+
+      - name: upload
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/shuati-${{ matrix.name }}.zip
+            dist/shuati-${{ matrix.name }}.tar.gz
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
