@@ -846,7 +846,7 @@ impl ShuatiApp {
                     self.fetching = false;
                     self.reload_problems();
                     self.select_problem(id.clone());
-                    let n = self.current_problem().and_then(|p| p.load_cases().ok()).map(|c| c.len()).unwrap_or(0);
+                    let n = self.current_problem().map(|p| p.count_cases()).unwrap_or(0);
                     self.lib_msg = if n > 0 {
                         format!("已拉取 {id} · {n} 组样例")
                     } else {

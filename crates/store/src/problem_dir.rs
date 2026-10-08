@@ -171,6 +171,17 @@ impl ProblemDir {
         Ok(cases)
     }
 
+    /// 轻量用例数：只列 tests/ 目录数 *.in，不读文件内容（list/拉题提示用）
+    pub fn count_cases(&self) -> usize {
+        std::fs::read_dir(self.tests_dir())
+            .ok()
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|x| x == "in"))
+            .count()
+    }
+
     /// 写入用例文件。output=None 时不写 .out（无答案的 smoke 用例）
     pub fn write_case(&self, name: &str, input: &str, output: Option<&str>, origin: CaseOrigin) -> Result<()> {
         let tests = self.tests_dir();

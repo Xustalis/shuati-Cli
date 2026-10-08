@@ -101,7 +101,7 @@ impl TestEngine {
             let _ = h.await;
         }
 
-        let mut indexed = results.lock().await.clone();
+        let mut indexed = std::mem::take(&mut *results.lock().await);
         indexed.sort_by_key(|(i, _)| *i);
         let cases_res: Vec<CaseResult> = indexed.into_iter().map(|(_, r)| r).collect();
 
@@ -145,7 +145,6 @@ async fn run_one(
     };
 
     let actual = std::fs::read_to_string(&out_f).unwrap_or_default();
-    let stderr_text = std::fs::read_to_string(&err_f).unwrap_or_default();
 
     let (verdict, message) = match outcome.status {
         RunStatus::Ok => match &tc.expected {
@@ -163,15 +162,18 @@ async fn run_one(
         RunStatus::MemoryLimit => (Verdict::Mle, String::new()),
         RunStatus::OutputLimit => (Verdict::Ole, "输出超过 output_mb 限制".into()),
         RunStatus::Cancelled => (Verdict::Se, "已取消".into()),
-        RunStatus::RuntimeError => (
-            Verdict::Re,
-            if stderr_text.is_empty() {
-                format!("exit code {}", outcome.exit_code)
-            } else {
-                // stderr 可能巨大（本地化报错/死循环打印），留头部 2k 够用
-                stderr_text.chars().take(2000).collect()
-            },
-        ),
+        RunStatus::RuntimeError => {
+            // stderr 只在 RE 时才读，且截头 64KB——AC 路径不该为不用的数据付 I/O
+            let stderr_text = crate::read_head(&err_f, crate::STDERR_HEAD_CAP);
+            (
+                Verdict::Re,
+                if stderr_text.is_empty() {
+                    format!("exit code {}", outcome.exit_code)
+                } else {
+                    stderr_text.chars().take(2000).collect()
+                },
+            )
+        }
         RunStatus::InternalError => (Verdict::Se, outcome.internal.clone()),
     };
 

@@ -454,25 +454,29 @@ fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
             ui.add(egui::ProgressBar::new(done as f32 / total as f32).text(format!("{done}/{total}")));
         }
 
-        // 用例结果
-        let rows: Vec<(String, shuati_core::Verdict)> = if !app.run.live_cases.is_empty() {
-            app.run.live_cases.clone()
+        // 用例结果：借用引用不 clone——diff_case 是别的字段，写完再赋
+        let rows: Vec<(&str, shuati_core::Verdict)> = if !app.run.live_cases.is_empty() {
+            app.run.live_cases.iter().map(|(n, v)| (n.as_str(), *v)).collect()
         } else if let Some(rep) = &app.run.report {
-            rep.cases.iter().map(|c| (c.name.clone(), c.verdict)).collect()
+            rep.cases.iter().map(|c| (c.name.as_str(), c.verdict)).collect()
         } else {
             Vec::new()
         };
         let summary = app.run.report.as_ref().map(|r| (r.verdict, r.pass, r.total));
 
+        let mut open_diff = None;
         for (name, v) in &rows {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(format!("{name:12}")).monospace());
                 ui.label(RichText::new(v.to_string()).color(verdict_color(*v)).strong().monospace());
                 // 按用例名存——live_cases 是完成顺序，跟报告里的顺序不一样
                 if app.run.report.is_some() && ui.small_button("diff").clicked() {
-                    app.run.diff_case = Some(name.clone());
+                    open_diff = Some(name.to_string());
                 }
             });
+        }
+        if open_diff.is_some() {
+            app.run.diff_case = open_diff;
         }
         if let Some((v, pass, total)) = summary {
             ui.label(RichText::new(format!("结果 {v} · {pass}/{total}")).color(verdict_color(v)).size(16.0));
@@ -648,10 +652,19 @@ fn diff_window(app: &mut ShuatiApp, ctx: &egui::Context) {
         });
         ui.separator();
         egui::ScrollArea::both().show(ui, |ui| {
+            // 虚拟滚动：三列共用同一可视行范围（报告单字段上限 64KB，最坏几千行，
+            // 全量建 label 每帧上万 widget 会卡）。行距 = 等宽字高 + item_spacing
+            let row_h = ui.text_style_height(&egui::TextStyle::Monospace) + ui.spacing().item_spacing.y;
+            let total = case.input.lines().count().max(case.actual.lines().count()).max(case.expected.lines().count());
+            let vis = ui.clip_rect();
+            let top = ui.cursor().top();
+            let first = ((vis.top() - top) / row_h).floor().clamp(0.0, total as f32) as usize;
+            let last = (((vis.bottom() - top) / row_h).ceil() as usize + 1).min(total).max(first);
+            let range = first..last;
             ui.columns(3, |cols| {
-                diff_text(&mut cols[0], &case.input, "");
-                diff_text(&mut cols[1], &case.actual, &case.expected);
-                diff_text(&mut cols[2], &case.expected, &case.actual);
+                diff_text(&mut cols[0], &case.input, "", total, &range);
+                diff_text(&mut cols[1], &case.actual, &case.expected, total, &range);
+                diff_text(&mut cols[2], &case.expected, &case.actual, total, &range);
             });
         });
         if !case.message.is_empty() {
@@ -664,18 +677,27 @@ fn diff_window(app: &mut ShuatiApp, ctx: &egui::Context) {
     }
 }
 
-/// 逐行高亮差异
-fn diff_text(ui: &mut Ui, text: &str, other: &str) {
+/// 逐行高亮差异：只渲染 range 内的可视行，前后用空白占位撑出滚动高度。
+/// 三列渲染同一 range 且每列都撑满 total 行，天然对齐。
+fn diff_text(ui: &mut Ui, text: &str, other: &str, total: usize, range: &std::ops::Range<usize>) {
+    let row_h = ui.text_style_height(&egui::TextStyle::Monospace) + ui.spacing().item_spacing.y;
     let lines: Vec<&str> = text.lines().collect();
     let other_lines: Vec<&str> = other.lines().collect();
-    for (i, line) in lines.iter().enumerate() {
+    ui.allocate_space(egui::vec2(1.0, range.start as f32 * row_h));
+    for i in range.clone() {
+        // 行数不够的列补空行；空行用空格占位保住行高
+        let line = lines.get(i).copied().filter(|l| !l.is_empty()).unwrap_or(" ");
         let same = other_lines.get(i).map(|o| o.trim() == line.trim()).unwrap_or(false);
         let rt = if same {
-            RichText::new(*line).monospace()
+            RichText::new(line).monospace()
         } else {
-            RichText::new(*line).monospace().color(Color32::from_rgb(230, 90, 90))
+            RichText::new(line).monospace().color(Color32::from_rgb(230, 90, 90))
         };
         ui.label(rt);
+    }
+    let rest = total.saturating_sub(range.end);
+    if rest > 0 {
+        ui.allocate_space(egui::vec2(1.0, rest as f32 * row_h));
     }
 }
 

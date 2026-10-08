@@ -25,6 +25,18 @@ pub struct RunOutcome {
     pub internal: String,
 }
 
+/// stderr 探针只需头部：本地化报错/bad_alloc 都在开头，整读可能被刷屏撑爆内存
+pub(crate) const STDERR_HEAD_CAP: u64 = 64 * 1024;
+
+pub(crate) fn read_head(path: &std::path::Path, cap: u64) -> String {
+    use std::io::Read;
+    let mut buf = Vec::new();
+    if let Ok(f) = std::fs::File::open(path) {
+        let _ = f.take(cap).read_to_end(&mut buf);
+    }
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunStatus {
     Ok,
@@ -138,10 +150,12 @@ fn run_blocking(prog: &Program, io: &Io, limits: &Limits, cancel: Option<Arc<Ato
     let peak_mem_kb = usage.ru_maxrss as u64;
 
     let exit_code = if libc::WIFEXITED(status) { libc::WEXITSTATUS(status) } else { -1 };
-    let stderr_text = std::fs::read_to_string(&io.stderr).unwrap_or_default();
-    // 输出超限判定（各平台通用兜底，rlimit 未覆盖的平台也生效）
-    let stdout_bytes = std::fs::metadata(&io.stdout).map(|m| m.len()).unwrap_or(0);
-    let over_output = stdout_bytes > fsize_bytes;
+    let stderr_text = read_head(&io.stderr, STDERR_HEAD_CAP);
+    // 输出超限判定（各平台通用兜底，rlimit 未覆盖的平台也生效）。
+    // stdout+stderr 合并计：RLIMIT_FSIZE 是单文件限，往 stderr 刷能绕过只看 stdout 的判定
+    let out_bytes = std::fs::metadata(&io.stdout).map(|m| m.len()).unwrap_or(0);
+    let err_bytes = std::fs::metadata(&io.stderr).map(|m| m.len()).unwrap_or(0);
+    let over_output = out_bytes.saturating_add(err_bytes) > fsize_bytes;
 
     let status_out = if cancelled {
         RunStatus::Cancelled
@@ -379,9 +393,16 @@ fn run_blocking(prog: &Program, io: &Io, limits: &Limits, cancel: Option<Arc<Ato
     if matches!(status, RunStatus::Ok | RunStatus::RuntimeError) {
         if cpu_ms > limits.cpu_ms {
             status = RunStatus::TimeLimit;
-        } else if peak_kb > limits.memory_mb.saturating_mul(1024) {
+        } else if peak_kb > limits.memory_mb.saturating_mul(1024)
+            || read_head(&io.stderr, STDERR_HEAD_CAP).contains("bad_alloc")
+        {
             status = RunStatus::MemoryLimit;
-        } else if std::fs::metadata(&io.stdout).map(|m| m.len()).unwrap_or(0) > fsize_bytes {
+        } else if std::fs::metadata(&io.stdout)
+            .map(|m| m.len())
+            .unwrap_or(0)
+            .saturating_add(std::fs::metadata(&io.stderr).map(|m| m.len()).unwrap_or(0))
+            > fsize_bytes
+        {
             status = RunStatus::OutputLimit;
         }
     }

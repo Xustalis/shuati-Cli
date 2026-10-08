@@ -209,7 +209,7 @@ impl StressEngine {
             let _ = h.await;
         }
 
-        let mut rep = report.lock().await.clone();
+        let mut rep = std::mem::take(&mut *report.lock().await);
         rep.stopped_early = rep.rounds_done < p.rounds;
         rep.hacks.sort_by_key(|h| h.seed);
         Ok(rep)
@@ -260,7 +260,7 @@ async fn run_one_round(seed: u64, round: u32, ctx: &RoundCtx<'_>, cancel: Option
         Err(e) => return StressEvent::GenFail { seed, round, msg: e.to_string() },
     };
     if g.status != RunStatus::Ok {
-        let e = std::fs::read_to_string(&gen_err).unwrap_or_default();
+        let e = crate::read_head(&gen_err, crate::STDERR_HEAD_CAP);
         let e = if e.is_empty() { format!("gen exit {:?}", g.status) } else { e };
         return StressEvent::GenFail { seed, round, msg: truncate(&e, 400) };
     }
@@ -269,13 +269,9 @@ async fn run_one_round(seed: u64, round: u32, ctx: &RoundCtx<'_>, cancel: Option
         return StressEvent::GenFail { seed, round, msg: "生成器输出为空".into() };
     }
 
-    // 2. user & oracle 并发跑同一 input
-    let in_f = td.join("case.in");
-    if let Err(e) = std::fs::write(&in_f, &input) {
-        return StressEvent::GenFail { seed, round, msg: format!("write input: {e}") };
-    }
-    let user_io = Io { stdin: Some(in_f.clone()), stdout: td.join("user.out"), stderr: td.join("user.err") };
-    let oracle_io = Io { stdin: Some(in_f), stdout: td.join("oracle.out"), stderr: td.join("oracle.err") };
+    // 2. user & oracle 并发跑同一 input——stdin 直接指 gen 的输出文件，省每轮一次整文件重写
+    let user_io = Io { stdin: Some(gen_out.clone()), stdout: td.join("user.out"), stderr: td.join("user.err") };
+    let oracle_io = Io { stdin: Some(gen_out), stdout: td.join("oracle.out"), stderr: td.join("oracle.err") };
     let (u, o) = tokio::join!(
         run_program(ctx.user, &user_io, ctx.limits_run, cancel.clone()),
         run_program(ctx.oracle, &oracle_io, ctx.limits_run, cancel)
@@ -298,12 +294,12 @@ async fn run_one_round(seed: u64, round: u32, ctx: &RoundCtx<'_>, cancel: Option
     }
 
     if o.status != RunStatus::Ok {
-        let e = std::fs::read_to_string(&oracle_io.stderr).unwrap_or_default();
+        let e = crate::read_head(&oracle_io.stderr, crate::STDERR_HEAD_CAP);
         return StressEvent::OracleFail { seed, round, msg: format!("标程 {:?}: {}", o.status, truncate(&e, 300)) };
     }
     if u.status != RunStatus::Ok {
         // 用户程序挂也是"反例"（不是答案不等，是程序错了）
-        let e = std::fs::read_to_string(&user_io.stderr).unwrap_or_default();
+        let e = crate::read_head(&user_io.stderr, crate::STDERR_HEAD_CAP);
         let kind = match u.status {
             RunStatus::TimeLimit => "user_tle",
             RunStatus::MemoryLimit => "user_mle",
@@ -391,20 +387,19 @@ async fn gen_one_case(
         .await
         .map_err(|e| e.to_string())?;
     if g.status != RunStatus::Ok {
-        let e = std::fs::read_to_string(&gen_err).unwrap_or_default();
+        let e = crate::read_head(&gen_err, crate::STDERR_HEAD_CAP);
         return Err(format!("gen {:?}: {}", g.status, truncate(&e, 120)));
     }
     let input = std::fs::read_to_string(&gen_out).unwrap_or_default();
     if input.trim().is_empty() {
         return Err("gen 输出为空".into());
     }
-    let in_f = td.join("c.in");
-    std::fs::write(&in_f, &input).map_err(|e| e.to_string())?;
+    // stdin 直接复用 gen 输出文件，不再重写一遍
     let o_err = td.join("o.err");
-    let io = Io { stdin: Some(in_f), stdout: td.join("o.out"), stderr: o_err.clone() };
+    let io = Io { stdin: Some(gen_out), stdout: td.join("o.out"), stderr: o_err.clone() };
     let o = run_program(oracle_prog, &io, limits_run, None).await.map_err(|e| e.to_string())?;
     if o.status != RunStatus::Ok {
-        let e = std::fs::read_to_string(&o_err).unwrap_or_default();
+        let e = crate::read_head(&o_err, crate::STDERR_HEAD_CAP);
         return Err(format!("oracle {:?}: {}", o.status, truncate(&e, 120)));
     }
     let output = std::fs::read_to_string(&io.stdout).unwrap_or_default();

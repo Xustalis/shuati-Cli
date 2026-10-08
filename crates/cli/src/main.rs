@@ -935,7 +935,7 @@ fn cmd_list(ws: &store::Workspace) -> Result<()> {
     let state = store::AppState::load(&ws.state_path());
     for p in &problems {
         let id = p.meta.id.to_string();
-        let n = p.load_cases().map(|c| c.len()).unwrap_or(0);
+        let n = p.count_cases();
         let last = state.last_verdicts.get(&id).map(|s| s.as_str()).unwrap_or("-");
         let cur = if state.current_problem.as_deref() == Some(id.as_str()) { "*" } else { " " };
         println!("{cur} {id:22} 上次:{last:4} {n:3}组  {}", p.meta.title);
