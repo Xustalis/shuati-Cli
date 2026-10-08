@@ -10,6 +10,7 @@ mod engine;
 mod stress;
 mod watch;
 mod env;
+mod binding;
 
 pub use program::*;
 pub use compiler::*;
@@ -19,6 +20,7 @@ pub use engine::*;
 pub use stress::*;
 pub use watch::*;
 pub use env::*;
+pub use binding::*;
 
 use thiserror::Error;
 
@@ -34,7 +36,7 @@ pub enum JudgeError {
     Sandbox(String),
     #[error("store: {0}")]
     Store(#[from] shuati_store::StoreError),
-    #[error("no test cases")]
+    #[error("没有测试用例：tests/ 目录为空，先在题库页/CLI 添加用例（.in + .out）")]
     NoCases,
     #[error("{0}")]
     Other(String),

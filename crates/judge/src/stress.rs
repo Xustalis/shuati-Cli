@@ -134,7 +134,7 @@ impl StressEngine {
         oracle_prog: &Program,
     ) -> Result<StressReport> {
         let next_round = Arc::new(AtomicU32::new(0));
-        let hack_count = Arc::new(AtomicU32::new(0));
+        let fail_count = Arc::new(AtomicU32::new(0));
         let report = Arc::new(tokio::sync::Mutex::new(StressReport::default()));
 
         let jobs = p.jobs.max(1) as usize;
@@ -142,7 +142,7 @@ impl StressEngine {
 
         for _ in 0..jobs {
             let next_round = next_round.clone();
-            let hack_count = hack_count.clone();
+            let fail_count = fail_count.clone();
             let report = report.clone();
             let gen_prog = gen_prog.clone();
             let user_prog = user_prog.clone();
@@ -161,7 +161,8 @@ impl StressEngine {
                     if cancel.as_ref().is_some_and(|c| c.load(Ordering::Relaxed)) {
                         break;
                     }
-                    if stop_on_fail && hack_count.load(Ordering::Relaxed) > 0 {
+                    // stop_on_fail = 任何一类失败（hack/gen 异常/标程异常）即停
+                    if stop_on_fail && fail_count.load(Ordering::Relaxed) > 0 {
                         break;
                     }
                     let r = next_round.fetch_add(1, Ordering::Relaxed);
@@ -170,8 +171,8 @@ impl StressEngine {
                     }
                     let seed = seed_start + r as u64;
                     let outcome = run_one_round(
-                        seed, &gen_prog, &user_prog, &oracle_prog,
-                        &limits_run, &limits_gen, &checker,
+                        seed, r, &gen_prog, &user_prog, &oracle_prog,
+                        &limits_run, &limits_gen, &checker, cancel.clone(),
                     )
                     .await;
 
@@ -182,10 +183,16 @@ impl StressEngine {
                             StressEvent::Match { .. } => rep.matched += 1,
                             StressEvent::Hack { case, .. } => {
                                 rep.hacks.push((**case).clone());
-                                hack_count.fetch_add(1, Ordering::Relaxed);
+                                fail_count.fetch_add(1, Ordering::Relaxed);
                             }
-                            StressEvent::GenFail { .. } => rep.gen_failures += 1,
-                            StressEvent::OracleFail { .. } => rep.oracle_failures += 1,
+                            StressEvent::GenFail { .. } => {
+                                rep.gen_failures += 1;
+                                fail_count.fetch_add(1, Ordering::Relaxed);
+                            }
+                            StressEvent::OracleFail { .. } => {
+                                rep.oracle_failures += 1;
+                                fail_count.fetch_add(1, Ordering::Relaxed);
+                            }
                         }
                     }
                     if let Some(cb) = &progress {
@@ -222,14 +229,15 @@ fn with_extra_arg(prog: &Program, arg: &str) -> Program {
 /// 单轮：gen(seed) → input → user & oracle → 比对
 async fn run_one_round(
     seed: u64,
+    round: u32,
     gen_prog: &Program,
     user_prog: &Program,
     oracle_prog: &Program,
     limits_run: &Limits,
     limits_gen: &Limits,
     checker: &CheckerSpec,
+    cancel: Option<Arc<AtomicBool>>,
 ) -> StressEvent {
-    let round = (seed & 0xFFFF_FFFF) as u32;
     let tmp = match tempfile::Builder::new().prefix("shuati_stress_").tempdir() {
         Ok(t) => t,
         Err(e) => {
@@ -243,7 +251,7 @@ async fn run_one_round(
     let gen_err = td.join("gen.err");
     let gen_io = Io { stdin: None, stdout: gen_out.clone(), stderr: gen_err.clone() };
     let gen_p = with_extra_arg(gen_prog, &seed.to_string());
-    let g = match run_program(&gen_p, &gen_io, limits_gen).await {
+    let g = match run_program(&gen_p, &gen_io, limits_gen, cancel.clone()).await {
         Ok(o) => o,
         Err(e) => return StressEvent::GenFail { seed, round, msg: e.to_string() },
     };
@@ -273,8 +281,8 @@ async fn run_one_round(
         stderr: td.join("oracle.err"),
     };
     let (u, o) = tokio::join!(
-        run_program(user_prog, &user_io, limits_run),
-        run_program(oracle_prog, &oracle_io, limits_run)
+        run_program(user_prog, &user_io, limits_run, cancel.clone()),
+        run_program(oracle_prog, &oracle_io, limits_run, cancel)
     );
     let u = match u {
         Ok(x) => x,
@@ -288,6 +296,10 @@ async fn run_one_round(
     // 3. 归责
     let user_out = std::fs::read_to_string(&user_io.stdout).unwrap_or_default();
     let oracle_out = std::fs::read_to_string(&oracle_io.stdout).unwrap_or_default();
+
+    if u.status == RunStatus::Cancelled || o.status == RunStatus::Cancelled {
+        return StressEvent::GenFail { seed, round, msg: "已取消".into() };
+    }
 
     if o.status != RunStatus::Ok {
         let e = std::fs::read_to_string(&oracle_io.stderr).unwrap_or_default();
@@ -332,41 +344,73 @@ async fn run_one_round(
 }
 
 fn truncate(s: &str, n: usize) -> String {
-    if s.len() <= n { s.to_string() } else { format!("{}…", &s[..n]) }
+    if s.len() <= n { s.to_string() } else { format!("{}…", s.chars().take(n).collect::<String>()) }
 }
 
-/// 批量测试集生成：gen(seed) → oracle → 返回用例对（调用方落盘）
+/// gen_cases 的批次结果：产出的用例 + 失败明细（不静默吞错）
+#[derive(Debug, Default)]
+pub struct GenBatch {
+    /// (seed, input, output)
+    pub cases: Vec<(u64, String, String)>,
+    /// (seed, 失败原因)
+    pub failed: Vec<(u64, String)>,
+}
+
+/// 批量测试集生成：gen(seed) → oracle → 返回用例对与失败明细（调用方落盘/展示）
 pub async fn gen_cases(
     gen_prog: &Program,
     oracle_prog: &Program,
     seeds: impl Iterator<Item = u64>,
     limits_run: &Limits,
     limits_gen: &Limits,
-) -> Vec<(u64, String, String)> {
-    let mut out = Vec::new();
+) -> GenBatch {
+    let mut batch = GenBatch::default();
     for seed in seeds {
-        let tmp = match tempfile::tempdir() {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-        let td = tmp.path().to_path_buf();
-        let gen_out = td.join("g.out");
-        let gen_io = Io { stdin: None, stdout: gen_out.clone(), stderr: td.join("g.err") };
-        let g = run_program(&with_extra_arg(gen_prog, &seed.to_string()), &gen_io, limits_gen).await;
-        let Ok(g) = g else { continue };
-        if g.status != RunStatus::Ok { continue; }
-        let input = std::fs::read_to_string(&gen_out).unwrap_or_default();
-        if input.trim().is_empty() { continue; }
-        let in_f = td.join("c.in");
-        if std::fs::write(&in_f, &input).is_err() { continue; }
-        let io = Io { stdin: Some(in_f), stdout: td.join("o.out"), stderr: td.join("o.err") };
-        let o = run_program(oracle_prog, &io, limits_run).await;
-        let Ok(o) = o else { continue };
-        if o.status != RunStatus::Ok { continue; }
-        let output = std::fs::read_to_string(&io.stdout).unwrap_or_default();
-        out.push((seed, input, output));
+        let r = gen_one_case(gen_prog, oracle_prog, seed, limits_run, limits_gen).await;
+        match r {
+            Ok((input, output)) => batch.cases.push((seed, input, output)),
+            Err(e) => batch.failed.push((seed, e)),
+        }
     }
-    out
+    batch
+}
+
+async fn gen_one_case(
+    gen_prog: &Program,
+    oracle_prog: &Program,
+    seed: u64,
+    limits_run: &Limits,
+    limits_gen: &Limits,
+) -> std::result::Result<(String, String), String> {
+    let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let td = tmp.path().to_path_buf();
+    let gen_out = td.join("g.out");
+    let gen_err = td.join("g.err");
+    let gen_io = Io { stdin: None, stdout: gen_out.clone(), stderr: gen_err.clone() };
+    let g = run_program(&with_extra_arg(gen_prog, &seed.to_string()), &gen_io, limits_gen, None)
+        .await
+        .map_err(|e| e.to_string())?;
+    if g.status != RunStatus::Ok {
+        let e = std::fs::read_to_string(&gen_err).unwrap_or_default();
+        return Err(format!("gen {:?}: {}", g.status, truncate(&e, 120)));
+    }
+    let input = std::fs::read_to_string(&gen_out).unwrap_or_default();
+    if input.trim().is_empty() {
+        return Err("gen 输出为空".into());
+    }
+    let in_f = td.join("c.in");
+    std::fs::write(&in_f, &input).map_err(|e| e.to_string())?;
+    let o_err = td.join("o.err");
+    let io = Io { stdin: Some(in_f), stdout: td.join("o.out"), stderr: o_err.clone() };
+    let o = run_program(oracle_prog, &io, limits_run, None)
+        .await
+        .map_err(|e| e.to_string())?;
+    if o.status != RunStatus::Ok {
+        let e = std::fs::read_to_string(&o_err).unwrap_or_default();
+        return Err(format!("oracle {:?}: {}", o.status, truncate(&e, 120)));
+    }
+    let output = std::fs::read_to_string(&io.stdout).unwrap_or_default();
+    Ok((input, output))
 }
 
 /// 在题目目录里找 gen/brute 默认文件

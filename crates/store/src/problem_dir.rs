@@ -50,6 +50,13 @@ impl ProblemDir {
         let t: ProblemToml = toml::from_str(&text)?;
         let id = ProblemId::parse(&t.id)
             .ok_or_else(|| StoreError::Invalid(meta_path.clone(), format!("bad id {}", t.id)))?;
+        // spj 程序路径按题目目录解析，与进程 CWD 解耦
+        let checker = match t.checker {
+            CheckerSpec::Spj { program } if program.is_relative() => CheckerSpec::Spj {
+                program: dir.join(program),
+            },
+            c => c,
+        };
         Ok(Self {
             dir,
             meta: Problem {
@@ -60,15 +67,19 @@ impl ProblemDir {
                 tags: t.tags,
                 limits: t.limits,
                 statement: PathBuf::from("statement.md"),
-                checker: t.checker,
+                checker,
                 created_at: t.created_at,
             },
         })
     }
 
-    /// 创建新题目目录（含 problem.toml / statement.md / 子目录）
+    /// 创建新题目目录（含 problem.toml / statement.md / 子目录）。
+    /// 已存在 problem.toml 时报错，不静默覆盖用户数据。
     pub fn create(dir: impl Into<PathBuf>, meta: &Problem) -> Result<Self> {
         let dir = dir.into();
+        if dir.join("problem.toml").exists() {
+            return Err(StoreError::Exists(dir));
+        }
         for sub in ["tests", "solutions", "gen", "stress", "reports"] {
             std::fs::create_dir_all(dir.join(sub))?;
         }
@@ -89,7 +100,14 @@ impl ProblemDir {
             difficulty: self.meta.difficulty.clone(),
             tags: self.meta.tags.clone(),
             limits: self.meta.limits,
-            checker: self.meta.checker.clone(),
+            // spj 路径落盘时收敛回相对路径：题目目录整体可搬迁/同步
+            checker: match &self.meta.checker {
+                CheckerSpec::Spj { program } => match program.strip_prefix(&self.dir) {
+                    Ok(rel) => CheckerSpec::Spj { program: rel.to_path_buf() },
+                    Err(_) => self.meta.checker.clone(),
+                },
+                c => c.clone(),
+            },
             created_at: self.meta.created_at,
         };
         Ok(atomic_write(&self.dir.join("problem.toml"), toml::to_string_pretty(&t)?.as_bytes())?)
@@ -159,11 +177,13 @@ impl ProblemDir {
         Ok(cases)
     }
 
-    /// 写入一对用例文件
-    pub fn write_case(&self, name: &str, input: &str, output: &str, origin: CaseOrigin) -> Result<()> {
+    /// 写入用例文件。output=None 时不写 .out（无答案的 smoke 用例）
+    pub fn write_case(&self, name: &str, input: &str, output: Option<&str>, origin: CaseOrigin) -> Result<()> {
         let tests = self.tests_dir();
         atomic_write(&tests.join(format!("{name}.in")), input.as_bytes())?;
-        atomic_write(&tests.join(format!("{name}.out")), output.as_bytes())?;
+        if let Some(out) = output {
+            atomic_write(&tests.join(format!("{name}.out")), out.as_bytes())?;
+        }
         let mut m = self.load_manifest().unwrap_or_default();
         let key = match origin {
             CaseOrigin::Sample => "sample",
@@ -172,6 +192,22 @@ impl ProblemDir {
         };
         m.cases.insert(name.to_string(), key.to_string());
         self.save_manifest(&m)
+    }
+
+    /// 下一个可用用例名：取 tests/*.in 数字 stem 的最大值+1（防删中间后覆盖）
+    pub fn next_case_name(&self) -> String {
+        let next = std::fs::read_dir(self.tests_dir())
+            .ok()
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .filter_map(|e| e.path().file_stem().map(|s| s.to_string_lossy().to_string()))
+            .filter(|n| self.tests_dir().join(format!("{n}.in")).exists())
+            .filter_map(|n| n.parse::<u32>().ok())
+            .max()
+            .unwrap_or(0)
+            + 1;
+        format!("{next:04}")
     }
 
     /// 删除用例（.in/.out + manifest 记录）
@@ -203,9 +239,13 @@ impl ProblemDir {
         Ok(atomic_write(&self.manifest_path(), toml::to_string_pretty(m)?.as_bytes())?)
     }
 
-    /// 保存评测报告 reports/<ts>.json
+    /// 保存评测报告 reports/<ts>-<nanos>.json（纳秒后缀防同秒覆盖）
     pub fn save_report(&self, report: &shuati_core::TestReport) -> Result<PathBuf> {
-        let name = format!("{}.json", report.timestamp);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        let name = format!("{}-{:09}.json", report.timestamp, nanos);
         let path = self.reports_dir().join(name);
         atomic_write(&path, serde_json::to_string_pretty(report)?.as_bytes())?;
         Ok(path)
@@ -264,9 +304,95 @@ pub fn load_all_problems(ws: &crate::Workspace) -> Vec<ProblemDir> {
         for d in dirs {
             match ProblemDir::open(&d) {
                 Ok(pd) => out.push(pd),
-                Err(e) => eprintln!("[store] skip {}: {}", d.display(), e),
+                Err(e) => tracing::warn!("skip {}: {}", d.display(), e),
             }
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp_pd() -> (tempfile::TempDir, ProblemDir) {
+        let d = tempfile::tempdir().unwrap();
+        let meta = Problem {
+            id: ProblemId::new(shuati_core::Source::Local, "t1"),
+            title: "t".into(),
+            url: String::new(),
+            difficulty: None,
+            tags: vec![],
+            limits: Default::default(),
+            statement: PathBuf::from("statement.md"),
+            checker: Default::default(),
+            created_at: now_ts(),
+        };
+        let pd = ProblemDir::create(d.path().join("p"), &meta).unwrap();
+        (d, pd)
+    }
+
+    #[test]
+    fn create_twice_errors_not_overwrites() {
+        let (_d, pd) = tmp_pd();
+        let r = ProblemDir::create(&pd.dir, &pd.meta);
+        assert!(matches!(r, Err(StoreError::Exists(_))));
+    }
+
+    #[test]
+    fn next_case_name_survives_gaps() {
+        let (_d, pd) = tmp_pd();
+        assert_eq!(pd.next_case_name(), "0001");
+        pd.write_case("0001", "in1", Some("out1"), CaseOrigin::Sample).unwrap();
+        pd.write_case("0003", "in3", Some("out3"), CaseOrigin::Sample).unwrap();
+        // 删掉 0002 的中间空洞下，新用例取 max+1 而不是 count+1（防覆盖 0003）
+        assert_eq!(pd.next_case_name(), "0004");
+    }
+
+    #[test]
+    fn write_case_without_out_loads_none() {
+        let (_d, pd) = tmp_pd();
+        pd.write_case("0001", "1 2", None, CaseOrigin::Generated).unwrap();
+        let cases = pd.load_cases().unwrap();
+        assert_eq!(cases.len(), 1);
+        assert_eq!(cases[0].expected, None);
+        assert!(!pd.tests_dir().join("0001.out").exists());
+    }
+
+    #[test]
+    fn report_filenames_are_unique() {
+        let (_d, pd) = tmp_pd();
+        let rep = shuati_core::TestReport {
+            problem: pd.meta.id.clone(),
+            timestamp: now_ts(),
+            kind: shuati_core::RunKind::Test,
+            verdict: shuati_core::Verdict::Ac,
+            total: 0,
+            pass: 0,
+            cases: vec![],
+        };
+        let a = pd.save_report(&rep).unwrap();
+        let b = pd.save_report(&rep).unwrap();
+        assert_ne!(a, b);
+        assert!(a.exists() && b.exists());
+    }
+
+    #[test]
+    fn spj_relative_path_resolves_under_problem_dir() {
+        let (_d, mut pd) = tmp_pd();
+        pd.meta.checker = CheckerSpec::Spj { program: PathBuf::from("checkers/wcmp") };
+        pd.save_meta().unwrap();
+        let pd2 = ProblemDir::open(&pd.dir).unwrap();
+        match pd2.meta.checker {
+            CheckerSpec::Spj { program } => {
+                assert!(program.is_absolute());
+                assert_eq!(program, pd.dir.join("checkers/wcmp"));
+            }
+            c => panic!("expect spj, got {c:?}"),
+        }
+        // round-trip：写盘时收敛回相对路径，problem.toml 不记宿主绝对路径
+        let text = std::fs::read_to_string(pd.dir.join("problem.toml")).unwrap();
+        assert!(text.contains("checkers/wcmp"), "{text}");
+        assert!(!text.contains(pd.dir.to_str().unwrap()), "{text}");
+    }
 }

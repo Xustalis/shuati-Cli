@@ -10,14 +10,15 @@ use std::path::{Path, PathBuf};
 
 const MAX_ATTEMPTS: u32 = 3;
 
-/// dry-run 验证结果
-/// 自动管线：产出写好的 (gen_path, oracle_path)
-/// 文件落在 `dest_dir`（通常是题目目录），文件名 gen.<ext> / brute.<ext>
+/// dry-run 验证通过才落盘。
+/// gen 写到 `gen_dir/gen.<ext>`，oracle 写到 `oracle_dir/brute.<ext>`——
+/// 必须与 find_script 的探测目录一致（gen/ 和 solutions/），否则下次找不到。
 pub async fn produce_scripts(
     client: &AiClient,
     statement: &str,
     lang: Lang,
-    dest_dir: &Path,
+    gen_dir: &Path,
+    oracle_dir: &Path,
     cpp_cfg: &str,
     py_cfg: &str,
     mut on_status: impl FnMut(&str),
@@ -54,10 +55,11 @@ pub async fn produce_scripts(
         on_status(&format!("dry-run 验证（第 {attempt} 次）…"));
         match dry_run(&gen_src, &oracle_src, &tc).await {
             Ok(()) => {
-                // 验证通过 → 落盘到目标目录
-                std::fs::create_dir_all(dest_dir).map_err(|e| AiError::Api(e.to_string()))?;
-                let gen_dest = dest_dir.join(format!("gen.{ext}"));
-                let brute_dest = dest_dir.join(format!("brute.{ext}"));
+                // 验证通过 → 落盘到约定子目录
+                std::fs::create_dir_all(gen_dir).map_err(|e| AiError::Api(e.to_string()))?;
+                std::fs::create_dir_all(oracle_dir).map_err(|e| AiError::Api(e.to_string()))?;
+                let gen_dest = gen_dir.join(format!("gen.{ext}"));
+                let brute_dest = oracle_dir.join(format!("brute.{ext}"));
                 std::fs::write(&gen_dest, &scripts.generator).map_err(|e| AiError::Api(e.to_string()))?;
                 std::fs::write(&brute_dest, &scripts.oracle).map_err(|e| AiError::Api(e.to_string()))?;
                 on_status("脚本验证通过");
@@ -80,7 +82,7 @@ pub async fn produce_scripts(
     unreachable!()
 }
 
-/// dry-run：编译两个脚本，跑 gen(seed=1) → oracle，任何一步挂都算失败
+/// dry-run：编译两个脚本，跑 3 个 seed 的 gen → oracle，任何一步挂都算失败
 async fn dry_run(gen_src: &SourceFile, oracle_src: &SourceFile, tc: &judge::Toolchain) -> std::result::Result<(), String> {
     let gen_prog = judge::compile_source(gen_src, tc)
         .await
@@ -93,59 +95,62 @@ async fn dry_run(gen_src: &SourceFile, oracle_src: &SourceFile, tc: &judge::Tool
         }
     };
 
-    let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
-    let td = tmp.path();
-
-    // gen(seed=42) → input
-    let glim = Limits { cpu_ms: 10000, wall_ms: 15000, memory_mb: 512, output_mb: 16 };
-    let rlim = Limits { cpu_ms: 10000, wall_ms: 15000, memory_mb: 512, output_mb: 16 };
-    let gen_io = judge::Io {
-        stdin: None,
-        stdout: td.join("g.out"),
-        stderr: td.join("g.err"),
-    };
-    let mut gen_with_seed = gen_prog.clone();
-    gen_with_seed.argv.push("42".into());
-    let g = judge::run_program(&gen_with_seed, &gen_io, &glim)
-        .await
-        .map_err(|e| e.to_string())?;
-    if g.status != judge::RunStatus::Ok {
-        judge::cleanup_program(&gen_prog);
-        judge::cleanup_program(&oracle_prog);
-        let err = std::fs::read_to_string(td.join("g.err")).unwrap_or_default();
-        return Err(format!("gen 运行失败({:?}): {}", g.status, truncate(&err, 200)));
-    }
-    let input = std::fs::read_to_string(td.join("g.out")).unwrap_or_default();
-    if input.trim().is_empty() {
-        judge::cleanup_program(&gen_prog);
-        judge::cleanup_program(&oracle_prog);
-        return Err("gen 输出为空".into());
-    }
-
-    // oracle 跑这份输入 → output
-    let in_f = td.join("case.in");
-    std::fs::write(&in_f, &input).map_err(|e| e.to_string())?;
-    let oracle_io = judge::Io {
-        stdin: Some(in_f),
-        stdout: td.join("o.out"),
-        stderr: td.join("o.err"),
-    };
-    let o = judge::run_program(&oracle_prog, &oracle_io, &rlim)
-        .await
-        .map_err(|e| e.to_string())?;
+    let result = dry_run_seeds(&gen_prog, &oracle_prog).await;
     judge::cleanup_program(&gen_prog);
     judge::cleanup_program(&oracle_prog);
-    if o.status != judge::RunStatus::Ok {
-        let err = std::fs::read_to_string(td.join("o.err")).unwrap_or_default();
-        return Err(format!("oracle 运行失败({:?}): {}", o.status, truncate(&err, 200)));
-    }
-    let output = std::fs::read_to_string(td.join("o.out")).unwrap_or_default();
-    if output.trim().is_empty() {
-        return Err("oracle 输出为空".into());
+    result
+}
+
+async fn dry_run_seeds(gen_prog: &judge::Program, oracle_prog: &judge::Program) -> std::result::Result<(), String> {
+    let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let td = tmp.path();
+    let glim = Limits { cpu_ms: 10000, wall_ms: 15000, memory_mb: 512, output_mb: 16 };
+    let rlim = Limits { cpu_ms: 10000, wall_ms: 15000, memory_mb: 512, output_mb: 16 };
+
+    for seed in [1u64, 42, 7] {
+        // gen(seed) → input
+        let gen_io = judge::Io {
+            stdin: None,
+            stdout: td.join(format!("g{seed}.out")),
+            stderr: td.join(format!("g{seed}.err")),
+        };
+        let mut gen_with_seed = gen_prog.clone();
+        gen_with_seed.argv.push(seed.to_string());
+        let g = judge::run_program(&gen_with_seed, &gen_io, &glim, None)
+            .await
+            .map_err(|e| e.to_string())?;
+        if g.status != judge::RunStatus::Ok {
+            let err = std::fs::read_to_string(&gen_io.stderr).unwrap_or_default();
+            return Err(format!("gen 运行失败(seed={seed}, {:?}): {}", g.status, truncate(&err, 200)));
+        }
+        let input = std::fs::read_to_string(&gen_io.stdout).unwrap_or_default();
+        if input.trim().is_empty() {
+            return Err(format!("gen 输出为空(seed={seed})"));
+        }
+
+        // oracle 跑这份输入 → output
+        let in_f = td.join(format!("case{seed}.in"));
+        std::fs::write(&in_f, &input).map_err(|e| e.to_string())?;
+        let oracle_io = judge::Io {
+            stdin: Some(in_f),
+            stdout: td.join(format!("o{seed}.out")),
+            stderr: td.join(format!("o{seed}.err")),
+        };
+        let o = judge::run_program(oracle_prog, &oracle_io, &rlim, None)
+            .await
+            .map_err(|e| e.to_string())?;
+        if o.status != judge::RunStatus::Ok {
+            let err = std::fs::read_to_string(&oracle_io.stderr).unwrap_or_default();
+            return Err(format!("oracle 运行失败(seed={seed}, {:?}): {}", o.status, truncate(&err, 200)));
+        }
+        let output = std::fs::read_to_string(&oracle_io.stdout).unwrap_or_default();
+        if output.trim().is_empty() {
+            return Err(format!("oracle 输出为空(seed={seed})"));
+        }
     }
     Ok(())
 }
 
 fn truncate(s: &str, n: usize) -> String {
-    if s.len() <= n { s.to_string() } else { format!("{}…", &s[..n]) }
+    if s.len() <= n { s.to_string() } else { format!("{}…", s.chars().take(n).collect::<String>()) }
 }

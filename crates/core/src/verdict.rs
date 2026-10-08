@@ -10,6 +10,8 @@ pub enum Verdict {
     Mle,
     Re,
     Ce,
+    /// 输出超限（写爆 output_mb）
+    Ole,
     /// 系统错误（沙箱自身故障等）
     Se,
 }
@@ -29,6 +31,7 @@ impl fmt::Display for Verdict {
             Verdict::Mle => "MLE",
             Verdict::Re => "RE",
             Verdict::Ce => "CE",
+            Verdict::Ole => "OLE",
             Verdict::Se => "SE",
         };
         f.write_str(s)

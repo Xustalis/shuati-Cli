@@ -143,10 +143,11 @@ async fn compile_cpp(src: &SourceFile, tc: &Toolchain, cache_dir: Option<&std::p
 
 async fn prepare_python(src: &SourceFile, tc: &Toolchain) -> Result<Program> {
     let src_path = src.path.canonicalize().unwrap_or_else(|_| src.path.clone());
-    // 语法快速检查：python -m py_compile
+    // 语法快速检查：python -B -m py_compile（-B 避免在用户目录产 __pycache__）
     let output = timeout(
         COMPILE_TIMEOUT,
         Command::new(&tc.executable)
+            .arg("-B")
             .arg("-m")
             .arg("py_compile")
             .arg(&src_path)

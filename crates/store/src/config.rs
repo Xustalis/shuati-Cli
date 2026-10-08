@@ -63,16 +63,28 @@ impl Default for Config {
 
 impl AiConfig {
     pub fn enabled(&self) -> bool {
-        !self.api_key.is_empty()
+        crate::secrets::resolve_api_key(&self.api_key).is_some()
+    }
+
+    /// 实际生效的 key：SHUATI_API_KEY 环境变量 > 系统钥匙串 > config.toml
+    pub fn resolved_key(&self) -> Option<String> {
+        crate::secrets::resolve_api_key(&self.api_key)
     }
 }
 
 impl Config {
     pub fn load(path: &std::path::Path) -> Self {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|t| toml::from_str(&t).ok())
-            .unwrap_or_default()
+        match std::fs::read_to_string(path) {
+            Ok(text) => match toml::from_str(&text) {
+                Ok(c) => c,
+                Err(e) => {
+                    // 解析失败必须让用户知道——静默回退默认会让配置"莫名失效"
+                    tracing::warn!("config.toml 解析失败，使用默认配置: {e}");
+                    Self::default()
+                }
+            },
+            Err(_) => Self::default(),
+        }
     }
 
     pub fn save(&self, path: &std::path::Path) -> Result<()> {

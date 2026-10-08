@@ -4,6 +4,8 @@
 use crate::{Io, JudgeError, Program, Result};
 use shuati_core::Limits;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// 一次运行的结构化结果
@@ -29,21 +31,31 @@ pub enum RunStatus {
     TimeLimit,
     MemoryLimit,
     RuntimeError,
+    /// 输出文件超过 output_mb 上限
+    OutputLimit,
+    /// 被外部取消（用户按停止/切任务）
+    Cancelled,
     InternalError,
 }
 
 /// 运行一个 Program：argv 数组直传内核，无 shell。
-pub async fn run_program(prog: &Program, io: &Io, limits: &Limits) -> Result<RunOutcome> {
+/// `cancel` 置 true 后尽快杀掉进程并返回 Cancelled。
+pub async fn run_program(
+    prog: &Program,
+    io: &Io,
+    limits: &Limits,
+    cancel: Option<Arc<AtomicBool>>,
+) -> Result<RunOutcome> {
     let prog = prog.clone();
     let io = io.clone();
     let limits = *limits;
-    tokio::task::spawn_blocking(move || run_blocking(&prog, &io, &limits))
+    tokio::task::spawn_blocking(move || run_blocking(&prog, &io, &limits, cancel))
         .await
         .map_err(|e| JudgeError::Sandbox(format!("join: {e}")))?
 }
 
 #[cfg(unix)]
-fn run_blocking(prog: &Program, io: &Io, limits: &Limits) -> Result<RunOutcome> {
+fn run_blocking(prog: &Program, io: &Io, limits: &Limits, cancel: Option<Arc<AtomicBool>>) -> Result<RunOutcome> {
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
 
@@ -89,6 +101,7 @@ fn run_blocking(prog: &Program, io: &Io, limits: &Limits) -> Result<RunOutcome> 
     let start = Instant::now();
     let wall_limit = Duration::from_millis(limits.wall_ms.max(500));
     let mut timed_out = false;
+    let mut cancelled = false;
 
     // wait4 轮询：拿到 per-child rusage
     let (status, usage) = loop {
@@ -105,8 +118,11 @@ fn run_blocking(prog: &Program, io: &Io, limits: &Limits) -> Result<RunOutcome> 
             }
             return Err(JudgeError::Io(err));
         }
-        if start.elapsed() > wall_limit {
-            timed_out = true;
+        if start.elapsed() > wall_limit
+            || cancel.as_ref().is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed))
+        {
+            timed_out = start.elapsed() > wall_limit;
+            cancelled = !timed_out;
             unsafe {
                 libc::kill(-pid, libc::SIGKILL);
             }
@@ -130,19 +146,27 @@ fn run_blocking(prog: &Program, io: &Io, limits: &Limits) -> Result<RunOutcome> 
 
     let exit_code = if libc::WIFEXITED(status) { libc::WEXITSTATUS(status) } else { -1 };
     let stderr_text = std::fs::read_to_string(&io.stderr).unwrap_or_default();
+    // 输出超限判定（各平台通用兜底，rlimit 未覆盖的平台也生效）
+    let stdout_bytes = std::fs::metadata(&io.stdout).map(|m| m.len()).unwrap_or(0);
+    let over_output = stdout_bytes > fsize_bytes;
 
-    let status_out = if timed_out {
+    let status_out = if cancelled {
+        RunStatus::Cancelled
+    } else if timed_out {
         RunStatus::TimeLimit
     } else if cpu_ms > limits.cpu_ms {
         // rusage 精判 CPU TLE（wall 没超但 cpu 超了）
         RunStatus::TimeLimit
+    } else if over_output {
+        RunStatus::OutputLimit
     } else if peak_mem_kb > limits.memory_mb.saturating_mul(1024) {
         // rusage 事后判 MLE（macOS 无 RLIMIT_AS 硬限，靠这个兜）
         RunStatus::MemoryLimit
     } else if libc::WIFSIGNALED(status) {
         let sig = libc::WTERMSIG(status);
         match sig {
-            libc::SIGXCPU | libc::SIGXFSZ => RunStatus::TimeLimit,
+            libc::SIGXCPU => RunStatus::TimeLimit,
+            libc::SIGXFSZ => RunStatus::OutputLimit,
             libc::SIGSEGV | libc::SIGBUS | libc::SIGKILL => {
                 if peak_mem_kb >= limits.memory_mb.saturating_sub(8) * 1024
                     || stderr_text.contains("bad_alloc")
@@ -189,9 +213,117 @@ fn set_rlimit(res: libc::c_int, val: u64) -> std::io::Result<()> {
     }
 }
 
-/// Windows 初版：spawn + wall 超时杀进程树；Job Object 细化留 TODO。
+/// Windows：Job Object 沙箱。
+/// KILL_ON_JOB_CLOSE + PROCESS_MEMORY 硬限 + PROCESS_TIME CPU 限；
+/// 轮询里读 IoInfo.WriteTransferCount 实时掐输出、查取消；
+/// TerminateJobObject 杀整棵进程树（child.kill 只杀根进程）。
 #[cfg(windows)]
-fn run_blocking(prog: &Program, io: &Io, limits: &Limits) -> Result<RunOutcome> {
+mod win_job {
+    use super::*;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::*;
+
+    pub struct Job(HANDLE);
+
+    impl Job {
+        /// 按 limits 建 Job；失败（旧系统/权限）返回 None → 走基础路径
+        pub fn new(limits: &Limits) -> Option<Self> {
+            unsafe {
+                let h = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+                if h.is_null() {
+                    return None;
+                }
+                let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                    | JOB_OBJECT_LIMIT_PROCESS_MEMORY
+                    | JOB_OBJECT_LIMIT_PROCESS_TIME;
+                // PerProcessUserTimeLimit 单位是 100ns，只计 user 态——放宽 2 倍再 +2s 余量，
+                // 精确 TLE 判定靠退出后读 TotalUserTime+TotalKernelTime
+                let cpu_100ns = limits
+                    .cpu_ms
+                    .saturating_mul(2)
+                    .saturating_add(2000)
+                    .saturating_mul(10_000) as i64;
+                info.BasicLimitInformation.PerProcessUserTimeLimit = cpu_100ns;
+                info.ProcessMemoryLimit = limits.memory_mb.saturating_mul(1024 * 1024) as usize;
+                if SetInformationJobObject(
+                    h,
+                    JobObjectExtendedLimitInformation,
+                    &info as *const _ as *const _,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                ) == 0
+                {
+                    CloseHandle(h);
+                    return None;
+                }
+                Some(Self(h))
+            }
+        }
+
+        pub fn assign(&self, process: HANDLE) -> std::io::Result<()> {
+            unsafe {
+                if AssignProcessToJobObject(self.0, process) == 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            }
+        }
+
+        pub fn kill(&self) {
+            unsafe {
+                TerminateJobObject(self.0, 1);
+            }
+        }
+
+        /// (cpu_ms, 累计写出字节)
+        pub fn accounting(&self) -> Option<(u64, u64)> {
+            unsafe {
+                let mut acc: JOBOBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION = std::mem::zeroed();
+                if QueryInformationJobObject(
+                    self.0,
+                    JobObjectBasicAndIoAccountingInformation,
+                    &mut acc as *mut _ as *mut _,
+                    std::mem::size_of::<JOBOBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION>() as u32,
+                    std::ptr::null_mut(),
+                ) == 0
+                {
+                    return None;
+                }
+                let cpu_100ns = acc.BasicInfo.TotalUserTime + acc.BasicInfo.TotalKernelTime;
+                Some(((cpu_100ns / 10_000).max(0) as u64, acc.IoInfo.WriteTransferCount))
+            }
+        }
+
+        /// 峰值内存（KB，整个 job 累计峰值）
+        pub fn peak_mem_kb(&self) -> u64 {
+            unsafe {
+                let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                if QueryInformationJobObject(
+                    self.0,
+                    JobObjectExtendedLimitInformation,
+                    &mut info as *mut _ as *mut _,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                    std::ptr::null_mut(),
+                ) == 0
+                {
+                    return 0;
+                }
+                (info.PeakJobMemoryUsed / 1024) as u64
+            }
+        }
+    }
+
+    impl Drop for Job {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn run_blocking(prog: &Program, io: &Io, limits: &Limits, cancel: Option<Arc<AtomicBool>>) -> Result<RunOutcome> {
     use std::process::{Command, Stdio};
 
     let stdin = match &io.stdin {
@@ -211,40 +343,78 @@ fn run_blocking(prog: &Program, io: &Io, limits: &Limits) -> Result<RunOutcome> 
     let mut child = cmd.spawn().map_err(|e| JudgeError::Sandbox(format!("spawn: {e}")))?;
     let start = Instant::now();
     let wall_limit = Duration::from_millis(limits.wall_ms.max(500));
+    let fsize_bytes = limits.output_mb.saturating_mul(1024 * 1024);
 
-    loop {
+    // Job Object：assign 失败（比如父进程已在不兼容的 job 里）→ 退回无沙箱路径
+    use std::os::windows::io::AsRawHandle;
+    let job = win_job::Job::new(limits).and_then(|j| match j.assign(child.as_raw_handle() as _) {
+        Ok(()) => Some(j),
+        Err(e) => {
+            tracing::warn!("assign job failed, sandbox off: {e}");
+            None
+        }
+    });
+
+    let (mut status, exit_code) = loop {
         match child.try_wait()? {
-            Some(st) => {
-                return Ok(RunOutcome {
-                    status: if st.success() { RunStatus::Ok } else { RunStatus::RuntimeError },
-                    exit_code: st.code().unwrap_or(-1),
-                    cpu_ms: start.elapsed().as_millis() as u64,
-                    wall_ms: start.elapsed().as_millis() as u64,
-                    peak_mem_kb: 0,
-                    stdout_path: io.stdout.clone(),
-                    stderr_path: io.stderr.clone(),
-                    internal: String::new(),
-                });
-            }
+            Some(st) => break (if st.success() { RunStatus::Ok } else { RunStatus::RuntimeError }, st.code().unwrap_or(-1)),
             None => {
+                let mut kill_reason = None;
                 if start.elapsed() > wall_limit {
-                    let _ = child.kill();
+                    kill_reason = Some(RunStatus::TimeLimit);
+                } else if cancel.as_ref().is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed)) {
+                    kill_reason = Some(RunStatus::Cancelled);
+                } else if let Some(j) = &job {
+                    // 实时输出计数（含 stderr/文件写，偏保守）
+                    if let Some((_, written)) = j.accounting() {
+                        if written > fsize_bytes {
+                            kill_reason = Some(RunStatus::OutputLimit);
+                        }
+                    }
+                }
+                if let Some(st) = kill_reason {
+                    match &job {
+                        Some(j) => j.kill(),
+                        None => {
+                            let _ = child.kill();
+                        }
+                    }
                     let _ = child.wait();
-                    return Ok(RunOutcome {
-                        status: RunStatus::TimeLimit,
-                        exit_code: -1,
-                        cpu_ms: limits.wall_ms,
-                        wall_ms: start.elapsed().as_millis() as u64,
-                        peak_mem_kb: 0,
-                        stdout_path: io.stdout.clone(),
-                        stderr_path: io.stderr.clone(),
-                        internal: String::new(),
-                    });
+                    break (st, -1);
                 }
                 std::thread::sleep(Duration::from_millis(3));
             }
         }
+    };
+
+    let elapsed = start.elapsed().as_millis() as u64;
+    let (cpu_ms, peak_kb) = job
+        .as_ref()
+        .map(|j| (j.accounting().map(|(c, _)| c).unwrap_or(elapsed), j.peak_mem_kb()))
+        .unwrap_or((elapsed, 0));
+
+    // 兜底判定：job 的 CPU/内存硬限触发时进程被杀死 → try_wait 拿到非 0 退出码（RE），
+    // 这里用 job 记账把误报的 RE 修回 TLE/MLE
+    if matches!(status, RunStatus::Ok | RunStatus::RuntimeError) {
+        if cpu_ms > limits.cpu_ms {
+            status = RunStatus::TimeLimit;
+        } else if peak_kb > limits.memory_mb.saturating_mul(1024) {
+            status = RunStatus::MemoryLimit;
+        } else if std::fs::metadata(&io.stdout).map(|m| m.len()).unwrap_or(0) > fsize_bytes {
+            status = RunStatus::OutputLimit;
+        }
     }
+
+    Ok(RunOutcome {
+        status,
+        exit_code,
+        cpu_ms,
+        wall_ms: elapsed,
+        peak_mem_kb: peak_kb,
+        stdout_path: io.stdout.clone(),
+        stderr_path: io.stderr.clone(),
+        internal: String::new(),
+    })
 }
 
 
@@ -276,7 +446,7 @@ mod tests {
     #[tokio::test]
     async fn echo_ok() {
         let (io, _d) = io_paths("echo");
-        let out = run_program(&prog(&["/bin/echo", "hello"]), &io, &Limits::default()).await.unwrap();
+        let out = run_program(&prog(&["/bin/echo", "hello"]), &io, &Limits::default(), None).await.unwrap();
         assert_eq!(out.status, RunStatus::Ok);
         assert_eq!(std::fs::read_to_string(&out.stdout_path).unwrap().trim(), "hello");
     }
@@ -286,14 +456,37 @@ mod tests {
         let (io, _d) = io_paths("sleep");
         let mut l = Limits::default();
         l.wall_ms = 200;
-        let out = run_program(&prog(&["/bin/sleep", "10"]), &io, &l).await.unwrap();
+        let out = run_program(&prog(&["/bin/sleep", "10"]), &io, &l, None).await.unwrap();
         assert_eq!(out.status, RunStatus::TimeLimit);
     }
 
     #[tokio::test]
     async fn exit_nonzero_re() {
         let (io, _d) = io_paths("false");
-        let out = run_program(&prog(&["/usr/bin/false"]), &io, &Limits::default()).await.unwrap();
+        let out = run_program(&prog(&["/usr/bin/false"]), &io, &Limits::default(), None).await.unwrap();
         assert_eq!(out.status, RunStatus::RuntimeError);
+    }
+
+    #[tokio::test]
+    async fn cancel_kills_child() {
+        let (io, _d) = io_paths("cancel");
+        let cancel = Arc::new(AtomicBool::new(false));
+        let c2 = cancel.clone();
+        let p = prog(&["/bin/sleep", "30"]);
+        let l = Limits::default();
+        let h = tokio::spawn(async move { run_program(&p, &io, &l, Some(c2)).await });
+        std::thread::sleep(Duration::from_millis(100));
+        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        let out = h.await.unwrap().unwrap();
+        assert_eq!(out.status, RunStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn output_limit() {
+        let (io, _d) = io_paths("ole");
+        let l = Limits { cpu_ms: 5000, wall_ms: 10000, memory_mb: 256, output_mb: 0 };
+        // yes 输出无限流，应被判 OutputLimit
+        let out = run_program(&prog(&["/usr/bin/yes"]), &io, &l, None).await.unwrap();
+        assert_eq!(out.status, RunStatus::OutputLimit);
     }
 }

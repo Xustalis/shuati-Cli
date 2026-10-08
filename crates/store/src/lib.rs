@@ -26,11 +26,15 @@ pub enum StoreError {
     Json(#[from] serde_json::Error),
     #[error("problem not found: {0}")]
     NotFound(String),
+    #[error("problem already exists at {0}")]
+    Exists(PathBuf),
     #[error("invalid manifest at {0}: {1}")]
     Invalid(PathBuf, String),
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
+
+pub mod secrets;
 
 /// 原子写：写临时文件再 rename，崩溃不留半截文件。
 pub fn atomic_write(path: &std::path::Path, data: &[u8]) -> io::Result<()> {

@@ -13,6 +13,11 @@ impl Workspace {
     pub fn open(root: impl Into<PathBuf>) -> Result<Self> {
         let root = root.into();
         std::fs::create_dir_all(root.join("problems"))?;
+        // 防 api_key 等被 git 推上去：补一份 .gitignore（不覆盖用户已有的）
+        let gi = root.join(".gitignore");
+        if !gi.exists() {
+            let _ = std::fs::write(&gi, "config.toml\n.cache/\n");
+        }
         Ok(Self { root })
     }
 

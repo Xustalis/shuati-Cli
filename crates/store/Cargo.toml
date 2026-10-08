@@ -12,3 +12,11 @@ toml.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 tempfile.workspace = true
+tracing.workspace = true
+# Windows 凭据管理器 + macOS Keychain + Linux Secret Service（RustCrypto 后端，不依赖 openssl）
+keyring = { version = "3", default-features = false, features = [
+    "apple-native",
+    "windows-native",
+    "sync-secret-service",
+    "crypto-rust",
+] }

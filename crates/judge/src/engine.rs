@@ -89,7 +89,7 @@ impl TestEngine {
                     if i >= cases.len() {
                         break;
                     }
-                    let r = run_one(&prog, &cases[i], &limits, &checker, &tmp, i).await;
+                    let r = run_one(&prog, &cases[i], &limits, &checker, &tmp, i, cancel.clone()).await;
                     if let Some(cb) = &progress {
                         cb(i + 1, cases.len(), &r);
                     }
@@ -132,6 +132,7 @@ async fn run_one(
     checker: &CheckerSpec,
     tmpdir: &PathBuf,
     idx: usize,
+    cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
 ) -> CaseResult {
     let base = tmpdir.join(format!("case_{idx}"));
     let in_f = base.with_extension("in");
@@ -142,7 +143,7 @@ async fn run_one(
     }
 
     let io = crate::Io { stdin: Some(in_f.clone()), stdout: out_f.clone(), stderr: err_f.clone() };
-    let outcome = match run_program(prog, &io, limits).await {
+    let outcome = match run_program(prog, &io, limits, cancel).await {
         Ok(o) => o,
         Err(e) => return err_result(&tc.name, e.to_string()),
     };
@@ -151,19 +152,29 @@ async fn run_one(
     let stderr_text = std::fs::read_to_string(&err_f).unwrap_or_default();
 
     let (verdict, message) = match outcome.status {
-        RunStatus::Ok => {
-            let expected = tc.expected.clone().unwrap_or_default();
-            let ctx = shuati_core::CheckCtx { input: &tc.input, actual: &actual, expected: &expected };
-            match check_async(checker, &ctx, tmpdir).await {
-                Ok(v) => (v, String::new()),
-                Err(e) => (Verdict::Se, e.to_string()),
+        RunStatus::Ok => match &tc.expected {
+            // 无 .out 的用例当 smoke run：能跑完即算过，标注明示
+            None => (Verdict::Ac, "（无 .out 答案，仅验证可运行）".into()),
+            Some(expected) => {
+                let ctx = shuati_core::CheckCtx { input: &tc.input, actual: &actual, expected };
+                match check_async(checker, &ctx, tmpdir).await {
+                    Ok(v) => (v, String::new()),
+                    Err(e) => (Verdict::Se, e.to_string()),
+                }
             }
-        }
+        },
         RunStatus::TimeLimit => (Verdict::Tle, String::new()),
         RunStatus::MemoryLimit => (Verdict::Mle, String::new()),
+        RunStatus::OutputLimit => (Verdict::Ole, "输出超过 output_mb 限制".into()),
+        RunStatus::Cancelled => (Verdict::Se, "已取消".into()),
         RunStatus::RuntimeError => (
             Verdict::Re,
-            if stderr_text.is_empty() { format!("exit code {}", outcome.exit_code) } else { stderr_text },
+            if stderr_text.is_empty() {
+                format!("exit code {}", outcome.exit_code)
+            } else {
+                // stderr 可能巨大（本地化报错/死循环打印），留头部 2k 够用
+                stderr_text.chars().take(2000).collect()
+            },
         ),
         RunStatus::InternalError => (Verdict::Se, outcome.internal.clone()),
     };
@@ -174,10 +185,29 @@ async fn run_one(
         cpu_ms: outcome.cpu_ms,
         memory_kb: outcome.peak_mem_kb,
         message,
-        input: tc.input.clone(),
-        actual,
-        expected: tc.expected.clone().unwrap_or_default(),
+        // 报告只为 diff 展示服务——完整数据在 tests/ 文件里，截断防报告膨胀
+        input: cap_io(&tc.input),
+        actual: cap_io(&actual),
+        expected: cap_io(tc.expected.as_deref().unwrap_or("")),
     }
+}
+
+/// 报告里单个 IO 字段的上限：完整数据在 tests/ 和 stress/hack_* 里
+const REPORT_IO_CAP: usize = 64 * 1024;
+
+fn cap_io(s: &str) -> String {
+    if s.len() <= REPORT_IO_CAP {
+        return s.to_string();
+    }
+    // UTF-8 边界安全截断（直接按字节切会在多字节中间 panic）
+    let mut end = 0;
+    for (i, c) in s.char_indices() {
+        if i > REPORT_IO_CAP {
+            break;
+        }
+        end = i + c.len_utf8();
+    }
+    format!("{}…(truncated, 完整见 tests/)", &s[..end])
 }
 
 fn err_result(name: &str, msg: String) -> CaseResult {

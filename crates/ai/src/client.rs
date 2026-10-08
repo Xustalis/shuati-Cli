@@ -51,7 +51,8 @@ impl AiClient {
         let status = resp.status();
         let text = resp.text().await.map_err(|e| AiError::Api(e.to_string()))?;
         if !status.is_success() {
-            return Err(AiError::Api(format!("HTTP {status}: {}", &text[..text.len().min(300)])));
+            let preview: String = text.chars().take(300).collect();
+            return Err(AiError::Api(format!("HTTP {status}: {preview}")));
         }
         let v: serde_json::Value =
             serde_json::from_str(&text).map_err(|e| AiError::Parse(e.to_string()))?;
@@ -62,6 +63,79 @@ impl AiClient {
             .and_then(|c| c.as_str())
             .map(|s| s.to_string())
             .ok_or_else(|| AiError::Parse("no content".into()))
+    }
+
+    /// 单轮 chat，SSE 流式：on_delta 逐段收到增量文本，返回完整拼接结果。
+    /// UI 可以实时滚动显示，不用干等几十秒。
+    pub async fn chat_stream<F: FnMut(&str) + Send>(&self, system: &str, user: &str, on_delta: &mut F) -> Result<String> {
+        let url = format!("{}/chat/completions", self.api_base);
+        let body = json!({
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": 0.3,
+            "max_tokens": 4096,
+            "stream": true,
+        });
+        let resp = self
+            .client
+            .post(&url)
+            .bearer_auth(&self.api_key)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| AiError::Api(e.to_string()))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.map_err(|e| AiError::Api(e.to_string()))?;
+            let preview: String = text.chars().take(300).collect();
+            return Err(AiError::Api(format!("HTTP {status}: {preview}")));
+        }
+
+        use futures_util::StreamExt;
+        let mut acc = String::new();
+        let mut buf = String::new();
+        let mut stream = resp.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| AiError::Api(e.to_string()))?;
+            // SSE 事件以空行分隔；\r\n 服务器先归一化成 \n
+            buf.push_str(&String::from_utf8_lossy(&chunk).replace('\r', ""));
+            while let Some(pos) = buf.find("\n\n") {
+                // 事件体 + 分隔空行一起出队，lines() 会忽略尾部空行
+                let event: String = buf.drain(..pos + 2).collect();
+                for piece in parse_sse_event(&event) {
+                    match piece {
+                        SsePiece::Done => return Ok(acc),
+                        SsePiece::Text(d) => {
+                            acc.push_str(&d);
+                            on_delta(&d);
+                        }
+                    }
+                }
+            }
+        }
+        if acc.is_empty() {
+            return Err(AiError::Parse("stream ended without content".into()));
+        }
+        Ok(acc)
+    }
+
+    /// 流式提示
+    pub async fn hint_stream<F: FnMut(&str) + Send>(&self, statement: &str, code: &str, verdict_info: &str, on_delta: &mut F) -> Result<String> {
+        let user = format!(
+            "题目:\n{statement}\n\n我的代码:\n```\n{code}\n```\n\n判题结果: {verdict_info}\n\n请给一个提示：指出大概方向，但不要直接给完整代码。"
+        );
+        self.chat_stream(crate::prompts::HINT_SYS, &user, on_delta).await
+    }
+
+    /// 流式诊断
+    pub async fn explain_stream<F: FnMut(&str) + Send>(&self, statement: &str, code: &str, verdict_info: &str, io_detail: &str, on_delta: &mut F) -> Result<String> {
+        let user = format!(
+            "题目:\n{statement}\n\n我的代码:\n```\n{code}\n```\n\n判题结果: {verdict_info}\n\n相关输入输出:\n```\n{io_detail}\n```\n\n请诊断出错原因，简洁指出 bug 在哪。"
+        );
+        self.chat_stream(crate::prompts::EXPLAIN_SYS, &user, on_delta).await
     }
 
     /// 提示：不给完整答案，只指方向
@@ -97,5 +171,62 @@ impl AiClient {
         );
         let text = self.chat(crate::prompts::GEN_SYS, &user).await?;
         crate::scripts::parse(&text).ok_or_else(|| AiError::Parse("响应中没有 <gen>/<oracle> 块".into()))
+    }
+}
+
+/// SSE 事件里能拆出的东西
+enum SsePiece {
+    Done,
+    Text(String),
+}
+
+/// 解析一个 SSE 事件体（空行分隔的一段）：提取所有 data: 行里的 delta.content。
+/// 非 data 行（comment/event:/id:）和坏 JSON 一律跳过——容错优先。
+fn parse_sse_event(event: &str) -> Vec<SsePiece> {
+    event
+        .lines()
+        .filter_map(|line| {
+            let data = line.strip_prefix("data:")?.trim();
+            if data == "[DONE]" {
+                return Some(SsePiece::Done);
+            }
+            let v = serde_json::from_str::<serde_json::Value>(data).ok()?;
+            v.pointer("/choices/0/delta/content")
+                .and_then(|c| c.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| SsePiece::Text(s.to_string()))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sse_event_extracts_delta_text() {
+        let ev = "data: {\"choices\":[{\"delta\":{\"content\":\"你好\"}}]}\n";
+        let pieces = parse_sse_event(ev);
+        assert!(matches!(&pieces[..], [SsePiece::Text(t)] if t == "你好"));
+    }
+
+    #[test]
+    fn sse_event_handles_done_and_junk() {
+        assert!(matches!(&parse_sse_event("data: [DONE]\n")[..], [SsePiece::Done]));
+        assert!(parse_sse_event("data: not-json\n").is_empty());
+        assert!(parse_sse_event(": keep-alive\n\nevent: ping\n").is_empty());
+        // role-only delta（首包常见）没有 content → 忽略
+        assert!(parse_sse_event("data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n").is_empty());
+    }
+
+    #[test]
+    fn sse_event_multi_line_data() {
+        // 一个事件多 data 行（少见但合法）：全都要
+        let ev = "data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\ndata: {\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n";
+        let texts: Vec<String> = parse_sse_event(ev)
+            .into_iter()
+            .filter_map(|p| match p { SsePiece::Text(t) => Some(t), _ => None })
+            .collect();
+        assert_eq!(texts, ["a", "b"]);
     }
 }
