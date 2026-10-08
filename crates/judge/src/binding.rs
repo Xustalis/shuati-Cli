@@ -15,10 +15,7 @@ pub fn binding_comment(src: &Path) -> Option<ProblemId> {
         }
         let toks: Vec<&str> = rest.split_whitespace().collect();
         // 候选："luogu:P1001" 整词 或 "luogu P1001" 两词拼接
-        let cands = [
-            toks[0].to_string(),
-            format!("{}:{}", toks[0], toks.get(1).copied().unwrap_or_default()),
-        ];
+        let cands = [toks[0].to_string(), format!("{}:{}", toks[0], toks.get(1).copied().unwrap_or_default())];
         for cand in cands {
             if let Some(id) = ProblemId::parse(&cand) {
                 return Some(id);

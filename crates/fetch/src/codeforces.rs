@@ -2,17 +2,22 @@
 //! - API（contest.standings）拿标题/难度/tags —— 稳定不被拦
 //! - HTML 页抓题面+样例 —— Cloudflare 防护下可能 403，失败时降级为仅元数据
 
-use crate::{http, FetchError, FetchedProblem, Provider};
+use crate::{FetchError, FetchedProblem, Provider, http};
 use regex::Regex;
 use scraper::{Html, Selector};
 use shuati_core::{ProblemId, Source};
 use std::sync::LazyLock;
 
-static URL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:problemset/problem|contest|gym)/(\d+)(?:/problem)?/([A-Za-z]\d*)").unwrap()
-});
+static URL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:problemset/problem|contest|gym)/(\d+)(?:/problem)?/([A-Za-z]\d*)").unwrap());
 
 pub struct CodeforcesProvider;
+
+impl Default for CodeforcesProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl CodeforcesProvider {
     pub fn new() -> Self {
@@ -24,9 +29,9 @@ impl CodeforcesProvider {
 fn rating_str(r: u64) -> String {
     match r {
         ..=1000 => "入门",
-        ..=1400 => "普及",
-        ..=1800 => "提高",
-        ..=2200 => "省选",
+        1001..=1400 => "普及",
+        1401..=1800 => "提高",
+        1801..=2200 => "省选",
         _ => "NOI",
     }
     .to_string()
@@ -35,17 +40,11 @@ fn rating_str(r: u64) -> String {
 /// pre 块文本：CF 把行包在 div.test-example-line，无包裹时是 <br> 分行
 fn pre_text(el: &scraper::ElementRef) -> String {
     let sel_line = Selector::parse("div.test-example-line").unwrap();
-    let lines: Vec<String> = el
-        .select(&sel_line)
-        .map(|d| d.text().collect::<String>())
-        .collect();
+    let lines: Vec<String> = el.select(&sel_line).map(|d| d.text().collect::<String>()).collect();
     if !lines.is_empty() {
         return lines.join("\n") + "\n";
     }
-    let html = el.inner_html()
-        .replace("<br>", "\n")
-        .replace("<br/>", "\n")
-        .replace("<br />", "\n");
+    let html = el.inner_html().replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n");
     let re = Regex::new(r"<[^>]+>").unwrap();
     re.replace_all(&html, "").to_string()
 }
@@ -74,11 +73,7 @@ async fn fetch_meta(contest: &str, index: &str) -> Option<ApiMeta> {
                 tags: p
                     .get("tags")
                     .and_then(|t| t.as_array())
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|x| x.as_str().map(String::from))
-                            .collect()
-                    })
+                    .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
                     .unwrap_or_default(),
             });
         }
@@ -101,10 +96,7 @@ fn el_text(el: &scraper::ElementRef) -> String {
 /// 纯函数：从 problem-statement HTML 提取 limits/样例/题面段落（可单测）
 fn parse_page(html: &str) -> Result<PageData, FetchError> {
     let doc = Html::parse_document(html);
-    let stmt_el = doc
-        .select(&Selector::parse("div.problem-statement").unwrap())
-        .next()
-        .ok_or(FetchError::NotFound)?;
+    let stmt_el = doc.select(&Selector::parse("div.problem-statement").unwrap()).next().ok_or(FetchError::NotFound)?;
 
     static NUM_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d+\.?\d*)").unwrap());
     let first_num = |el: &scraper::ElementRef| -> Option<f64> {
@@ -123,14 +115,10 @@ fn parse_page(html: &str) -> Result<PageData, FetchError> {
         .and_then(|el| first_num(&el))
         .map(|mb| mb as u64);
 
-    let ins: Vec<String> = stmt_el
-        .select(&Selector::parse("div.sample-test div.input pre").unwrap())
-        .map(|e| pre_text(&e))
-        .collect();
-    let outs: Vec<String> = stmt_el
-        .select(&Selector::parse("div.sample-test div.output pre").unwrap())
-        .map(|e| pre_text(&e))
-        .collect();
+    let ins: Vec<String> =
+        stmt_el.select(&Selector::parse("div.sample-test div.input pre").unwrap()).map(|e| pre_text(&e)).collect();
+    let outs: Vec<String> =
+        stmt_el.select(&Selector::parse("div.sample-test div.output pre").unwrap()).map(|e| pre_text(&e)).collect();
     let samples: Vec<(String, String)> = ins.into_iter().zip(outs).collect();
 
     // 题面段落
@@ -155,6 +143,65 @@ async fn fetch_page(contest: &str, index: &str) -> Result<PageData, FetchError> 
         return Err(FetchError::Network("Cloudflare 拦截".into()));
     }
     parse_page(&html)
+}
+
+#[async_trait::async_trait]
+impl Provider for CodeforcesProvider {
+    fn name(&self) -> &'static str {
+        "codeforces"
+    }
+
+    fn matches(&self, url: &str) -> bool {
+        url.contains("codeforces.com")
+    }
+
+    async fn fetch(&self, url: &str) -> Result<FetchedProblem, FetchError> {
+        let caps = URL_RE.captures(url).ok_or_else(|| FetchError::UnsupportedUrl(url.to_string()))?;
+        let contest = caps[1].to_string();
+        let index = caps[2].to_uppercase();
+        let slug = format!("{contest}{index}");
+        let page_url = format!("https://codeforces.com/problemset/problem/{contest}/{index}");
+
+        // 并拉：API 元数据 + HTML 页面
+        let (meta, page) = tokio::join!(fetch_meta(&contest, &index), fetch_page(&contest, &index));
+
+        let title = meta.as_ref().map(|m| format!("{contest}{index}. {}", m.title)).unwrap_or_else(|| slug.clone());
+
+        let (statement, samples, time_ms, mem_mb) = match page {
+            Ok(pd) => (pd.statement, pd.samples, pd.time_ms, pd.mem_mb),
+            Err(e) => {
+                tracing::warn!("CF 页面抓取失败({e})，仅保存元数据");
+                (
+                    format!("题面抓取失败（{e}）。CF 有反爬防护，请到 {page_url} 手动复制题面和样例。"),
+                    vec![],
+                    None,
+                    None,
+                )
+            }
+        };
+
+        let mut stmt = format!("# {title}\n\n> {page_url}\n\n{statement}");
+        for (i, (inp, outp)) in samples.iter().enumerate() {
+            stmt.push_str(&format!(
+                "## 样例 {}\n输入:\n```\n{}\n```\n输出:\n```\n{}\n```\n\n",
+                i + 1,
+                inp.trim_end(),
+                outp.trim_end()
+            ));
+        }
+
+        Ok(FetchedProblem {
+            id: ProblemId::new(Source::Codeforces, slug),
+            title,
+            url: page_url,
+            statement: stmt,
+            samples,
+            time_limit_ms: time_ms,
+            memory_limit_mb: mem_mb,
+            tags: meta.as_ref().map(|m| m.tags.clone()).unwrap_or_default(),
+            difficulty: meta.and_then(|m| m.rating.map(rating_str)),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -199,72 +246,5 @@ mod tests {
     #[test]
     fn missing_statement_is_notfound() {
         assert!(matches!(parse_page("<html><body></body></html>"), Err(FetchError::NotFound)));
-    }
-}
-
-#[async_trait::async_trait]
-impl Provider for CodeforcesProvider {
-    fn name(&self) -> &'static str {
-        "codeforces"
-    }
-
-    fn matches(&self, url: &str) -> bool {
-        url.contains("codeforces.com")
-    }
-
-    async fn fetch(&self, url: &str) -> Result<FetchedProblem, FetchError> {
-        let caps = URL_RE
-            .captures(url)
-            .ok_or_else(|| FetchError::UnsupportedUrl(url.to_string()))?;
-        let contest = caps[1].to_string();
-        let index = caps[2].to_uppercase();
-        let slug = format!("{contest}{index}");
-        let page_url = format!("https://codeforces.com/problemset/problem/{contest}/{index}");
-
-        // 并拉：API 元数据 + HTML 页面
-        let (meta, page) = tokio::join!(
-            fetch_meta(&contest, &index),
-            fetch_page(&contest, &index)
-        );
-
-        let title = meta
-            .as_ref()
-            .map(|m| format!("{contest}{index}. {}", m.title))
-            .unwrap_or_else(|| slug.clone());
-
-        let (statement, samples, time_ms, mem_mb) = match page {
-            Ok(pd) => (pd.statement, pd.samples, pd.time_ms, pd.mem_mb),
-            Err(e) => {
-                tracing::warn!("CF 页面抓取失败({e})，仅保存元数据");
-                (
-                    format!("题面抓取失败（{e}）。CF 有反爬防护，请到 {page_url} 手动复制题面和样例。"),
-                    vec![],
-                    None,
-                    None,
-                )
-            }
-        };
-
-        let mut stmt = format!("# {title}\n\n> {page_url}\n\n{statement}");
-        for (i, (inp, outp)) in samples.iter().enumerate() {
-            stmt.push_str(&format!(
-                "## 样例 {}\n输入:\n```\n{}\n```\n输出:\n```\n{}\n```\n\n",
-                i + 1,
-                inp.trim_end(),
-                outp.trim_end()
-            ));
-        }
-
-        Ok(FetchedProblem {
-            id: ProblemId::new(Source::Codeforces, slug),
-            title,
-            url: page_url,
-            statement: stmt,
-            samples,
-            time_limit_ms: time_ms,
-            memory_limit_mb: mem_mb,
-            tags: meta.as_ref().map(|m| m.tags.clone()).unwrap_or_default(),
-            difficulty: meta.and_then(|m| m.rating.map(rating_str)),
-        })
     }
 }

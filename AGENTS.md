@@ -37,7 +37,7 @@ crates/
 - 文件是唯一真相源，DB 不存在
 - 编译产物缓存：`compile_cached(src, tc, ws.cache_dir())`，指纹 = 源文件 mtime+size+编译器路径；`Program.cached=true` 时 `cleanup_program` 不删
 - Rust 2024：`gen` 是保留字，变量/字段用 `generator`/`genf`
-- 改动后：`cargo build --workspace && cargo test --workspace` 全绿才提交
+- 改动后：`cargo fmt && cargo clippy --workspace --all-targets && cargo build --workspace && cargo test --workspace` 全绿才提交（CI 强制 fmt --check + clippy -D warnings）
 
 ## 冒烟清单
 

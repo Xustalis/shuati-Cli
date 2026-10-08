@@ -48,7 +48,8 @@ fn extract_block(text: &str, fence: &str, n: usize) -> Option<String> {
 
 fn strip_fences(s: &str) -> String {
     let t = s.trim();
-    let t = t.strip_prefix("```").map(|x| x.trim_start_matches(|c: char| c.is_alphanumeric()).trim_start()).unwrap_or(t);
+    let t =
+        t.strip_prefix("```").map(|x| x.trim_start_matches(|c: char| c.is_alphanumeric()).trim_start()).unwrap_or(t);
     t.strip_suffix("```").unwrap_or(t).trim().to_string()
 }
 

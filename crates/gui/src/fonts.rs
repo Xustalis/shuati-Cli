@@ -43,9 +43,7 @@ pub fn install(ctx: &egui::Context) -> Option<String> {
             if ab_glyph::FontVec::try_from_vec_and_index(bytes.clone(), index).is_ok() {
                 let mut data = egui::FontData::from_owned(bytes.clone());
                 data.index = index;
-                fonts
-                    .font_data
-                    .insert("cjk".to_string(), Arc::new(data));
+                fonts.font_data.insert("cjk".to_string(), Arc::new(data));
                 loaded = Some(format!("{path}#{index}"));
                 break 'files;
             }
@@ -57,16 +55,8 @@ pub fn install(ctx: &egui::Context) -> Option<String> {
     }
 
     if let Some(found) = &loaded {
-        fonts
-            .families
-            .entry(egui::FontFamily::Proportional)
-            .or_default()
-            .push("cjk".to_string());
-        fonts
-            .families
-            .entry(egui::FontFamily::Monospace)
-            .or_default()
-            .push("cjk".to_string());
+        fonts.families.entry(egui::FontFamily::Proportional).or_default().push("cjk".to_string());
+        fonts.families.entry(egui::FontFamily::Monospace).or_default().push("cjk".to_string());
         ctx.set_fonts(fonts);
         tracing::info!("CJK font loaded: {found}");
     } else {
@@ -79,16 +69,8 @@ pub fn install(ctx: &egui::Context) -> Option<String> {
 pub fn tune_text_styles(ctx: &egui::Context) {
     use egui::{FontId, TextStyle};
     ctx.style_mut(|style| {
-        for ts in [
-            TextStyle::Body,
-            TextStyle::Button,
-            TextStyle::Heading,
-            TextStyle::Monospace,
-        ] {
-            style
-                .text_styles
-                .entry(ts)
-                .and_modify(|f| *f = FontId::new(f.size * 1.15, f.family.clone()));
+        for ts in [TextStyle::Body, TextStyle::Button, TextStyle::Heading, TextStyle::Monospace] {
+            style.text_styles.entry(ts).and_modify(|f| *f = FontId::new(f.size * 1.15, f.family.clone()));
         }
     });
 }

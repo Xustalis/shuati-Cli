@@ -1,7 +1,7 @@
 //! 编译器抽象：源码 → Program。
 //! argv 数组调用，无 shell 拼接——命令注入在类型层面不存在。
 
-use crate::{detect_toolchain, JudgeError, Program, Result};
+use crate::{JudgeError, Program, Result, detect_toolchain};
 use shuati_core::{Lang, SourceFile};
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -19,8 +19,8 @@ pub struct Toolchain {
 
 impl Toolchain {
     pub fn detect(lang: Lang, configured: &str) -> Result<Self> {
-        let executable = detect_toolchain(lang, configured)
-            .ok_or_else(|| JudgeError::CompilerNotFound(format!("{lang:?}")))?;
+        let executable =
+            detect_toolchain(lang, configured).ok_or_else(|| JudgeError::CompilerNotFound(format!("{lang:?}")))?;
         Ok(Self { lang, executable })
     }
 }
@@ -57,7 +57,9 @@ fn cache_key(src_path: &std::path::Path, compiler: &std::path::Path) -> String {
 fn src_fingerprint(src_path: &std::path::Path) -> String {
     match std::fs::metadata(src_path) {
         Ok(m) => {
-            let mt = m.modified().ok()
+            let mt = m
+                .modified()
+                .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_nanos())
                 .unwrap_or(0);
@@ -75,26 +77,22 @@ async fn compile_cpp(src: &SourceFile, tc: &Toolchain, cache_dir: Option<&std::p
             std::fs::create_dir_all(&dir).map_err(JudgeError::Io)?;
             (dir, true)
         }
-        None => (
-            src_path.parent().unwrap_or_else(|| std::path::Path::new(".")).to_path_buf(),
-            false,
-        )
+        None => (src_path.parent().unwrap_or_else(|| std::path::Path::new(".")).to_path_buf(), false),
     };
     let artifact = out_dir.join(if cfg!(windows) { "shuati_exe.exe" } else { "shuati_exe" });
     let meta_path = out_dir.join("meta.txt");
     let fingerprint = src_fingerprint(&src_path);
 
     // 缓存命中：指纹一致且产物在 → 零编译直接返回
-    if cached && artifact.exists() {
-        if std::fs::read_to_string(&meta_path).ok().as_deref() == Some(fingerprint.as_str()) {
-            return Ok(Program {
-                argv: vec![artifact.to_string_lossy().to_string()],
-                lang: Lang::Cpp,
-                artifact,
-                workdir: src_path.parent().unwrap_or_else(|| std::path::Path::new(".")).to_path_buf(),
-                cached: true,
-            });
-        }
+    if cached && artifact.exists() && std::fs::read_to_string(&meta_path).ok().as_deref() == Some(fingerprint.as_str())
+    {
+        return Ok(Program {
+            argv: vec![artifact.to_string_lossy().to_string()],
+            lang: Lang::Cpp,
+            artifact,
+            workdir: src_path.parent().unwrap_or_else(|| std::path::Path::new(".")).to_path_buf(),
+            cached: true,
+        });
     }
 
     // 标准探测：优先 c++17（兼容性最广），失败再试 c++20
@@ -161,15 +159,10 @@ async fn prepare_python(src: &SourceFile, tc: &Toolchain) -> Result<Program> {
     .map_err(JudgeError::Io)?;
 
     if !output.status.success() {
-        return Err(JudgeError::Compile(
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ));
+        return Err(JudgeError::Compile(String::from_utf8_lossy(&output.stderr).trim().to_string()));
     }
     Ok(Program {
-        argv: vec![
-            tc.executable.to_string_lossy().to_string(),
-            src_path.to_string_lossy().to_string(),
-        ],
+        argv: vec![tc.executable.to_string_lossy().to_string(), src_path.to_string_lossy().to_string()],
         lang: Lang::Python,
         artifact: src_path.clone(),
         workdir: src_path.parent().unwrap_or_else(|| std::path::Path::new(".")).to_path_buf(),

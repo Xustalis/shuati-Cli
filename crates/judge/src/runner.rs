@@ -4,8 +4,8 @@
 use crate::{Io, JudgeError, Program, Result};
 use shuati_core::Limits;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 /// 一次运行的结构化结果
@@ -72,11 +72,7 @@ fn run_blocking(prog: &Program, io: &Io, limits: &Limits, cancel: Option<Arc<Ato
     let cpu_secs = limits.cpu_ms.div_ceil(1000) + 1;
 
     let mut cmd = Command::new(&prog.argv[0]);
-    cmd.args(&prog.argv[1..])
-        .current_dir(&prog.workdir)
-        .stdin(stdin)
-        .stdout(stdout)
-        .stderr(stderr);
+    cmd.args(&prog.argv[1..]).current_dir(&prog.workdir).stdin(stdin).stdout(stdout).stderr(stderr);
 
     unsafe {
         cmd.pre_exec(move || {
@@ -93,9 +89,7 @@ fn run_blocking(prog: &Program, io: &Io, limits: &Limits, cancel: Option<Arc<Ato
         });
     }
 
-    let child = cmd.spawn().map_err(|e| {
-        JudgeError::Sandbox(format!("spawn {}: {e}", prog.argv[0]))
-    })?;
+    let child = cmd.spawn().map_err(|e| JudgeError::Sandbox(format!("spawn {}: {e}", prog.argv[0])))?;
     let pid = child.id() as i32;
 
     let start = Instant::now();
@@ -118,8 +112,7 @@ fn run_blocking(prog: &Program, io: &Io, limits: &Limits, cancel: Option<Arc<Ato
             }
             return Err(JudgeError::Io(err));
         }
-        if start.elapsed() > wall_limit
-            || cancel.as_ref().is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed))
+        if start.elapsed() > wall_limit || cancel.as_ref().is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed))
         {
             timed_out = start.elapsed() > wall_limit;
             cancelled = !timed_out;
@@ -168,9 +161,7 @@ fn run_blocking(prog: &Program, io: &Io, limits: &Limits, cancel: Option<Arc<Ato
             libc::SIGXCPU => RunStatus::TimeLimit,
             libc::SIGXFSZ => RunStatus::OutputLimit,
             libc::SIGSEGV | libc::SIGBUS | libc::SIGKILL => {
-                if peak_mem_kb >= limits.memory_mb.saturating_sub(8) * 1024
-                    || stderr_text.contains("bad_alloc")
-                {
+                if peak_mem_kb >= limits.memory_mb.saturating_sub(8) * 1024 || stderr_text.contains("bad_alloc") {
                     RunStatus::MemoryLimit
                 } else {
                     RunStatus::RuntimeError
@@ -206,11 +197,7 @@ fn run_blocking(prog: &Program, io: &Io, limits: &Limits, cancel: Option<Arc<Ato
 #[cfg(unix)]
 fn set_rlimit(res: libc::c_int, val: u64) -> std::io::Result<()> {
     let rl = libc::rlimit { rlim_cur: val, rlim_max: val };
-    if unsafe { libc::setrlimit(res, &rl) } != 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
+    if unsafe { libc::setrlimit(res, &rl) } != 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
 }
 
 /// Windows：Job Object 沙箱。
@@ -239,11 +226,7 @@ mod win_job {
                     | JOB_OBJECT_LIMIT_PROCESS_TIME;
                 // PerProcessUserTimeLimit 单位是 100ns，只计 user 态——放宽 2 倍再 +2s 余量，
                 // 精确 TLE 判定靠退出后读 TotalUserTime+TotalKernelTime
-                let cpu_100ns = limits
-                    .cpu_ms
-                    .saturating_mul(2)
-                    .saturating_add(2000)
-                    .saturating_mul(10_000) as i64;
+                let cpu_100ns = limits.cpu_ms.saturating_mul(2).saturating_add(2000).saturating_mul(10_000) as i64;
                 info.BasicLimitInformation.PerProcessUserTimeLimit = cpu_100ns;
                 info.ProcessMemoryLimit = limits.memory_mb.saturating_mul(1024 * 1024) as usize;
                 if SetInformationJobObject(
@@ -334,11 +317,7 @@ fn run_blocking(prog: &Program, io: &Io, limits: &Limits, cancel: Option<Arc<Ato
     let stderr = Stdio::from(std::fs::File::create(&io.stderr)?);
 
     let mut cmd = Command::new(&prog.argv[0]);
-    cmd.args(&prog.argv[1..])
-        .current_dir(&prog.workdir)
-        .stdin(stdin)
-        .stdout(stdout)
-        .stderr(stderr);
+    cmd.args(&prog.argv[1..]).current_dir(&prog.workdir).stdin(stdin).stdout(stdout).stderr(stderr);
 
     let mut child = cmd.spawn().map_err(|e| JudgeError::Sandbox(format!("spawn: {e}")))?;
     let start = Instant::now();
@@ -357,7 +336,9 @@ fn run_blocking(prog: &Program, io: &Io, limits: &Limits, cancel: Option<Arc<Ato
 
     let (mut status, exit_code) = loop {
         match child.try_wait()? {
-            Some(st) => break (if st.success() { RunStatus::Ok } else { RunStatus::RuntimeError }, st.code().unwrap_or(-1)),
+            Some(st) => {
+                break (if st.success() { RunStatus::Ok } else { RunStatus::RuntimeError }, st.code().unwrap_or(-1));
+            }
             None => {
                 let mut kill_reason = None;
                 if start.elapsed() > wall_limit {
@@ -417,7 +398,6 @@ fn run_blocking(prog: &Program, io: &Io, limits: &Limits, cancel: Option<Arc<Ato
     })
 }
 
-
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -454,8 +434,7 @@ mod tests {
     #[tokio::test]
     async fn sleeper_tle() {
         let (io, _d) = io_paths("sleep");
-        let mut l = Limits::default();
-        l.wall_ms = 200;
+        let l = Limits { wall_ms: 200, ..Default::default() };
         let out = run_program(&prog(&["/bin/sleep", "10"]), &io, &l, None).await.unwrap();
         assert_eq!(out.status, RunStatus::TimeLimit);
     }

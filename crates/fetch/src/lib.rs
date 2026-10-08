@@ -1,9 +1,9 @@
 //! shuati-fetch: OJ 题目拉取。
 //! Provider trait + URL 路由 + 各平台实现。
 
+pub mod codeforces;
 mod http;
 pub mod luogu;
-pub mod codeforces;
 
 use shuati_core::ProblemId;
 use thiserror::Error;
@@ -48,10 +48,7 @@ pub trait Provider: Send + Sync {
 
 /// 全部 Provider 注册表
 pub fn providers() -> Vec<Box<dyn Provider>> {
-    vec![
-        Box::new(luogu::LuoguProvider::new()),
-        Box::new(codeforces::CodeforcesProvider::new()),
-    ]
+    vec![Box::new(luogu::LuoguProvider::new()), Box::new(codeforces::CodeforcesProvider::new())]
 }
 
 /// URL → Provider 路由

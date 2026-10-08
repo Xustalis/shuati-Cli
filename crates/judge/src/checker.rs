@@ -10,9 +10,7 @@ pub fn check(spec: &CheckerSpec, ctx: &CheckCtx) -> Result<Verdict> {
         CheckerSpec::Tokens => Ok(check_tokens(ctx.actual, ctx.expected)),
         CheckerSpec::Exact => Ok(if ctx.actual == ctx.expected { Verdict::Ac } else { Verdict::Wa }),
         CheckerSpec::Float { eps } => Ok(check_float(ctx.actual, ctx.expected, *eps)),
-        CheckerSpec::Spj { .. } => Err(JudgeError::Other(
-            "spj checker requires async check_async".into(),
-        )),
+        CheckerSpec::Spj { .. } => Err(JudgeError::Other("spj checker requires async check_async".into())),
     }
 }
 
@@ -69,9 +67,7 @@ async fn check_spj(program: &PathBuf, ctx: &CheckCtx<'_>, tmpdir: &std::path::Pa
     std::fs::write(&exp_f, ctx.expected)?;
 
     let exe = if program.extension().is_some_and(|e| e == "py") {
-        let py = crate::detect_toolchain(shuati_core::Lang::Python, "")
-            .ok_or(JudgeError::CompilerNotFound("python".into()))?;
-        py
+        crate::detect_toolchain(shuati_core::Lang::Python, "").ok_or(JudgeError::CompilerNotFound("python".into()))?
     } else {
         program.clone()
     };
@@ -82,16 +78,10 @@ async fn check_spj(program: &PathBuf, ctx: &CheckCtx<'_>, tmpdir: &std::path::Pa
         cmd.arg(program);
     }
     // spj 最坏 10s：坏掉的 checker 不能把引擎挂死
-    let out = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        cmd.arg(&in_f)
-            .arg(&act_f)
-            .arg(&exp_f)
-            .output(),
-    )
-    .await
-    .map_err(|_| JudgeError::Other("spj checker timeout (10s)".into()))?
-    .map_err(JudgeError::Io)?;
+    let out = tokio::time::timeout(std::time::Duration::from_secs(10), cmd.arg(&in_f).arg(&act_f).arg(&exp_f).output())
+        .await
+        .map_err(|_| JudgeError::Other("spj checker timeout (10s)".into()))?
+        .map_err(JudgeError::Io)?;
 
     Ok(if out.status.success() { Verdict::Ac } else { Verdict::Wa })
 }

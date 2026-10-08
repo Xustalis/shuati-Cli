@@ -1,4 +1,4 @@
-use crate::{atomic_write, Result};
+use crate::{Result, atomic_write};
 use serde::{Deserialize, Serialize};
 
 /// config.toml
@@ -31,11 +31,7 @@ pub struct AiConfig {
 
 impl Default for AiConfig {
     fn default() -> Self {
-        Self {
-            api_key: String::new(),
-            api_base: default_api_base(),
-            model: default_model(),
-        }
+        Self { api_key: String::new(), api_base: default_api_base(), model: default_model() }
     }
 }
 

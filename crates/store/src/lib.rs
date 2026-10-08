@@ -1,14 +1,14 @@
 //! shuati-store: 工作区文件布局 + 原子读写。无数据库，文件即真相。
 
-mod workspace;
+mod config;
 mod problem_dir;
 mod state;
-mod config;
+mod workspace;
 
-pub use workspace::*;
+pub use config::*;
 pub use problem_dir::*;
 pub use state::*;
-pub use config::*;
+pub use workspace::*;
 
 use std::io;
 use std::path::PathBuf;

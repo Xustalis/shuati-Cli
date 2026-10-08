@@ -1,4 +1,4 @@
-use crate::{atomic_write, Result};
+use crate::{Result, atomic_write};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -21,10 +21,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn load(path: &std::path::Path) -> Self {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_default()
+        std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
     }
 
     pub fn save(&self, path: &std::path::Path) -> Result<()> {

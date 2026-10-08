@@ -1,6 +1,6 @@
-use crate::{atomic_write, Result, StoreError};
-use shuati_core::{CaseOrigin, CheckerSpec, Limits, Problem, ProblemId, TestCase};
+use crate::{Result, StoreError, atomic_write};
 use serde::{Deserialize, Serialize};
+use shuati_core::{CaseOrigin, CheckerSpec, Limits, Problem, ProblemId, TestCase};
 use std::path::PathBuf;
 
 /// 单个题目目录的全部内容访问。
@@ -45,16 +45,14 @@ impl ProblemDir {
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self> {
         let dir = dir.into();
         let meta_path = dir.join("problem.toml");
-        let text = std::fs::read_to_string(&meta_path)
-            .map_err(|e| StoreError::Invalid(meta_path.clone(), e.to_string()))?;
+        let text =
+            std::fs::read_to_string(&meta_path).map_err(|e| StoreError::Invalid(meta_path.clone(), e.to_string()))?;
         let t: ProblemToml = toml::from_str(&text)?;
         let id = ProblemId::parse(&t.id)
             .ok_or_else(|| StoreError::Invalid(meta_path.clone(), format!("bad id {}", t.id)))?;
         // spj 程序路径按题目目录解析，与进程 CWD 解耦
         let checker = match t.checker {
-            CheckerSpec::Spj { program } if program.is_relative() => CheckerSpec::Spj {
-                program: dir.join(program),
-            },
+            CheckerSpec::Spj { program } if program.is_relative() => CheckerSpec::Spj { program: dir.join(program) },
             c => c,
         };
         Ok(Self {
@@ -162,11 +160,7 @@ impl ProblemDir {
             let name = in_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
             let input = std::fs::read_to_string(&in_path)?;
             let out_path = in_path.with_extension("out");
-            let expected = if out_path.exists() {
-                Some(std::fs::read_to_string(&out_path)?)
-            } else {
-                None
-            };
+            let expected = if out_path.exists() { Some(std::fs::read_to_string(&out_path)?) } else { None };
             let origin = match manifest.cases.get(&name).map(|s| s.as_str()) {
                 Some("gen") => CaseOrigin::Generated,
                 Some("stress") => CaseOrigin::Stress,
@@ -241,10 +235,8 @@ impl ProblemDir {
 
     /// 保存评测报告 reports/<ts>-<nanos>.json（纳秒后缀防同秒覆盖）
     pub fn save_report(&self, report: &shuati_core::TestReport) -> Result<PathBuf> {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0);
+        let nanos =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
         let name = format!("{}-{:09}.json", report.timestamp, nanos);
         let path = self.reports_dir().join(name);
         atomic_write(&path, serde_json::to_string_pretty(report)?.as_bytes())?;
@@ -291,10 +283,7 @@ impl ProblemDir {
 }
 
 pub fn now_ts() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
 /// 扫描工作区，加载全部题目（损坏的目录跳过并记日志）

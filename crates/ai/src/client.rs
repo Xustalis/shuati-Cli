@@ -54,8 +54,7 @@ impl AiClient {
             let preview: String = text.chars().take(300).collect();
             return Err(AiError::Api(format!("HTTP {status}: {preview}")));
         }
-        let v: serde_json::Value =
-            serde_json::from_str(&text).map_err(|e| AiError::Parse(e.to_string()))?;
+        let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| AiError::Parse(e.to_string()))?;
         v.get("choices")
             .and_then(|c| c.get(0))
             .and_then(|c| c.get("message"))
@@ -67,7 +66,12 @@ impl AiClient {
 
     /// 单轮 chat，SSE 流式：on_delta 逐段收到增量文本，返回完整拼接结果。
     /// UI 可以实时滚动显示，不用干等几十秒。
-    pub async fn chat_stream<F: FnMut(&str) + Send>(&self, system: &str, user: &str, on_delta: &mut F) -> Result<String> {
+    pub async fn chat_stream<F: FnMut(&str) + Send>(
+        &self,
+        system: &str,
+        user: &str,
+        on_delta: &mut F,
+    ) -> Result<String> {
         let url = format!("{}/chat/completions", self.api_base);
         let body = json!({
             "model": self.model,
@@ -123,7 +127,13 @@ impl AiClient {
     }
 
     /// 流式提示
-    pub async fn hint_stream<F: FnMut(&str) + Send>(&self, statement: &str, code: &str, verdict_info: &str, on_delta: &mut F) -> Result<String> {
+    pub async fn hint_stream<F: FnMut(&str) + Send>(
+        &self,
+        statement: &str,
+        code: &str,
+        verdict_info: &str,
+        on_delta: &mut F,
+    ) -> Result<String> {
         let user = format!(
             "题目:\n{statement}\n\n我的代码:\n```\n{code}\n```\n\n判题结果: {verdict_info}\n\n请给一个提示：指出大概方向，但不要直接给完整代码。"
         );
@@ -131,7 +141,14 @@ impl AiClient {
     }
 
     /// 流式诊断
-    pub async fn explain_stream<F: FnMut(&str) + Send>(&self, statement: &str, code: &str, verdict_info: &str, io_detail: &str, on_delta: &mut F) -> Result<String> {
+    pub async fn explain_stream<F: FnMut(&str) + Send>(
+        &self,
+        statement: &str,
+        code: &str,
+        verdict_info: &str,
+        io_detail: &str,
+        on_delta: &mut F,
+    ) -> Result<String> {
         let user = format!(
             "题目:\n{statement}\n\n我的代码:\n```\n{code}\n```\n\n判题结果: {verdict_info}\n\n相关输入输出:\n```\n{io_detail}\n```\n\n请诊断出错原因，简洁指出 bug 在哪。"
         );
@@ -164,7 +181,13 @@ impl AiClient {
     }
 
     /// 修复脚本：带错误信息再要一次
-    pub async fn repair_scripts(&self, statement: &str, lang: &str, broken: &crate::StressScripts, error: &str) -> Result<crate::StressScripts> {
+    pub async fn repair_scripts(
+        &self,
+        statement: &str,
+        lang: &str,
+        broken: &crate::StressScripts,
+        error: &str,
+    ) -> Result<crate::StressScripts> {
         let user = format!(
             "题目:\n{statement}\n\n上次生成的脚本运行出错:\n{error}\n\n坏的 gen:\n```{lang}\n{}\n```\n坏的 oracle:\n```{lang}\n{}\n```\n\n请修正后重新输出完整的 <gen> 和 <oracle>（{lang}）。",
             broken.generator, broken.oracle
@@ -225,7 +248,10 @@ mod tests {
         let ev = "data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\ndata: {\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n";
         let texts: Vec<String> = parse_sse_event(ev)
             .into_iter()
-            .filter_map(|p| match p { SsePiece::Text(t) => Some(t), _ => None })
+            .filter_map(|p| match p {
+                SsePiece::Text(t) => Some(t),
+                _ => None,
+            })
             .collect();
         assert_eq!(texts, ["a", "b"]);
     }

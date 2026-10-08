@@ -4,8 +4,8 @@ use crate::worker::{self, Bridge, Event, Task};
 use shuati_core::{Lang, SourceFile, TestReport, Verdict};
 use shuati_store as store;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum Tab {
@@ -185,7 +185,11 @@ impl ShuatiApp {
             cfg_py: cfg.compiler_python.clone(),
             cfg_api_key: cfg.ai.api_key.clone(),
             // 旧配置可能存过空串——空则回落到 DeepSeek 默认
-            cfg_api_base: if cfg.ai.api_base.is_empty() { "https://api.deepseek.com/v1".into() } else { cfg.ai.api_base.clone() },
+            cfg_api_base: if cfg.ai.api_base.is_empty() {
+                "https://api.deepseek.com/v1".into()
+            } else {
+                cfg.ai.api_base.clone()
+            },
             cfg_model: if cfg.ai.model.is_empty() { "deepseek-chat".into() } else { cfg.ai.model.clone() },
             cfg_editor: cfg.editor.clone(),
             cfg_msg: String::new(),
@@ -205,11 +209,7 @@ impl ShuatiApp {
             url_input: String::new(),
             lib_msg: String::new(),
             fetching: false,
-            stress: StressState {
-                rounds_input: "100".into(),
-                gen_count_input: "20".into(),
-                ..Default::default()
-            },
+            stress: StressState { rounds_input: "100".into(), gen_count_input: "20".into(), ..Default::default() },
             quick: QuickState::default(),
             ai: AiState::default(),
             prob_edit: ProblemEditor::default(),
@@ -270,10 +270,8 @@ impl ShuatiApp {
         let pid = pd.meta.id.to_string();
         match pd.load_cases() {
             Ok(cases) => {
-                self.cases.cases = cases
-                    .into_iter()
-                    .map(|c| (c.name, c.input, c.expected.unwrap_or_default()))
-                    .collect();
+                self.cases.cases =
+                    cases.into_iter().map(|c| (c.name, c.input, c.expected.unwrap_or_default())).collect();
                 self.cases.loaded_for = Some(pid);
             }
             Err(e) => {
@@ -285,11 +283,7 @@ impl ShuatiApp {
     /// 用例编辑器：新增一个用例
     pub fn add_case(&mut self, input: &str, output: &str) {
         let Some(pd) = self.current_problem() else { return };
-        let name = if let Some(n) = &self.cases.editing {
-            n.clone()
-        } else {
-            pd.next_case_name()
-        };
+        let name = if let Some(n) = &self.cases.editing { n.clone() } else { pd.next_case_name() };
         match pd.write_case(&name, input, Some(output), shuati_core::CaseOrigin::Sample) {
             Ok(()) => {
                 self.cases.msg = format!("已{}用例 {name}", if self.cases.editing.is_some() { "更新" } else { "添加" });
@@ -317,24 +311,21 @@ impl ShuatiApp {
         let Some(pd) = self.current_problem() else { return };
         let gen_dir = pd.gen_dir();
         let sol_dir = pd.solutions_dir();
-        if self.stress.gen_path.is_empty() {
-            if let Some(p) = shuati_judge::find_script(&gen_dir, &["gen"]) {
-                self.stress.gen_path = p.display().to_string();
-            }
+        if self.stress.gen_path.is_empty()
+            && let Some(p) = shuati_judge::find_script(&gen_dir, &["gen"])
+        {
+            self.stress.gen_path = p.display().to_string();
         }
-        if self.stress.oracle_path.is_empty() {
-            if let Some(p) = shuati_judge::find_script(&sol_dir, &["brute", "oracle", "std"]) {
-                self.stress.oracle_path = p.display().to_string();
-            }
+        if self.stress.oracle_path.is_empty()
+            && let Some(p) = shuati_judge::find_script(&sol_dir, &["brute", "oracle", "std"])
+        {
+            self.stress.oracle_path = p.display().to_string();
         }
     }
 
     /// 用户解路径：watch 文件 > 题目 solutions/ 下的 main.*
     pub fn user_solution(&self) -> Option<PathBuf> {
-        self.state
-            .watch_file
-            .clone()
-            .or_else(|| self.current_problem().and_then(|pd| pd.find_solution()))
+        self.state.watch_file.clone().or_else(|| self.current_problem().and_then(|pd| pd.find_solution()))
     }
 
     /// 设置被监视文件（拖入或恢复）。识别源文件头部的 `// shuati:` 绑定注释：
@@ -348,11 +339,11 @@ impl ShuatiApp {
                 // shuati: 绑定注释 → 切到绑定的题目
                 if let Some(bound) = shuati_judge::binding_comment(&path) {
                     let bid = bound.to_string();
-                    if self.state.current_problem.as_deref() != Some(bid.as_str()) {
-                        if self.problems.iter().any(|p| p.meta.id.to_string() == bid) {
-                            self.lib_msg = format!("源文件绑定 {bid}（shuati: 注释），已切换题目");
-                            self.select_problem(bid);
-                        }
+                    if self.state.current_problem.as_deref() != Some(bid.as_str())
+                        && self.problems.iter().any(|p| p.meta.id.to_string() == bid)
+                    {
+                        self.lib_msg = format!("源文件绑定 {bid}（shuati: 注释），已切换题目");
+                        self.select_problem(bid);
                     }
                 }
             }
@@ -368,10 +359,7 @@ impl ShuatiApp {
 
     /// 触发一次评测（按钮或 watch 回调）
     pub fn trigger_test(&mut self) {
-        let (Some(pd), Some(src)) = (
-            self.current_problem().map(|p| p.dir.clone()),
-            self.user_solution(),
-        ) else {
+        let (Some(pd), Some(src)) = (self.current_problem().map(|p| p.dir.clone()), self.user_solution()) else {
             self.run.error = Some("先选题目和源文件".into());
             return;
         };
@@ -389,15 +377,7 @@ impl ShuatiApp {
         let limits = self.current_problem().unwrap().meta.limits;
         let checker = self.current_problem().unwrap().meta.checker.clone();
 
-        self.bridge.request(Task::RunTest {
-            problem_dir: pd,
-            problem_id,
-            src,
-            limits,
-            checker,
-            compiler_cfg,
-            cancel,
-        });
+        self.bridge.request(Task::RunTest { problem_dir: pd, problem_id, src, limits, checker, compiler_cfg, cancel });
     }
 
     /// 触发拉题
@@ -440,12 +420,8 @@ impl ShuatiApp {
         };
         let rounds = self.stress.rounds_input.trim().parse::<u32>().unwrap_or(100).max(1);
         // 空 seed → 时间戳当随机起点
-        let seed = self
-            .stress
-            .seed_input
-            .trim()
-            .parse::<u64>()
-            .unwrap_or((shuati_store::now_ts() as u64) % 1_000_000 + 1);
+        let seed =
+            self.stress.seed_input.trim().parse::<u64>().unwrap_or((shuati_store::now_ts() as u64) % 1_000_000 + 1);
 
         self.bridge.cancel_current();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -517,9 +493,7 @@ impl ShuatiApp {
         }
         meta.checker = match self.prob_edit.checker.as_str() {
             "exact" => shuati_core::CheckerSpec::Exact,
-            "float" => shuati_core::CheckerSpec::Float {
-                eps: self.prob_edit.eps.trim().parse().unwrap_or(1e-6),
-            },
+            "float" => shuati_core::CheckerSpec::Float { eps: self.prob_edit.eps.trim().parse().unwrap_or(1e-6) },
             _ => shuati_core::CheckerSpec::Tokens,
         };
         let dir = pd.dir.clone();
@@ -536,11 +510,11 @@ impl ShuatiApp {
             self.prob_edit.msg = format!("保存失败: {e}");
             return;
         }
-        if self.prob_edit.edit_statement {
-            if let Err(e) = pd2.write_statement(&self.prob_edit.statement) {
-                self.prob_edit.msg = format!("题面保存失败: {e}");
-                return;
-            }
+        if self.prob_edit.edit_statement
+            && let Err(e) = pd2.write_statement(&self.prob_edit.statement)
+        {
+            self.prob_edit.msg = format!("题面保存失败: {e}");
+            return;
         }
         self.reload_problems();
         self.prob_edit.show = false;
@@ -690,11 +664,8 @@ impl ShuatiApp {
 
     /// 测试 AI 连接（输入框优先，空则用已存的 key）
     pub fn trigger_ai_ping(&mut self) {
-        let key = if self.cfg_api_key.trim().is_empty() {
-            self.ai_key()
-        } else {
-            Some(self.cfg_api_key.trim().to_string())
-        };
+        let key =
+            if self.cfg_api_key.trim().is_empty() { self.ai_key() } else { Some(self.cfg_api_key.trim().to_string()) };
         let Some(key) = key else {
             self.cfg_msg = "先填 API Key".into();
             return;
@@ -825,9 +796,7 @@ impl ShuatiApp {
                 Event::RunDone(report) => {
                     self.run.running = false;
                     self.run.compiling = false;
-                    self.state
-                        .last_verdicts
-                        .insert(report.problem.to_string(), report.verdict.to_string());
+                    self.state.last_verdicts.insert(report.problem.to_string(), report.verdict.to_string());
                     self.save_state();
                     self.run.report = Some(*report);
                     // 跑的时候又保存过 → 立刻补测最新版本
@@ -894,7 +863,8 @@ impl ShuatiApp {
                 }
                 Event::ScriptsReady(g, o) => {
                     self.ai.busy = false;
-                    self.ai.text = format!("脚本已生成并验证通过:\n  gen    = {}\n  oracle = {}", g.display(), o.display());
+                    self.ai.text =
+                        format!("脚本已生成并验证通过:\n  gen    = {}\n  oracle = {}", g.display(), o.display());
                     self.ai.show = true;
                     self.stress.gen_path = g.display().to_string();
                     self.stress.oracle_path = o.display().to_string();
@@ -928,7 +898,15 @@ impl ShuatiApp {
                 }
             }
         }
-        if self.run.running || self.stress.running || self.state.watch_enabled || self.fetching || self.ai.busy || self.stress.genning || self.ai_pinging || self.quick.running {
+        if self.run.running
+            || self.stress.running
+            || self.state.watch_enabled
+            || self.fetching
+            || self.ai.busy
+            || self.stress.genning
+            || self.ai_pinging
+            || self.quick.running
+        {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
     }
@@ -951,10 +929,8 @@ impl eframe::App for ShuatiApp {
                         self.trigger_test();
                     }
                 }
-                Tab::Stress => {
-                    if !self.stress.running {
-                        self.trigger_stress();
-                    }
+                Tab::Stress if !self.stress.running => {
+                    self.trigger_stress();
                 }
                 _ => {}
             }
@@ -977,10 +953,9 @@ impl eframe::App for ShuatiApp {
                 }
             } else if p.extension().is_some_and(|e| e == "in") {
                 // 拖入 .in → 加到用例（无 .out 则按无答案存）
-                if let (Ok(input), Some(pd)) = (
-                    std::fs::read_to_string(p),
-                    self.current_problem().map(|x| x.dir.clone()),
-                ) {
+                if let (Ok(input), Some(pd)) =
+                    (std::fs::read_to_string(p), self.current_problem().map(|x| x.dir.clone()))
+                {
                     let out_p = p.with_extension("out");
                     let output = std::fs::read_to_string(&out_p).ok();
                     let pd2 = shuati_store::ProblemDir::open(&pd);

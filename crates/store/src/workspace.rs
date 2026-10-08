@@ -23,13 +23,13 @@ impl Workspace {
 
     /// 默认工作区：可执行文件同级 `shuati-data/`；目录不可写则回退系统数据目录
     pub fn default_dir() -> PathBuf {
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
-                let portable = dir.join("shuati-data");
-                // 已存在就用；否则探测是否可创建（不可写→回退）
-                if portable.exists() || std::fs::create_dir(&portable).is_ok() {
-                    return portable;
-                }
+        if let Ok(exe) = std::env::current_exe()
+            && let Some(dir) = exe.parent()
+        {
+            let portable = dir.join("shuati-data");
+            // 已存在就用；否则探测是否可创建（不可写→回退）
+            if portable.exists() || std::fs::create_dir(&portable).is_ok() {
+                return portable;
             }
         }
         dirs_fallback()

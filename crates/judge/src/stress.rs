@@ -2,11 +2,11 @@
 //! 循环: gen(seed) → input → (user ∥ oracle) → checker 比对
 //! mismatch 即 hack，三方归责：gen 坏/标程坏/找到反例。
 
-use crate::{check_async, compile_source, cleanup_program, run_program, Io, Program, Result, RunStatus, Toolchain};
+use crate::{Io, Program, Result, RunStatus, Toolchain, check_async, cleanup_program, compile_source, run_program};
 use shuati_core::{CheckerSpec, Lang, Limits, SourceFile, Verdict};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 /// 对拍参数
 pub struct StressParams<'a> {
@@ -137,7 +137,7 @@ impl StressEngine {
         let fail_count = Arc::new(AtomicU32::new(0));
         let report = Arc::new(tokio::sync::Mutex::new(StressReport::default()));
 
-        let jobs = p.jobs.max(1) as usize;
+        let jobs = p.jobs.max(1);
         let mut handles = Vec::new();
 
         for _ in 0..jobs {
@@ -170,11 +170,15 @@ impl StressEngine {
                         break;
                     }
                     let seed = seed_start + r as u64;
-                    let outcome = run_one_round(
-                        seed, r, &gen_prog, &user_prog, &oracle_prog,
-                        &limits_run, &limits_gen, &checker, cancel.clone(),
-                    )
-                    .await;
+                    let ctx = RoundCtx {
+                        generator: &gen_prog,
+                        user: &user_prog,
+                        oracle: &oracle_prog,
+                        limits_run: &limits_run,
+                        limits_gen: &limits_gen,
+                        checker: &checker,
+                    };
+                    let outcome = run_one_round(seed, r, &ctx, cancel.clone()).await;
 
                     {
                         let mut rep = report.lock().await;
@@ -226,18 +230,18 @@ fn with_extra_arg(prog: &Program, arg: &str) -> Program {
     p
 }
 
+/// 一轮对拍用到的只读上下文（程序组 + 时限 + 判题器，轮间共享）
+struct RoundCtx<'a> {
+    generator: &'a Program,
+    user: &'a Program,
+    oracle: &'a Program,
+    limits_run: &'a Limits,
+    limits_gen: &'a Limits,
+    checker: &'a CheckerSpec,
+}
+
 /// 单轮：gen(seed) → input → user & oracle → 比对
-async fn run_one_round(
-    seed: u64,
-    round: u32,
-    gen_prog: &Program,
-    user_prog: &Program,
-    oracle_prog: &Program,
-    limits_run: &Limits,
-    limits_gen: &Limits,
-    checker: &CheckerSpec,
-    cancel: Option<Arc<AtomicBool>>,
-) -> StressEvent {
+async fn run_one_round(seed: u64, round: u32, ctx: &RoundCtx<'_>, cancel: Option<Arc<AtomicBool>>) -> StressEvent {
     let tmp = match tempfile::Builder::new().prefix("shuati_stress_").tempdir() {
         Ok(t) => t,
         Err(e) => {
@@ -250,8 +254,8 @@ async fn run_one_round(
     let gen_out = td.join("gen.out");
     let gen_err = td.join("gen.err");
     let gen_io = Io { stdin: None, stdout: gen_out.clone(), stderr: gen_err.clone() };
-    let gen_p = with_extra_arg(gen_prog, &seed.to_string());
-    let g = match run_program(&gen_p, &gen_io, limits_gen, cancel.clone()).await {
+    let gen_p = with_extra_arg(ctx.generator, &seed.to_string());
+    let g = match run_program(&gen_p, &gen_io, ctx.limits_gen, cancel.clone()).await {
         Ok(o) => o,
         Err(e) => return StressEvent::GenFail { seed, round, msg: e.to_string() },
     };
@@ -270,19 +274,11 @@ async fn run_one_round(
     if let Err(e) = std::fs::write(&in_f, &input) {
         return StressEvent::GenFail { seed, round, msg: format!("write input: {e}") };
     }
-    let user_io = Io {
-        stdin: Some(in_f.clone()),
-        stdout: td.join("user.out"),
-        stderr: td.join("user.err"),
-    };
-    let oracle_io = Io {
-        stdin: Some(in_f),
-        stdout: td.join("oracle.out"),
-        stderr: td.join("oracle.err"),
-    };
+    let user_io = Io { stdin: Some(in_f.clone()), stdout: td.join("user.out"), stderr: td.join("user.err") };
+    let oracle_io = Io { stdin: Some(in_f), stdout: td.join("oracle.out"), stderr: td.join("oracle.err") };
     let (u, o) = tokio::join!(
-        run_program(user_prog, &user_io, limits_run, cancel.clone()),
-        run_program(oracle_prog, &oracle_io, limits_run, cancel)
+        run_program(ctx.user, &user_io, ctx.limits_run, cancel.clone()),
+        run_program(ctx.oracle, &oracle_io, ctx.limits_run, cancel)
     );
     let u = match u {
         Ok(x) => x,
@@ -303,10 +299,7 @@ async fn run_one_round(
 
     if o.status != RunStatus::Ok {
         let e = std::fs::read_to_string(&oracle_io.stderr).unwrap_or_default();
-        return StressEvent::OracleFail {
-            seed, round,
-            msg: format!("标程 {:?}: {}", o.status, truncate(&e, 300)),
-        };
+        return StressEvent::OracleFail { seed, round, msg: format!("标程 {:?}: {}", o.status, truncate(&e, 300)) };
     }
     if u.status != RunStatus::Ok {
         // 用户程序挂也是"反例"（不是答案不等，是程序错了）
@@ -317,9 +310,12 @@ async fn run_one_round(
             _ => "user_re",
         };
         return StressEvent::Hack {
-            seed, round,
+            seed,
+            round,
             case: Box::new(HackCase {
-                seed, input, user_out,
+                seed,
+                input,
+                user_out,
                 oracle_out,
                 kind: kind.into(),
                 detail: if e.is_empty() { format!("{:?}", u.status) } else { truncate(&e, 300) },
@@ -328,13 +324,17 @@ async fn run_one_round(
     }
 
     // 4. 比对
-    let ctx = shuati_core::CheckCtx { input: &input, actual: &user_out, expected: &oracle_out };
-    match check_async(checker, &ctx, &td).await {
+    let check = shuati_core::CheckCtx { input: &input, actual: &user_out, expected: &oracle_out };
+    match check_async(ctx.checker, &check, &td).await {
         Ok(Verdict::Ac) => StressEvent::Match { seed, round, cpu_ms: u.cpu_ms },
         Ok(_) => StressEvent::Hack {
-            seed, round,
+            seed,
+            round,
             case: Box::new(HackCase {
-                seed, input, user_out, oracle_out,
+                seed,
+                input,
+                user_out,
+                oracle_out,
                 kind: "wa".into(),
                 detail: "output differs".into(),
             }),
@@ -402,9 +402,7 @@ async fn gen_one_case(
     std::fs::write(&in_f, &input).map_err(|e| e.to_string())?;
     let o_err = td.join("o.err");
     let io = Io { stdin: Some(in_f), stdout: td.join("o.out"), stderr: o_err.clone() };
-    let o = run_program(oracle_prog, &io, limits_run, None)
-        .await
-        .map_err(|e| e.to_string())?;
+    let o = run_program(oracle_prog, &io, limits_run, None).await.map_err(|e| e.to_string())?;
     if o.status != RunStatus::Ok {
         let e = std::fs::read_to_string(&o_err).unwrap_or_default();
         return Err(format!("oracle {:?}: {}", o.status, truncate(&e, 120)));

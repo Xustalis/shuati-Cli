@@ -4,11 +4,11 @@
 use shuati_core::{CheckerSpec, Lang, Limits, SourceFile};
 use shuati_judge::{StressEngine, StressParams};
 use std::io::Write;
-use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
-fn py_script(dir: &PathBuf, name: &str, code: &str) -> SourceFile {
+fn py_script(dir: &Path, name: &str, code: &str) -> SourceFile {
     let p = dir.join(name);
     let mut f = std::fs::File::create(&p).unwrap();
     f.write_all(code.as_bytes()).unwrap();
@@ -30,15 +30,30 @@ const USER_BUG: &str = "a,b=map(int,input().split());print(a-b if a==9 else a+b)
 /// gen: 坏生成器（不输出）
 const GEN_BROKEN: &str = "import sys;sys.exit(1)";
 
+#[allow(clippy::too_many_arguments)] // 测试辅助函数：参数即配置，打包反而绕
 fn mk_params<'a>(
-    genf: &'a SourceFile, user: &'a SourceFile, oracle: &'a SourceFile,
-    rounds: u32, seed: u64, lim: &'a Limits, glim: &'a Limits, chk: &'a CheckerSpec,
+    genf: &'a SourceFile,
+    user: &'a SourceFile,
+    oracle: &'a SourceFile,
+    rounds: u32,
+    seed: u64,
+    lim: &'a Limits,
+    glim: &'a Limits,
+    chk: &'a CheckerSpec,
 ) -> StressParams<'a> {
     StressParams {
-        gen_src: genf, user_src: user, oracle_src: oracle,
-        rounds, seed_start: seed, jobs: 2,
-        limits_run: lim, limits_gen: glim, checker: chk,
-        stop_on_fail: true, progress: None, cancel: None,
+        gen_src: genf,
+        user_src: user,
+        oracle_src: oracle,
+        rounds,
+        seed_start: seed,
+        jobs: 2,
+        limits_run: lim,
+        limits_gen: glim,
+        checker: chk,
+        stop_on_fail: true,
+        progress: None,
+        cancel: None,
     }
 }
 
@@ -115,10 +130,18 @@ async fn stress_cancel_stops_early() {
 
     let cancel = Arc::new(AtomicBool::new(true)); // 已取消
     let p = StressParams {
-        gen_src: &genf, user_src: &user, oracle_src: &oracle,
-        rounds: 1000, seed_start: 1, jobs: 1,
-        limits_run: &lim, limits_gen: &glim, checker: &chk,
-        stop_on_fail: false, progress: None, cancel: Some(cancel),
+        gen_src: &genf,
+        user_src: &user,
+        oracle_src: &oracle,
+        rounds: 1000,
+        seed_start: 1,
+        jobs: 1,
+        limits_run: &lim,
+        limits_gen: &glim,
+        checker: &chk,
+        stop_on_fail: false,
+        progress: None,
+        cancel: Some(cancel),
     };
     let rep = engine(&p).run(&p).await.unwrap();
     assert_eq!(rep.rounds_done, 0);

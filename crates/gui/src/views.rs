@@ -56,64 +56,65 @@ fn problem_edit_window(app: &mut ShuatiApp, ctx: &egui::Context) {
         return;
     }
     let mut open = true;
-    egui::Window::new("题目设置")
-        .open(&mut open)
-        .default_size([560.0, 420.0])
-        .show(ctx, |ui| {
-            egui::Grid::new("pe_grid").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                ui.label("标题:");
-                ui.text_edit_singleline(&mut app.prob_edit.title);
-                ui.end_row();
-                ui.label("时限 (ms):");
-                ui.add(egui::TextEdit::singleline(&mut app.prob_edit.cpu_ms).desired_width(100.0));
-                ui.end_row();
-                ui.label("内存 (MB):");
-                ui.add(egui::TextEdit::singleline(&mut app.prob_edit.mem_mb).desired_width(100.0));
-                ui.end_row();
-                ui.label("判题方式:");
-                ui.horizontal(|ui| {
-                    egui::ComboBox::from_id_salt("checker_sel")
-                        .selected_text(match app.prob_edit.checker.as_str() {
-                            "exact" => "完全一致",
-                            "float" => "浮点容差",
-                            _ => "按 token 比较（默认）",
-                        })
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut app.prob_edit.checker, "tokens".into(), "按 token 比较");
-                            ui.selectable_value(&mut app.prob_edit.checker, "exact".into(), "完全一致");
-                            ui.selectable_value(&mut app.prob_edit.checker, "float".into(), "浮点容差");
-                        });
-                    if app.prob_edit.checker == "float" {
-                        ui.label("eps:");
-                        ui.add(egui::TextEdit::singleline(&mut app.prob_edit.eps).desired_width(80.0).hint_text("1e-6"));
-                    }
-                });
-                ui.end_row();
-            });
-            ui.add_space(6.0);
+    egui::Window::new("题目设置").open(&mut open).default_size([560.0, 420.0]).show(ctx, |ui| {
+        egui::Grid::new("pe_grid").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+            ui.label("标题:");
+            ui.text_edit_singleline(&mut app.prob_edit.title);
+            ui.end_row();
+            ui.label("时限 (ms):");
+            ui.add(egui::TextEdit::singleline(&mut app.prob_edit.cpu_ms).desired_width(100.0));
+            ui.end_row();
+            ui.label("内存 (MB):");
+            ui.add(egui::TextEdit::singleline(&mut app.prob_edit.mem_mb).desired_width(100.0));
+            ui.end_row();
+            ui.label("判题方式:");
             ui.horizontal(|ui| {
-                if ui.button(if app.prob_edit.edit_statement { "收起题面编辑" } else { "编辑题面" }).clicked() {
-                    app.prob_edit.edit_statement = !app.prob_edit.edit_statement;
-                }
-                if ui.button("打开题目目录").on_hover_text("在文件管理器中打开（放 gen/brute/数据文件用）").clicked() {
-                    if let Some(pd) = app.current_problem() {
-                        open_in_explorer(&pd.dir);
-                    }
+                egui::ComboBox::from_id_salt("checker_sel")
+                    .selected_text(match app.prob_edit.checker.as_str() {
+                        "exact" => "完全一致",
+                        "float" => "浮点容差",
+                        _ => "按 token 比较（默认）",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut app.prob_edit.checker, "tokens".into(), "按 token 比较");
+                        ui.selectable_value(&mut app.prob_edit.checker, "exact".into(), "完全一致");
+                        ui.selectable_value(&mut app.prob_edit.checker, "float".into(), "浮点容差");
+                    });
+                if app.prob_edit.checker == "float" {
+                    ui.label("eps:");
+                    ui.add(egui::TextEdit::singleline(&mut app.prob_edit.eps).desired_width(80.0).hint_text("1e-6"));
                 }
             });
-            if app.prob_edit.edit_statement {
-                egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
-                    ui.add(egui::TextEdit::multiline(&mut app.prob_edit.statement).desired_width(f32::INFINITY).desired_rows(10));
-                });
+            ui.end_row();
+        });
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui.button(if app.prob_edit.edit_statement { "收起题面编辑" } else { "编辑题面" }).clicked() {
+                app.prob_edit.edit_statement = !app.prob_edit.edit_statement;
             }
-            if !app.prob_edit.msg.is_empty() {
-                ui.colored_label(Color32::from_rgb(230, 90, 90), &app.prob_edit.msg);
-            }
-            ui.add_space(6.0);
-            if ui.button("保存").clicked() {
-                app.save_problem_editor();
+            if ui.button("打开题目目录").on_hover_text("在文件管理器中打开（放 gen/brute/数据文件用）").clicked()
+                && let Some(pd) = app.current_problem()
+            {
+                open_in_explorer(&pd.dir);
             }
         });
+        if app.prob_edit.edit_statement {
+            egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(&mut app.prob_edit.statement)
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(10),
+                );
+            });
+        }
+        if !app.prob_edit.msg.is_empty() {
+            ui.colored_label(Color32::from_rgb(230, 90, 90), &app.prob_edit.msg);
+        }
+        ui.add_space(6.0);
+        if ui.button("保存").clicked() {
+            app.save_problem_editor();
+        }
+    });
     if !open {
         app.prob_edit.show = false;
     }
@@ -125,20 +126,17 @@ fn ai_window(app: &mut ShuatiApp, ctx: &egui::Context) {
         return;
     }
     let mut open = true;
-    egui::Window::new("AI 助手")
-        .open(&mut open)
-        .default_size([560.0, 380.0])
-        .show(ctx, |ui| {
-            if app.ai.busy {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label("AI 工作中…");
-                });
-            }
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.add(egui::Label::new(RichText::new(&app.ai.text)).wrap());
+    egui::Window::new("AI 助手").open(&mut open).default_size([560.0, 380.0]).show(ctx, |ui| {
+        if app.ai.busy {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("AI 工作中…");
             });
+        }
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.add(egui::Label::new(RichText::new(&app.ai.text)).wrap());
         });
+    });
     if !open {
         app.ai.show = false;
     }
@@ -152,7 +150,8 @@ fn tab_btn(ui: &mut Ui, app: &mut ShuatiApp, tab: Tab, label: &str) {
 }
 
 fn env_item(ui: &mut Ui, name: &str, ok: bool, tip: Option<String>) {
-    let (icon, color) = if ok { ("✓", Color32::from_rgb(80, 200, 120)) } else { ("✗", Color32::from_rgb(230, 90, 90)) };
+    let (icon, color) =
+        if ok { ("✓", Color32::from_rgb(80, 200, 120)) } else { ("✗", Color32::from_rgb(230, 90, 90)) };
     let text = RichText::new(format!("{name} {icon}")).color(color).small();
     match tip {
         Some(t) => {
@@ -190,13 +189,10 @@ fn quick_view(app: &mut ShuatiApp, ui: &mut Ui) {
         } else {
             ui.label(RichText::new("（未选择）").weak());
         }
-        if ui.button("选择文件…").clicked() {
-            if let Some(p) = rfd::FileDialog::new()
-                .add_filter("源代码", &["cpp", "cc", "cxx", "c++", "py"])
-                .pick_file()
-            {
-                app.set_watch_file(p);
-            }
+        if ui.button("选择文件…").clicked()
+            && let Some(p) = rfd::FileDialog::new().add_filter("源代码", &["cpp", "cc", "cxx", "c++", "py"]).pick_file()
+        {
+            app.set_watch_file(p);
         }
         let can_run = app.state.watch_file.is_some() && !app.quick.running;
         if ui.add_enabled(can_run, egui::Button::new("▶ 运行").min_size(egui::vec2(76.0, 0.0))).clicked() {
@@ -257,7 +253,9 @@ fn quick_view(app: &mut ShuatiApp, ui: &mut Ui) {
                         ui.label(RichText::new(format!("{}ms · {}KB", r.cpu_ms, r.mem_kb)).weak().small());
                     }
                     Some(v) => {
-                        ui.label(RichText::new(format!("{} · {}ms", v, r.cpu_ms)).color(verdict_color(v)).strong().small());
+                        ui.label(
+                            RichText::new(format!("{} · {}ms", v, r.cpu_ms)).color(verdict_color(v)).strong().small(),
+                        );
                     }
                 }
             }
@@ -278,9 +276,7 @@ fn quick_view(app: &mut ShuatiApp, ui: &mut Ui) {
             let mut e = err;
             col.add_sized(
                 [w, 52.0],
-                egui::TextEdit::multiline(&mut e)
-                    .font(egui::TextStyle::Monospace)
-                    .interactive(false),
+                egui::TextEdit::multiline(&mut e).font(egui::TextStyle::Monospace).interactive(false),
             );
         }
     });
@@ -289,22 +285,23 @@ fn quick_view(app: &mut ShuatiApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.checkbox(&mut app.quick.show_expected, "对答案");
         // 有结果+期望非空 → 判 AC/WA
-        if app.quick.show_expected {
-            if let Some(r) = &app.quick.result {
-                if r.status.is_none() && !app.quick.expected.trim().is_empty() {
-                    let ctx = shuati_core::CheckCtx {
-                        input: &app.quick.input,
-                        actual: &r.stdout,
-                        expected: &app.quick.expected,
-                    };
-                    let v = shuati_judge::check(&shuati_core::CheckerSpec::Tokens, &ctx).unwrap_or(shuati_core::Verdict::Wa);
-                    ui.label(RichText::new(v.to_string()).color(verdict_color(v)).strong().size(16.0));
-                }
-            }
+        if app.quick.show_expected
+            && let Some(r) = &app.quick.result
+            && r.status.is_none()
+            && !app.quick.expected.trim().is_empty()
+        {
+            let ctx =
+                shuati_core::CheckCtx { input: &app.quick.input, actual: &r.stdout, expected: &app.quick.expected };
+            let v = shuati_judge::check(&shuati_core::CheckerSpec::Tokens, &ctx).unwrap_or(shuati_core::Verdict::Wa);
+            ui.label(RichText::new(v.to_string()).color(verdict_color(v)).strong().size(16.0));
         }
         ui.separator();
         let can_save = app.current_problem().is_some() && !app.quick.input.trim().is_empty();
-        if ui.add_enabled(can_save, egui::Button::new("存为当前题用例")).on_hover_text("输入+期望（空则用实际输出）写到当前题的 tests/").clicked() {
+        if ui
+            .add_enabled(can_save, egui::Button::new("存为当前题用例"))
+            .on_hover_text("输入+期望（空则用实际输出）写到当前题的 tests/")
+            .clicked()
+        {
             app.save_quick_as_case();
         }
         if app.current_problem().is_none() {
@@ -342,22 +339,20 @@ fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.label("题目:");
             let cur = app.state.current_problem.clone().unwrap_or_else(|| "（未选择）".into());
-            egui::ComboBox::from_id_salt("prob_sel")
-                .selected_text(&cur)
-                .show_ui(ui, |ui| {
-                    let items: Vec<(String, String)> = app
-                        .problems
-                        .iter()
-                        .map(|p| (p.meta.id.to_string(), p.meta.title.clone()))
-                        .collect();
-                    for (id, title) in items {
-                        let verdict = app.state.last_verdicts.get(&id).cloned().unwrap_or_default();
-                        let label = format!("{id}  {title}{}", if verdict.is_empty() { String::new() } else { format!("  [{verdict}]") });
-                        if ui.selectable_label(cur == id, label).clicked() {
-                            app.select_problem(id);
-                        }
+            egui::ComboBox::from_id_salt("prob_sel").selected_text(&cur).show_ui(ui, |ui| {
+                let items: Vec<(String, String)> =
+                    app.problems.iter().map(|p| (p.meta.id.to_string(), p.meta.title.clone())).collect();
+                for (id, title) in items {
+                    let verdict = app.state.last_verdicts.get(&id).cloned().unwrap_or_default();
+                    let label = format!(
+                        "{id}  {title}{}",
+                        if verdict.is_empty() { String::new() } else { format!("  [{verdict}]") }
+                    );
+                    if ui.selectable_label(cur == id, label).clicked() {
+                        app.select_problem(id);
                     }
-                });
+                }
+            });
             if ui.button("题库").clicked() {
                 app.tab = Tab::Library;
             }
@@ -374,15 +369,18 @@ fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
         });
 
         // 题面（可折叠）
-        if app.show_statement {
-            if let Some(pd) = app.current_problem() {
-                let stmt = pd.read_statement().unwrap_or_default();
-                ui.group(|ui| {
-                    egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-                        ui.add(egui::Label::new(RichText::new(if stmt.is_empty() { "（无题面）" } else { &stmt }).monospace()).wrap());
-                    });
+        if app.show_statement
+            && let Some(pd) = app.current_problem()
+        {
+            let stmt = pd.read_statement().unwrap_or_default();
+            ui.group(|ui| {
+                egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                    ui.add(
+                        egui::Label::new(RichText::new(if stmt.is_empty() { "（无题面）" } else { &stmt }).monospace())
+                            .wrap(),
+                    );
                 });
-            }
+            });
         }
 
         ui.add_space(6.0);
@@ -400,16 +398,18 @@ fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
                         ui.label(RichText::new("把 .cpp/.py 拖进窗口，或点右侧选择").weak());
                     }
                 }
-                if ui.button("选择文件…").clicked() {
-                    if let Some(p) = rfd::FileDialog::new()
-                        .add_filter("源代码", &["cpp", "cc", "cxx", "c++", "py"])
-                        .pick_file()
-                    {
-                        app.set_watch_file(p);
-                    }
+                if ui.button("选择文件…").clicked()
+                    && let Some(p) =
+                        rfd::FileDialog::new().add_filter("源代码", &["cpp", "cc", "cxx", "c++", "py"]).pick_file()
+                {
+                    app.set_watch_file(p);
                 }
                 let mut watch = app.state.watch_enabled;
-                if ui.checkbox(&mut watch, "保存后自动重测").on_hover_text("在 Dev-C++ 里 Ctrl+S 保存，这里自动重新评测").changed() {
+                if ui
+                    .checkbox(&mut watch, "保存后自动重测")
+                    .on_hover_text("在 Dev-C++ 里 Ctrl+S 保存，这里自动重新评测")
+                    .changed()
+                {
                     app.state.watch_enabled = watch;
                     app.save_state();
                 }
@@ -437,7 +437,10 @@ fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
         // 错误（编译错误可能很长，要换行显示）
         if let Some(err) = app.run.error.clone() {
             ui.horizontal(|ui| {
-                ui.add(egui::Label::new(RichText::new(&err).color(Color32::from_rgb(230, 90, 90)).monospace().small()).wrap());
+                ui.add(
+                    egui::Label::new(RichText::new(&err).color(Color32::from_rgb(230, 90, 90)).monospace().small())
+                        .wrap(),
+                );
                 if ui.small_button("×").clicked() {
                     app.run.error = None;
                 }
@@ -559,8 +562,18 @@ fn case_manager(app: &mut ShuatiApp, ui: &mut Ui) {
                 .unwrap_or_else(|| "输入 / 期望输出（粘贴样例）:".into());
             ui.label(title);
             ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::multiline(&mut app.cases.new_in).desired_width(280.0).desired_rows(4).hint_text("输入…"));
-                ui.add(egui::TextEdit::multiline(&mut app.cases.new_out).desired_width(280.0).desired_rows(4).hint_text("期望输出…"));
+                ui.add(
+                    egui::TextEdit::multiline(&mut app.cases.new_in)
+                        .desired_width(280.0)
+                        .desired_rows(4)
+                        .hint_text("输入…"),
+                );
+                ui.add(
+                    egui::TextEdit::multiline(&mut app.cases.new_out)
+                        .desired_width(280.0)
+                        .desired_rows(4)
+                        .hint_text("期望输出…"),
+                );
             });
             ui.horizontal(|ui| {
                 let label = if app.cases.editing.is_some() { "保存" } else { "添加用例" };
@@ -597,22 +610,19 @@ fn case_view_window(app: &mut ShuatiApp, ctx: &egui::Context) {
         return;
     };
     let mut open = true;
-    egui::Window::new(format!("用例 {name}"))
-        .open(&mut open)
-        .default_size([640.0, 360.0])
-        .show(ctx, |ui| {
+    egui::Window::new(format!("用例 {name}")).open(&mut open).default_size([640.0, 360.0]).show(ctx, |ui| {
+        ui.columns(2, |cols| {
+            cols[0].label(RichText::new("输入").strong());
+            cols[1].label(RichText::new("期望输出").strong());
+        });
+        ui.separator();
+        egui::ScrollArea::both().show(ui, |ui| {
             ui.columns(2, |cols| {
-                cols[0].label(RichText::new("输入").strong());
-                cols[1].label(RichText::new("期望输出").strong());
-            });
-            ui.separator();
-            egui::ScrollArea::both().show(ui, |ui| {
-                ui.columns(2, |cols| {
-                    cols[0].add(egui::Label::new(RichText::new(&input).monospace()).wrap());
-                    cols[1].add(egui::Label::new(RichText::new(&output).monospace()).wrap());
-                });
+                cols[0].add(egui::Label::new(RichText::new(&input).monospace()).wrap());
+                cols[1].add(egui::Label::new(RichText::new(&output).monospace()).wrap());
             });
         });
+    });
     if !open {
         app.cases.view_case = None;
     }
@@ -632,28 +642,25 @@ fn diff_window(app: &mut ShuatiApp, ctx: &egui::Context) {
     };
 
     let mut open = true;
-    egui::Window::new(format!("差异 · {}", case.name))
-        .open(&mut open)
-        .default_size([780.0, 440.0])
-        .show(ctx, |ui| {
-            ui.columns(3, |cols| {
-                cols[0].label(RichText::new("输入").strong());
-                cols[1].label(RichText::new("你的输出").strong());
-                cols[2].label(RichText::new("期望输出").strong());
-            });
-            ui.separator();
-            egui::ScrollArea::both().show(ui, |ui| {
-                ui.columns(3, |cols| {
-                    diff_text(&mut cols[0], &case.input, "");
-                    diff_text(&mut cols[1], &case.actual, &case.expected);
-                    diff_text(&mut cols[2], &case.expected, &case.actual);
-                });
-            });
-            if !case.message.is_empty() {
-                ui.separator();
-                ui.label(RichText::new(&case.message).color(Color32::from_rgb(230, 90, 90)));
-            }
+    egui::Window::new(format!("差异 · {}", case.name)).open(&mut open).default_size([780.0, 440.0]).show(ctx, |ui| {
+        ui.columns(3, |cols| {
+            cols[0].label(RichText::new("输入").strong());
+            cols[1].label(RichText::new("你的输出").strong());
+            cols[2].label(RichText::new("期望输出").strong());
         });
+        ui.separator();
+        egui::ScrollArea::both().show(ui, |ui| {
+            ui.columns(3, |cols| {
+                diff_text(&mut cols[0], &case.input, "");
+                diff_text(&mut cols[1], &case.actual, &case.expected);
+                diff_text(&mut cols[2], &case.expected, &case.actual);
+            });
+        });
+        if !case.message.is_empty() {
+            ui.separator();
+            ui.label(RichText::new(&case.message).color(Color32::from_rgb(230, 90, 90)));
+        }
+    });
     if !open {
         app.run.diff_case = None;
     }
@@ -665,7 +672,11 @@ fn diff_text(ui: &mut Ui, text: &str, other: &str) {
     let other_lines: Vec<&str> = other.lines().collect();
     for (i, line) in lines.iter().enumerate() {
         let same = other_lines.get(i).map(|o| o.trim() == line.trim()).unwrap_or(false);
-        let rt = if same { RichText::new(*line).monospace() } else { RichText::new(*line).monospace().color(Color32::from_rgb(230, 90, 90)) };
+        let rt = if same {
+            RichText::new(*line).monospace()
+        } else {
+            RichText::new(*line).monospace().color(Color32::from_rgb(230, 90, 90))
+        };
         ui.label(rt);
     }
 }
@@ -675,7 +686,11 @@ fn diff_text(ui: &mut Ui, text: &str, other: &str) {
 fn library_view(app: &mut ShuatiApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.label("拉题 URL:");
-        let resp = ui.add(egui::TextEdit::singleline(&mut app.url_input).desired_width(360.0).hint_text("https://www.luogu.com.cn/problem/P1001"));
+        let resp = ui.add(
+            egui::TextEdit::singleline(&mut app.url_input)
+                .desired_width(360.0)
+                .hint_text("https://www.luogu.com.cn/problem/P1001"),
+        );
         // 回车 = 获取
         let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let btn = ui.add_enabled(!app.fetching && !app.url_input.trim().is_empty(), egui::Button::new("获取"));
@@ -687,7 +702,11 @@ fn library_view(app: &mut ShuatiApp, ui: &mut Ui) {
         }
     });
     if !app.lib_msg.is_empty() {
-        let color = if app.lib_msg.contains("失败") { Color32::from_rgb(230, 90, 90) } else { Color32::from_rgb(80, 200, 120) };
+        let color = if app.lib_msg.contains("失败") {
+            Color32::from_rgb(230, 90, 90)
+        } else {
+            Color32::from_rgb(80, 200, 120)
+        };
         ui.label(RichText::new(&app.lib_msg).color(color));
     }
 
@@ -830,13 +849,18 @@ fn stress_view(app: &mut ShuatiApp, ui: &mut Ui) {
         ui.label("你的代码:");
         ui.horizontal(|ui| {
             match &user_path {
-                Some(p) => { ui.monospace(p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()).on_hover_text(p.display().to_string()); }
-                None => { ui.label(RichText::new("（未选择）").weak()); }
-            }
-            if ui.small_button("选择…").clicked() {
-                if let Some(p) = rfd::FileDialog::new().add_filter("源代码", &["cpp", "cc", "cxx", "py"]).pick_file() {
-                    app.set_watch_file(p);
+                Some(p) => {
+                    ui.monospace(p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())
+                        .on_hover_text(p.display().to_string());
                 }
+                None => {
+                    ui.label(RichText::new("（未选择）").weak());
+                }
+            }
+            if ui.small_button("选择…").clicked()
+                && let Some(p) = rfd::FileDialog::new().add_filter("源代码", &["cpp", "cc", "cxx", "py"]).pick_file()
+            {
+                app.set_watch_file(p);
             }
         });
         ui.end_row();
@@ -844,11 +868,15 @@ fn stress_view(app: &mut ShuatiApp, ui: &mut Ui) {
         stress_file_status(ui, has_gen);
         ui.label("数据生成器 gen:").on_hover_text("每次运行给它一个 seed（argv[1]），它输出一组测试数据");
         ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut app.stress.gen_path).desired_width(300.0).hint_text("gen/gen.cpp 或 .py"));
-            if ui.small_button("…").clicked() {
-                if let Some(p) = rfd::FileDialog::new().add_filter("源代码", &["cpp", "cc", "cxx", "py"]).pick_file() {
-                    app.stress.gen_path = p.display().to_string();
-                }
+            ui.add(
+                egui::TextEdit::singleline(&mut app.stress.gen_path)
+                    .desired_width(300.0)
+                    .hint_text("gen/gen.cpp 或 .py"),
+            );
+            if ui.small_button("…").clicked()
+                && let Some(p) = rfd::FileDialog::new().add_filter("源代码", &["cpp", "cc", "cxx", "py"]).pick_file()
+            {
+                app.stress.gen_path = p.display().to_string();
             }
         });
         ui.end_row();
@@ -856,11 +884,15 @@ fn stress_view(app: &mut ShuatiApp, ui: &mut Ui) {
         stress_file_status(ui, has_oracle);
         ui.label("暴力标程 oracle:").on_hover_text("一个保证正确但可能慢的程序，通常写暴力解法");
         ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut app.stress.oracle_path).desired_width(300.0).hint_text("solutions/brute.cpp 或 .py"));
-            if ui.small_button("…").clicked() {
-                if let Some(p) = rfd::FileDialog::new().add_filter("源代码", &["cpp", "cc", "cxx", "py"]).pick_file() {
-                    app.stress.oracle_path = p.display().to_string();
-                }
+            ui.add(
+                egui::TextEdit::singleline(&mut app.stress.oracle_path)
+                    .desired_width(300.0)
+                    .hint_text("solutions/brute.cpp 或 .py"),
+            );
+            if ui.small_button("…").clicked()
+                && let Some(p) = rfd::FileDialog::new().add_filter("源代码", &["cpp", "cc", "cxx", "py"]).pick_file()
+            {
+                app.stress.oracle_path = p.display().to_string();
             }
         });
         ui.end_row();
@@ -872,10 +904,15 @@ fn stress_view(app: &mut ShuatiApp, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.label("还没有生成器/标程？");
             let ai_ok = app.ai_ready() && !app.ai.busy;
-            if ui.add_enabled(ai_ok, egui::Button::new("AI 一键生成")).on_hover_text("AI 读题面写 gen+标程，自动验证能跑才给你（需配置 api_key）").clicked() {
+            if ui
+                .add_enabled(ai_ok, egui::Button::new("AI 一键生成"))
+                .on_hover_text("AI 读题面写 gen+标程，自动验证能跑才给你（需配置 api_key）")
+                .clicked()
+            {
                 app.trigger_ai_scripts();
             }
-            if ui.button("写代码模板").on_hover_text("在题目目录生成 gen.cpp/brute.cpp 骨架，改一改就能用").clicked() {
+            if ui.button("写代码模板").on_hover_text("在题目目录生成 gen.cpp/brute.cpp 骨架，改一改就能用").clicked()
+            {
                 write_stress_templates(app);
             }
         });
@@ -910,7 +947,11 @@ fn stress_view(app: &mut ShuatiApp, ui: &mut Ui) {
             ui.add(egui::TextEdit::singleline(&mut app.stress.gen_count_input).desired_width(60.0));
             ui.label("组");
             let can = !app.stress.genning && has_gen && has_oracle;
-            if ui.add_enabled(can, egui::Button::new("生成 → tests/")).on_hover_text("gen 产输入、标程产答案，直接落到用例库").clicked() {
+            if ui
+                .add_enabled(can, egui::Button::new("生成 → tests/"))
+                .on_hover_text("gen 产输入、标程产答案，直接落到用例库")
+                .clicked()
+            {
                 app.trigger_gen_cases();
             }
             if app.stress.genning {
@@ -941,10 +982,15 @@ fn stress_view(app: &mut ShuatiApp, ui: &mut Ui) {
             ui.label(RichText::new(format!("✓ {} 一致", app.stress.matched)).color(Color32::from_rgb(80, 200, 120)));
             ui.label(RichText::new(format!("✗ {} 反例", app.stress.hack_count)).color(Color32::from_rgb(230, 90, 90)));
             if app.stress.gen_fail > 0 {
-                ui.label(RichText::new(format!("gen异常 {}", app.stress.gen_fail)).color(Color32::from_rgb(230, 180, 60)));
+                ui.label(
+                    RichText::new(format!("gen异常 {}", app.stress.gen_fail)).color(Color32::from_rgb(230, 180, 60)),
+                );
             }
             if app.stress.oracle_fail > 0 {
-                ui.label(RichText::new(format!("标程异常 {}", app.stress.oracle_fail)).color(Color32::from_rgb(230, 180, 60)));
+                ui.label(
+                    RichText::new(format!("标程异常 {}", app.stress.oracle_fail))
+                        .color(Color32::from_rgb(230, 180, 60)),
+                );
             }
         });
     }
@@ -994,10 +1040,13 @@ fn stress_view(app: &mut ShuatiApp, ui: &mut Ui) {
                 }
             }
         });
-    } else if let Some(rep) = &app.stress.report {
-        if rep.is_clean() {
-            ui.label(RichText::new(format!("{} 轮全部一致，没找到反例 ✓", rep.rounds_done)).color(Color32::from_rgb(80, 200, 120)));
-        }
+    } else if let Some(rep) = &app.stress.report
+        && rep.is_clean()
+    {
+        ui.label(
+            RichText::new(format!("{} 轮全部一致，没找到反例 ✓", rep.rounds_done))
+                .color(Color32::from_rgb(80, 200, 120)),
+        );
     }
 }
 
@@ -1043,15 +1092,11 @@ int main() {
 }
 "#;
     let mut made = Vec::new();
-    if !gen_path.exists() {
-        if std::fs::write(&gen_path, GEN_TPL).is_ok() {
-            made.push(gen_path.display().to_string());
-        }
+    if !gen_path.exists() && std::fs::write(&gen_path, GEN_TPL).is_ok() {
+        made.push(gen_path.display().to_string());
     }
-    if !brute_path.exists() {
-        if std::fs::write(&brute_path, BRUTE_TPL).is_ok() {
-            made.push(brute_path.display().to_string());
-        }
+    if !brute_path.exists() && std::fs::write(&brute_path, BRUTE_TPL).is_ok() {
+        made.push(brute_path.display().to_string());
     }
     if made.is_empty() {
         app.stress.msg = "gen.cpp / brute.cpp 已存在".into();
@@ -1068,10 +1113,10 @@ fn settings_view(app: &mut ShuatiApp, ui: &mut Ui) {
         ui.label("C++ 编译器:");
         ui.horizontal(|ui| {
             ui.text_edit_singleline(&mut app.cfg_cpp);
-            if let Some(env) = &app.env {
-                if let Some(p) = &env.cpp {
-                    ui.label(RichText::new(format!("自动: {}", p.display())).weak().small());
-                }
+            if let Some(env) = &app.env
+                && let Some(p) = &env.cpp
+            {
+                ui.label(RichText::new(format!("自动: {}", p.display())).weak().small());
             }
         });
         ui.end_row();
@@ -1079,10 +1124,10 @@ fn settings_view(app: &mut ShuatiApp, ui: &mut Ui) {
         ui.label("Python:");
         ui.horizontal(|ui| {
             ui.text_edit_singleline(&mut app.cfg_py);
-            if let Some(env) = &app.env {
-                if let Some(p) = &env.python {
-                    ui.label(RichText::new(format!("自动: {}", p.display())).weak().small());
-                }
+            if let Some(env) = &app.env
+                && let Some(p) = &env.python
+            {
+                ui.label(RichText::new(format!("自动: {}", p.display())).weak().small());
             }
         });
         ui.end_row();
@@ -1119,7 +1164,11 @@ fn settings_view(app: &mut ShuatiApp, ui: &mut Ui) {
         ui.end_row();
 
         ui.label("AI 接口地址:");
-        ui.add(egui::TextEdit::singleline(&mut app.cfg_api_base).desired_width(340.0).hint_text("https://api.deepseek.com/v1"));
+        ui.add(
+            egui::TextEdit::singleline(&mut app.cfg_api_base)
+                .desired_width(340.0)
+                .hint_text("https://api.deepseek.com/v1"),
+        );
         ui.end_row();
 
         ui.label("AI 模型:");
@@ -1168,7 +1217,11 @@ fn settings_view(app: &mut ShuatiApp, ui: &mut Ui) {
                 Err(e) => app.run.error = Some(format!("配置保存失败: {e}")),
             }
         }
-        if ui.add_enabled(!app.ai_pinging, egui::Button::new("测试连接")).on_hover_text("用当前输入的地址/密钥/模型发一个最小请求").clicked() {
+        if ui
+            .add_enabled(!app.ai_pinging, egui::Button::new("测试连接"))
+            .on_hover_text("用当前输入的地址/密钥/模型发一个最小请求")
+            .clicked()
+        {
             app.trigger_ai_ping();
         }
         if app.ai_pinging {
@@ -1176,7 +1229,10 @@ fn settings_view(app: &mut ShuatiApp, ui: &mut Ui) {
         }
         if !app.cfg_msg.is_empty() {
             let ok = app.cfg_msg.starts_with("连接正常") || app.cfg_msg == "已保存";
-            ui.colored_label(if ok { Color32::from_rgb(80, 200, 120) } else { Color32::from_rgb(230, 90, 90) }, &app.cfg_msg);
+            ui.colored_label(
+                if ok { Color32::from_rgb(80, 200, 120) } else { Color32::from_rgb(230, 90, 90) },
+                &app.cfg_msg,
+            );
         }
     });
     ui.add_space(4.0);

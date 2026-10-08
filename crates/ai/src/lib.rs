@@ -3,14 +3,14 @@
 //! - explain: 解释 WA/TLE/RE 原因
 //! - gen_scripts: 生成对拍 gen/oracle，结构化输出 + 可重试
 
+pub mod autogen;
 mod client;
 pub mod prompts;
 pub mod scripts;
-pub mod autogen;
 
+pub use autogen::{ScriptDirs, produce_scripts};
 pub use client::AiClient;
 pub use scripts::StressScripts;
-pub use autogen::produce_scripts;
 
 use thiserror::Error;
 

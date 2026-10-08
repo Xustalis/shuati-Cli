@@ -1,11 +1,11 @@
 //! TestEngine：编译 → 逐用例跑 → checker → 聚合报告。
 //! GUI/CLI/对拍共用这一条管线。
 
-use crate::{check_async, compile_source, run_program, JudgeError, Result, RunStatus, Toolchain};
+use crate::{JudgeError, Result, RunStatus, Toolchain, check_async, compile_source, run_program};
 use shuati_core::{CaseResult, CheckerSpec, Limits, ProblemId, RunKind, SourceFile, TestCase, TestReport, Verdict};
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// 评测进度回调（GUI 实时刷新用）
 pub type ProgressFn = Arc<dyn Fn(usize, usize, &CaseResult) + Send + Sync>;
@@ -106,11 +106,7 @@ impl TestEngine {
         let cases_res: Vec<CaseResult> = indexed.into_iter().map(|(_, r)| r).collect();
 
         let pass = cases_res.iter().filter(|c| c.verdict == Verdict::Ac).count();
-        let verdict = cases_res
-            .iter()
-            .find(|c| c.verdict != Verdict::Ac)
-            .map(|c| c.verdict)
-            .unwrap_or(Verdict::Ac);
+        let verdict = cases_res.iter().find(|c| c.verdict != Verdict::Ac).map(|c| c.verdict).unwrap_or(Verdict::Ac);
 
         Ok(TestReport {
             problem: p.problem.clone(),
@@ -130,7 +126,7 @@ async fn run_one(
     tc: &TestCase,
     limits: &Limits,
     checker: &CheckerSpec,
-    tmpdir: &PathBuf,
+    tmpdir: &Path,
     idx: usize,
     cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
 ) -> CaseResult {

@@ -2,25 +2,25 @@
 //! Compiler → Program / Runner → RunOutcome / Checker → Verdict 三件套正交拆分，
 //! TestEngine/StressEngine 做编排。所有进程调用走 argv 数组，绝不拼 shell。
 
-mod program;
-mod compiler;
-mod runner;
+mod binding;
 mod checker;
+mod compiler;
 mod engine;
+mod env;
+mod program;
+mod runner;
 mod stress;
 mod watch;
-mod env;
-mod binding;
 
-pub use program::*;
-pub use compiler::*;
-pub use runner::*;
+pub use binding::*;
 pub use checker::*;
+pub use compiler::*;
 pub use engine::*;
+pub use env::*;
+pub use program::*;
+pub use runner::*;
 pub use stress::*;
 pub use watch::*;
-pub use env::*;
-pub use binding::*;
 
 use thiserror::Error;
 

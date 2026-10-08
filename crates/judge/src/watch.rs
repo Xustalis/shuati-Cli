@@ -4,8 +4,8 @@
 
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver};
 use std::sync::Mutex;
+use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
 /// 防抖间隔：连续保存只触发一次
@@ -22,10 +22,7 @@ pub fn watch_file(path: PathBuf) -> notify::Result<(notify::RecommendedWatcher, 
 
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
         let Ok(ev) = res else { return };
-        let dominated = matches!(
-            ev.kind,
-            EventKind::Modify(_) | EventKind::Create(_) | EventKind::Any
-        );
+        let dominated = matches!(ev.kind, EventKind::Modify(_) | EventKind::Create(_) | EventKind::Any);
         if !dominated || !ev.paths.iter().any(|p| p == &hit_path) {
             return;
         }

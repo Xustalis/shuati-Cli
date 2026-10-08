@@ -18,11 +18,7 @@ pub fn client() -> &'static reqwest::Client {
 }
 
 pub async fn get_text(url: &str) -> Result<String, FetchError> {
-    let resp = client()
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| FetchError::Network(e.to_string()))?;
+    let resp = client().get(url).send().await.map_err(|e| FetchError::Network(e.to_string()))?;
     if !resp.status().is_success() {
         return Err(FetchError::Network(format!("HTTP {} on {}", resp.status(), url)));
     }

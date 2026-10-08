@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use shuati_core::{Lang, ProblemId, SourceFile};
 use shuati_judge as judge;
 use shuati_store as store;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
 #[command(name = "shuati", about = "本地评测小助手 · shuati v2", version)]
@@ -164,12 +164,12 @@ fn init_logging(ws: &store::Workspace) {
 }
 
 /// 快速运行：编译 file → stdin 透传 → stdout/stderr 直接输出
-async fn cmd_run(ws: &store::Workspace, cfg: &store::Config, file: &PathBuf) -> Result<()> {
+async fn cmd_run(ws: &store::Workspace, cfg: &store::Config, file: &Path) -> Result<()> {
     let lang = Lang::from_path(file).context("不支持的文件类型（.cpp/.py）")?;
     let tc_cfg = pick_tc(lang, cfg);
     let tc = judge::Toolchain::detect(lang, tc_cfg)?;
     println!("[*] 编译 {} …", file.display());
-    let prog = judge::compile_cached(&SourceFile { path: file.clone(), lang }, &tc, &ws.cache_dir()).await?;
+    let prog = judge::compile_cached(&SourceFile { path: file.to_path_buf(), lang }, &tc, &ws.cache_dir()).await?;
 
     let tmp = tempfile::tempdir()?;
     // 管道输入 → 读到临时文件喂给程序；TTY（交互终端）→ 直接给 EOF（并提示）
@@ -187,11 +187,7 @@ async fn cmd_run(ws: &store::Workspace, cfg: &store::Config, file: &PathBuf) -> 
             Some(p)
         }
     };
-    let io = judge::Io {
-        stdin,
-        stdout: tmp.path().join("stdout"),
-        stderr: tmp.path().join("stderr"),
-    };
+    let io = judge::Io { stdin, stdout: tmp.path().join("stdout"), stderr: tmp.path().join("stderr") };
     let limits = shuati_core::Limits { cpu_ms: 5000, wall_ms: 15000, memory_mb: 512, output_mb: 16 };
     let out = judge::run_program(&prog, &io, &limits, None).await;
     judge::cleanup_program(&prog);
@@ -224,9 +220,7 @@ async fn auto_produce(
     lang_hint: Option<&str>,
 ) -> Result<(PathBuf, PathBuf)> {
     let ai = &cfg.ai;
-    let key = ai
-        .resolved_key()
-        .context("AI 未配置：设置页填 api_key，或设环境变量 SHUATI_API_KEY")?;
+    let key = ai.resolved_key().context("AI 未配置：设置页填 api_key，或设环境变量 SHUATI_API_KEY")?;
     let client = shuati_ai::AiClient::new(&ai.api_base, &key, &ai.model)?;
     let statement = pd.read_statement().unwrap_or_default();
     let lang = match lang_hint.unwrap_or(&cfg.default_lang) {
@@ -235,17 +229,14 @@ async fn auto_produce(
     };
     println!("[*] AI 正在生成对拍脚本（{lang:?}），自动 dry-run 验证…");
     // 落 gen/ 和 solutions/——与 find_script 的探测目录一致，下次不再重生成
-    let (gen_path, oracle_path) = shuati_ai::produce_scripts(
-        &client,
-        &statement,
-        lang,
-        &pd.gen_dir(),
-        &pd.solutions_dir(),
-        &cfg.compiler_cpp,
-        &cfg.compiler_python,
-        |s| println!("    {s}"),
-    )
-    .await?;
+    let gen_dir = pd.gen_dir();
+    let oracle_dir = pd.solutions_dir();
+    let dirs = shuati_ai::ScriptDirs { generator: &gen_dir, oracle: &oracle_dir };
+    let (gen_path, oracle_path) =
+        shuati_ai::produce_scripts(&client, &statement, lang, dirs, &cfg.compiler_cpp, &cfg.compiler_python, |s| {
+            println!("    {s}")
+        })
+        .await?;
     println!("    gen    → {}", gen_path.display());
     println!("    oracle → {}", oracle_path.display());
     Ok((gen_path, oracle_path))
@@ -269,12 +260,14 @@ async fn cmd_gen(
     };
 
     let (gen_path, oracle_path) = if auto {
-        auto_produce(&pd, cfg, None).await?
+        auto_produce(pd, cfg, None).await?
     } else {
         let g = generator.or_else(|| judge::find_script(&pd.gen_dir(), &["gen"]));
         let o = oracle.or_else(|| judge::find_script(&pd.solutions_dir(), &["brute", "oracle", "std"]));
-        (g.ok_or_else(|| anyhow::anyhow!("找不到生成器（放 gen/gen.* 或用 --auto 让 AI 写）"))?,
-         o.ok_or_else(|| anyhow::anyhow!("找不到标程（放 solutions/brute.* 或用 --auto）"))?)
+        (
+            g.ok_or_else(|| anyhow::anyhow!("找不到生成器（放 gen/gen.* 或用 --auto 让 AI 写）"))?,
+            o.ok_or_else(|| anyhow::anyhow!("找不到标程（放 solutions/brute.* 或用 --auto）"))?,
+        )
     };
 
     let mk_src = |p: &PathBuf| -> Result<SourceFile> {
@@ -322,11 +315,7 @@ fn resolve_rel(problem_dir: &std::path::Path, p: &PathBuf) -> PathBuf {
         return p.clone();
     }
     let cand = problem_dir.join(p);
-    if cand.exists() {
-        cand
-    } else {
-        p.clone()
-    }
+    if cand.exists() { cand } else { p.clone() }
 }
 
 fn pick_tc(lang: Lang, cfg: &store::Config) -> &str {
@@ -362,30 +351,42 @@ async fn cmd_hint(
         let reports_dir = pd.reports_dir();
         let mut latest: Option<shuati_core::TestReport> = None;
         if let Ok(entries) = std::fs::read_dir(&reports_dir) {
-            let mut paths: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|x| x.path())).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
+            let mut paths: Vec<PathBuf> = entries
+                .filter_map(|e| e.ok().map(|x| x.path()))
+                .filter(|p| p.extension().is_some_and(|x| x == "json"))
+                .collect();
             paths.sort();
-            if let Some(p) = paths.last() {
-                if let Ok(t) = std::fs::read_to_string(p) {
-                    latest = serde_json::from_str(&t).ok();
-                }
+            if let Some(p) = paths.last()
+                && let Ok(t) = std::fs::read_to_string(p)
+            {
+                latest = serde_json::from_str(&t).ok();
             }
         }
         match latest {
             Some(r) => {
-                let fails: Vec<String> = r.cases.iter()
+                let fails: Vec<String> = r
+                    .cases
+                    .iter()
                     .filter(|c| c.verdict != shuati_core::Verdict::Ac)
-                    .map(|c| format!("{}: {} （期望 {} 实际 {}）", c.name, c.verdict,
-                        c.expected.lines().next().unwrap_or(""),
-                        c.actual.lines().next().unwrap_or("")))
+                    .map(|c| {
+                        format!(
+                            "{}: {} （期望 {} 实际 {}）",
+                            c.name,
+                            c.verdict,
+                            c.expected.lines().next().unwrap_or(""),
+                            c.actual.lines().next().unwrap_or("")
+                        )
+                    })
                     .take(3)
                     .collect();
                 // explain 需要失败用例的 IO 细节，取第一个失败点
-                let io_detail = r.cases.iter()
+                let io_detail = r
+                    .cases
+                    .iter()
                     .find(|c| c.verdict != shuati_core::Verdict::Ac)
-                    .map(|c| format!(
-                        "用例 {}:\n输入:\n{}\n期望:\n{}\n实际:\n{}",
-                        c.name, c.input, c.expected, c.actual
-                    ))
+                    .map(|c| {
+                        format!("用例 {}:\n输入:\n{}\n期望:\n{}\n实际:\n{}", c.name, c.input, c.expected, c.actual)
+                    })
                     .unwrap_or_default();
                 (format!("总判定 {}，{}/{}。失败点:\n{}", r.verdict, r.pass, r.total, fails.join("\n")), io_detail)
             }
@@ -472,8 +473,7 @@ fn upsert_devcpp_tools(content: &str, tools: &[DevCppTool]) -> String {
     let is_ours = |lines: &[String]| {
         lines.iter().any(|l| {
             let l = l.trim();
-            (l.to_ascii_lowercase().starts_with("title=")
-                || l.to_ascii_lowercase().starts_with("params="))
+            (l.to_ascii_lowercase().starts_with("title=") || l.to_ascii_lowercase().starts_with("params="))
                 && l.to_ascii_lowercase().contains("shuati")
         })
     };
@@ -554,11 +554,10 @@ fn upsert_devcpp_tools(content: &str, tools: &[DevCppTool]) -> String {
     // 写回 [Tools] Count
     let count_line = format!("Count={count}");
     if let Some((_, ls)) = sections.iter_mut().find(|(n, _)| n.eq_ignore_ascii_case("tools")) {
-        if let Some(slot) = ls.iter_mut().find(|l| {
-            l.trim()
-                .split_once('=')
-                .is_some_and(|(k, _)| k.trim().eq_ignore_ascii_case("count"))
-        }) {
+        if let Some(slot) = ls
+            .iter_mut()
+            .find(|l| l.trim().split_once('=').is_some_and(|(k, _)| k.trim().eq_ignore_ascii_case("count")))
+        {
             *slot = count_line;
         } else {
             ls.push(count_line);
@@ -689,7 +688,7 @@ async fn cmd_stress(
         None => pd.find_solution().context("solutions/ 下没有源文件")?,
     };
     let (gen_path, oracle_path) = if auto {
-        auto_produce(&pd, cfg, auto_lang.as_deref()).await?
+        auto_produce(pd, cfg, auto_lang.as_deref()).await?
     } else {
         let g = match generator {
             Some(g) => g,
@@ -754,13 +753,23 @@ async fn cmd_stress(
 
     // hack 落盘
     for hack in &report.hacks {
-        let path = pd.save_hack(hack.seed, &hack.input, &hack.user_out, &hack.oracle_out, &format!("{}: {}", hack.kind, hack.detail))?;
+        let path = pd.save_hack(
+            hack.seed,
+            &hack.input,
+            &hack.user_out,
+            &hack.oracle_out,
+            &format!("{}: {}", hack.kind, hack.detail),
+        )?;
         println!("  hack 已保存 → {}", path.display());
     }
 
     println!(
         "[结果] {} 轮 · ✓{} 一致 · hack {} · gen异常 {} · 标程异常 {}",
-        report.rounds_done, report.matched, report.hacks.len(), report.gen_failures, report.oracle_failures
+        report.rounds_done,
+        report.matched,
+        report.hacks.len(),
+        report.gen_failures,
+        report.oracle_failures
     );
     if !report.hacks.is_empty() {
         std::process::exit(1);
@@ -803,9 +812,7 @@ fn cmd_list(ws: &store::Workspace) -> Result<()> {
 }
 
 fn cmd_new(ws: &store::Workspace, title: &str, slug: Option<String>) -> Result<()> {
-    let slug = slug.unwrap_or_else(|| {
-        title.chars().filter(|c| c.is_alphanumeric()).collect::<String>()
-    });
+    let slug = slug.unwrap_or_else(|| title.chars().filter(|c| c.is_alphanumeric()).collect::<String>());
     let slug = if slug.is_empty() { format!("{}", store::now_ts()) } else { slug };
     let id = ProblemId::new(shuati_core::Source::Local, &slug);
     let dir = ws.problem_dir(&id);
@@ -835,14 +842,13 @@ async fn cmd_test(
     // 解析题目：参数 > --file 绑定注释 > state.current > 唯一题目
     let problems = store::load_all_problems(ws);
     let mut bound_hit = None;
-    if id.is_none() {
-        if let Some(f) = &file {
-            if let Some(bound) = judge::binding_comment(f) {
-                bound_hit = problems.iter().find(|p| p.meta.id == bound);
-                if bound_hit.is_some() {
-                    println!("[*] 源文件绑定 {bound}（`// shuati:` 注释）");
-                }
-            }
+    if id.is_none()
+        && let Some(f) = &file
+        && let Some(bound) = judge::binding_comment(f)
+    {
+        bound_hit = problems.iter().find(|p| p.meta.id == bound);
+        if bound_hit.is_some() {
+            println!("[*] 源文件绑定 {bound}（`// shuati:` 注释）");
         }
     }
     let mut pd = match bound_hit.or(resolve_problem(&problems, id.as_deref(), ws)?) {
@@ -855,15 +861,13 @@ async fn cmd_test(
         None => pd.find_solution().context("solutions/ 下没有源文件")?,
     };
     // solutions/ 下发现的源文件也过一遍绑定注释（与已选不同时显式切题）
-    if id.is_none() {
-        if let Some(bound) = judge::binding_comment(&src_path) {
-            if let Some(p) = problems.iter().find(|p| p.meta.id == bound) {
-                if p.meta.id != pd.meta.id {
-                    println!("[*] 源文件绑定 {}（`// shuati:` 注释）", bound);
-                    pd = p;
-                }
-            }
-        }
+    if id.is_none()
+        && let Some(bound) = judge::binding_comment(&src_path)
+        && let Some(p) = problems.iter().find(|p| p.meta.id == bound)
+        && p.meta.id != pd.meta.id
+    {
+        println!("[*] 源文件绑定 {}（`// shuati:` 注释）", bound);
+        pd = p;
     }
     let lang = Lang::from_path(&src_path).context("不支持的文件类型（需 .cpp/.py）")?;
 
@@ -920,9 +924,7 @@ async fn cmd_test(
 
     // 记录最近结果
     let mut state = store::AppState::load(&ws.state_path());
-    state
-        .last_verdicts
-        .insert(pd.meta.id.to_string(), report.verdict.to_string());
+    state.last_verdicts.insert(pd.meta.id.to_string(), report.verdict.to_string());
     state.save(&ws.state_path())?;
 
     if report.verdict != shuati_core::Verdict::Ac {
@@ -931,7 +933,7 @@ async fn cmd_test(
     Ok(())
 }
 
-fn cfg_cpp_for<'a>(cfg: &'a store::Config, lang: Lang) -> &'a str {
+fn cfg_cpp_for(cfg: &store::Config, lang: Lang) -> &str {
     match lang {
         Lang::Cpp => &cfg.compiler_cpp,
         Lang::Python => &cfg.compiler_python,
@@ -948,18 +950,16 @@ fn resolve_problem<'a>(
         // 支持 "P1001" / "luogu:P1001" / 目录名 模糊匹配
         let hit = problems.iter().find(|p| {
             let full = p.meta.id.to_string().to_lowercase();
-            full == needle
-                || p.meta.id.slug.to_lowercase() == needle
-                || p.meta.id.dir_name().to_lowercase() == needle
+            full == needle || p.meta.id.slug.to_lowercase() == needle || p.meta.id.dir_name().to_lowercase() == needle
         });
         return Ok(hit);
     }
     // state.json 记录的当前题目
     let state = store::AppState::load(&ws.state_path());
-    if let Some(cur) = &state.current_problem {
-        if let Some(p) = problems.iter().find(|p| &p.meta.id.to_string() == cur) {
-            return Ok(Some(p));
-        }
+    if let Some(cur) = &state.current_problem
+        && let Some(p) = problems.iter().find(|p| &p.meta.id.to_string() == cur)
+    {
+        return Ok(Some(p));
     }
     // 只有一道题时直接用
     if problems.len() == 1 {

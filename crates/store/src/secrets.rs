@@ -24,13 +24,7 @@ pub fn resolve_api_key(file_key: &str) -> Option<String> {
 
 /// 优先级选择的纯逻辑（可测）：env > keyring > file
 fn pick_key(env: Option<String>, ring: Option<String>, file_key: &str) -> Option<String> {
-    env.or(ring).or_else(|| {
-        if file_key.trim().is_empty() {
-            None
-        } else {
-            Some(file_key.to_string())
-        }
-    })
+    env.or(ring).or_else(|| if file_key.trim().is_empty() { None } else { Some(file_key.to_string()) })
 }
 
 /// key 的来源（用于 UI 展示"key 已在系统钥匙串"之类的提示）
@@ -61,11 +55,7 @@ pub fn delete_api_key() {
 }
 
 fn keyring_get() -> Option<String> {
-    keyring::Entry::new(SERVICE, NAME)
-        .ok()?
-        .get_password()
-        .ok()
-        .filter(|s| !s.trim().is_empty())
+    keyring::Entry::new(SERVICE, NAME).ok()?.get_password().ok().filter(|s| !s.trim().is_empty())
 }
 
 fn io_err(msg: String) -> std::io::Error {

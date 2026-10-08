@@ -10,15 +10,19 @@ use std::path::{Path, PathBuf};
 
 const MAX_ATTEMPTS: u32 = 3;
 
-/// dry-run 验证通过才落盘。
-/// gen 写到 `gen_dir/gen.<ext>`，oracle 写到 `oracle_dir/brute.<ext>`——
+/// 脚本落盘位置：gen → `generator/gen.<ext>`，oracle → `oracle/brute.<ext>`。
 /// 必须与 find_script 的探测目录一致（gen/ 和 solutions/），否则下次找不到。
+pub struct ScriptDirs<'a> {
+    pub generator: &'a Path,
+    pub oracle: &'a Path,
+}
+
+/// dry-run 验证通过才落盘，返回 (gen_path, oracle_path)。
 pub async fn produce_scripts(
     client: &AiClient,
     statement: &str,
     lang: Lang,
-    gen_dir: &Path,
-    oracle_dir: &Path,
+    dirs: ScriptDirs<'_>,
     cpp_cfg: &str,
     py_cfg: &str,
     mut on_status: impl FnMut(&str),
@@ -31,8 +35,7 @@ pub async fn produce_scripts(
         Lang::Cpp => cpp_cfg,
         Lang::Python => py_cfg,
     };
-    let tc = judge::Toolchain::detect(lang, compiler)
-        .map_err(|e| AiError::Api(format!("工具链: {e}")))?;
+    let tc = judge::Toolchain::detect(lang, compiler).map_err(|e| AiError::Api(format!("工具链: {e}")))?;
 
     on_status("AI 生成 gen/oracle 脚本…");
     let mut scripts = client.gen_scripts(statement, lang_name).await?;
@@ -56,10 +59,10 @@ pub async fn produce_scripts(
         match dry_run(&gen_src, &oracle_src, &tc).await {
             Ok(()) => {
                 // 验证通过 → 落盘到约定子目录
-                std::fs::create_dir_all(gen_dir).map_err(|e| AiError::Api(e.to_string()))?;
-                std::fs::create_dir_all(oracle_dir).map_err(|e| AiError::Api(e.to_string()))?;
-                let gen_dest = gen_dir.join(format!("gen.{ext}"));
-                let brute_dest = oracle_dir.join(format!("brute.{ext}"));
+                std::fs::create_dir_all(dirs.generator).map_err(|e| AiError::Api(e.to_string()))?;
+                std::fs::create_dir_all(dirs.oracle).map_err(|e| AiError::Api(e.to_string()))?;
+                let gen_dest = dirs.generator.join(format!("gen.{ext}"));
+                let brute_dest = dirs.oracle.join(format!("brute.{ext}"));
                 std::fs::write(&gen_dest, &scripts.generator).map_err(|e| AiError::Api(e.to_string()))?;
                 std::fs::write(&brute_dest, &scripts.oracle).map_err(|e| AiError::Api(e.to_string()))?;
                 on_status("脚本验证通过");
@@ -67,9 +70,7 @@ pub async fn produce_scripts(
             }
             Err(err) if attempt < MAX_ATTEMPTS => {
                 on_status(&format!("验证失败，让 AI 修复: {}", truncate(&err, 120)));
-                scripts = client
-                    .repair_scripts(statement, lang_name, &scripts, &err)
-                    .await?;
+                scripts = client.repair_scripts(statement, lang_name, &scripts, &err).await?;
             }
             Err(err) => {
                 return Err(AiError::Parse(format!(
@@ -83,10 +84,12 @@ pub async fn produce_scripts(
 }
 
 /// dry-run：编译两个脚本，跑 3 个 seed 的 gen → oracle，任何一步挂都算失败
-async fn dry_run(gen_src: &SourceFile, oracle_src: &SourceFile, tc: &judge::Toolchain) -> std::result::Result<(), String> {
-    let gen_prog = judge::compile_source(gen_src, tc)
-        .await
-        .map_err(|e| format!("gen 编译失败: {e}"))?;
+async fn dry_run(
+    gen_src: &SourceFile,
+    oracle_src: &SourceFile,
+    tc: &judge::Toolchain,
+) -> std::result::Result<(), String> {
+    let gen_prog = judge::compile_source(gen_src, tc).await.map_err(|e| format!("gen 编译失败: {e}"))?;
     let oracle_prog = match judge::compile_source(oracle_src, tc).await {
         Ok(p) => p,
         Err(e) => {
@@ -109,16 +112,11 @@ async fn dry_run_seeds(gen_prog: &judge::Program, oracle_prog: &judge::Program) 
 
     for seed in [1u64, 42, 7] {
         // gen(seed) → input
-        let gen_io = judge::Io {
-            stdin: None,
-            stdout: td.join(format!("g{seed}.out")),
-            stderr: td.join(format!("g{seed}.err")),
-        };
+        let gen_io =
+            judge::Io { stdin: None, stdout: td.join(format!("g{seed}.out")), stderr: td.join(format!("g{seed}.err")) };
         let mut gen_with_seed = gen_prog.clone();
         gen_with_seed.argv.push(seed.to_string());
-        let g = judge::run_program(&gen_with_seed, &gen_io, &glim, None)
-            .await
-            .map_err(|e| e.to_string())?;
+        let g = judge::run_program(&gen_with_seed, &gen_io, &glim, None).await.map_err(|e| e.to_string())?;
         if g.status != judge::RunStatus::Ok {
             let err = std::fs::read_to_string(&gen_io.stderr).unwrap_or_default();
             return Err(format!("gen 运行失败(seed={seed}, {:?}): {}", g.status, truncate(&err, 200)));
@@ -136,9 +134,7 @@ async fn dry_run_seeds(gen_prog: &judge::Program, oracle_prog: &judge::Program) 
             stdout: td.join(format!("o{seed}.out")),
             stderr: td.join(format!("o{seed}.err")),
         };
-        let o = judge::run_program(oracle_prog, &oracle_io, &rlim, None)
-            .await
-            .map_err(|e| e.to_string())?;
+        let o = judge::run_program(oracle_prog, &oracle_io, &rlim, None).await.map_err(|e| e.to_string())?;
         if o.status != judge::RunStatus::Ok {
             let err = std::fs::read_to_string(&oracle_io.stderr).unwrap_or_default();
             return Err(format!("oracle 运行失败(seed={seed}, {:?}): {}", o.status, truncate(&err, 200)));

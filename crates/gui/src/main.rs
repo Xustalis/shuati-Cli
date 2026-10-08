@@ -4,8 +4,8 @@
 
 mod app;
 mod fonts;
-mod worker;
 mod views;
+mod worker;
 
 fn main() -> eframe::Result<()> {
     // --root <dir> 指定工作区（默认 exe 旁 shuati-data/）
@@ -37,9 +37,5 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
-    eframe::run_native(
-        "shuati",
-        options,
-        Box::new(|cc| Ok(Box::new(app::ShuatiApp::new(cc, root)))),
-    )
+    eframe::run_native("shuati", options, Box::new(|cc| Ok(Box::new(app::ShuatiApp::new(cc, root)))))
 }

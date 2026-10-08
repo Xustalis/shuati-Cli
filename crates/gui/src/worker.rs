@@ -124,11 +124,7 @@ pub enum Task {
         cancel: Arc<AtomicBool>,
     },
     /// AI 连接测试（最小请求）
-    AiPing {
-        api_base: String,
-        api_key: String,
-        model: String,
-    },
+    AiPing { api_base: String, api_key: String, model: String },
     /// 批量生成用例 → tests/
     GenCases {
         problem_dir: PathBuf,
@@ -170,7 +166,16 @@ impl Bridge {
                             let ev = ev_tx.clone();
                             let cd = cache_dir.clone();
                             tokio::spawn(async move {
-                                run_test(problem_dir, problem_id, src, limits, checker, compiler_cfg, cancel, ev, cd).await;
+                                let job = TestJob {
+                                    problem_dir,
+                                    problem_id,
+                                    src,
+                                    limits,
+                                    checker,
+                                    compiler_cfg,
+                                    cache_dir: cd,
+                                };
+                                run_test(job, cancel, ev).await;
                             });
                         }
                         Task::FetchProblem { url } => {
@@ -195,15 +200,42 @@ impl Bridge {
                             });
                         }
                         Task::RunStress {
-                            problem_dir, gen_src, user_src, oracle_src, rounds, seed_start,
-                            jobs, limits, checker, cpp_cfg, py_cfg, stop_on_fail, cancel,
+                            problem_dir,
+                            gen_src,
+                            user_src,
+                            oracle_src,
+                            rounds,
+                            seed_start,
+                            jobs,
+                            limits,
+                            checker,
+                            cpp_cfg,
+                            py_cfg,
+                            stop_on_fail,
+                            cancel,
                         } => {
                             *slot.lock().unwrap() = Some(cancel.clone());
                             let ev = ev_tx.clone();
                             let cd = cache_dir.clone();
                             tokio::spawn(async move {
-                                run_stress(problem_dir, gen_src, user_src, oracle_src, rounds, seed_start,
-                                    jobs, limits, checker, cpp_cfg, py_cfg, stop_on_fail, cancel, ev, cd).await;
+                                run_stress(
+                                    problem_dir,
+                                    gen_src,
+                                    user_src,
+                                    oracle_src,
+                                    rounds,
+                                    seed_start,
+                                    jobs,
+                                    limits,
+                                    checker,
+                                    cpp_cfg,
+                                    py_cfg,
+                                    stop_on_fail,
+                                    cancel,
+                                    ev,
+                                    cd,
+                                )
+                                .await;
                             });
                         }
                         Task::AiAsk { api_base, api_key, model, statement, code, verdict_info, explain } => {
@@ -211,7 +243,9 @@ impl Bridge {
                             tokio::spawn(async move {
                                 let r = shuati_ai::AiClient::new(&api_base, &api_key, &model);
                                 match r {
-                                    Err(e) => { let _ = ev.send(Event::AiText(format!("AI 未配置: {e}"))); }
+                                    Err(e) => {
+                                        let _ = ev.send(Event::AiText(format!("AI 未配置: {e}")));
+                                    }
                                     Ok(client) => {
                                         // SSE 流式：delta 实时进面板；流挂掉才退非流式整段
                                         let ev2 = ev.clone();
@@ -219,7 +253,9 @@ impl Bridge {
                                             let _ = ev2.send(Event::AiDelta(d.to_string()));
                                         };
                                         let out = if explain {
-                                            client.explain_stream(&statement, &code, &verdict_info, "", &mut on_delta).await
+                                            client
+                                                .explain_stream(&statement, &code, &verdict_info, "", &mut on_delta)
+                                                .await
                                         } else {
                                             client.hint_stream(&statement, &code, &verdict_info, &mut on_delta).await
                                         };
@@ -234,8 +270,12 @@ impl Bridge {
                                             }
                                         };
                                         match out {
-                                            Ok(t) => { let _ = ev.send(Event::AiText(t)); }
-                                            Err(e) => { let _ = ev.send(Event::AiText(format!("AI 错误: {e}"))); }
+                                            Ok(t) => {
+                                                let _ = ev.send(Event::AiText(t));
+                                            }
+                                            Err(e) => {
+                                                let _ = ev.send(Event::AiText(format!("AI 错误: {e}")));
+                                            }
                                         }
                                     }
                                 }
@@ -247,8 +287,12 @@ impl Bridge {
                             let cd = cache_dir.clone();
                             tokio::spawn(async move {
                                 match quick_run(src, input, limits, compiler_cfg, cancel, cd).await {
-                                    Ok(qr) => { let _ = ev.send(Event::QuickDone(Box::new(qr))); }
-                                    Err(e) => { let _ = ev.send(Event::QuickFailed(e)); }
+                                    Ok(qr) => {
+                                        let _ = ev.send(Event::QuickDone(Box::new(qr)));
+                                    }
+                                    Err(e) => {
+                                        let _ = ev.send(Event::QuickFailed(e));
+                                    }
                                 }
                             });
                         }
@@ -258,31 +302,81 @@ impl Bridge {
                                 let out = async {
                                     let client = shuati_ai::AiClient::new(&api_base, &api_key, &model)
                                         .map_err(|e| e.to_string())?;
-                                    client.chat("You are a connectivity probe. Reply with exactly: ok", "ping")
+                                    client
+                                        .chat("You are a connectivity probe. Reply with exactly: ok", "ping")
                                         .await
                                         .map(|r| format!("{} · {}", model, r.chars().take(60).collect::<String>()))
                                         .map_err(|e| e.to_string())
-                                }.await;
+                                }
+                                .await;
                                 let _ = ev.send(Event::AiPong(out));
                             });
                         }
-                        Task::GenCases { problem_dir, gen_src, oracle_src, count, seed_start, limits, cpp_cfg, py_cfg } => {
+                        Task::GenCases {
+                            problem_dir,
+                            gen_src,
+                            oracle_src,
+                            count,
+                            seed_start,
+                            limits,
+                            cpp_cfg,
+                            py_cfg,
+                        } => {
                             let ev = ev_tx.clone();
                             let cd = cache_dir.clone();
                             tokio::spawn(async move {
-                                run_gen_cases(problem_dir, gen_src, oracle_src, count, seed_start, limits, cpp_cfg, py_cfg, ev, cd).await;
+                                run_gen_cases(
+                                    problem_dir,
+                                    gen_src,
+                                    oracle_src,
+                                    count,
+                                    seed_start,
+                                    limits,
+                                    cpp_cfg,
+                                    py_cfg,
+                                    ev,
+                                    cd,
+                                )
+                                .await;
                             });
                         }
-                        Task::AiScripts { api_base, api_key, model, statement, lang, gen_dir, oracle_dir, cpp_cfg, py_cfg } => {
+                        Task::AiScripts {
+                            api_base,
+                            api_key,
+                            model,
+                            statement,
+                            lang,
+                            gen_dir,
+                            oracle_dir,
+                            cpp_cfg,
+                            py_cfg,
+                        } => {
                             let ev = ev_tx.clone();
                             tokio::spawn(async move {
                                 let r = shuati_ai::AiClient::new(&api_base, &api_key, &model);
                                 match r {
-                                    Err(e) => { let _ = ev.send(Event::AiText(format!("AI 未配置: {e}"))); }
+                                    Err(e) => {
+                                        let _ = ev.send(Event::AiText(format!("AI 未配置: {e}")));
+                                    }
                                     Ok(client) => {
-                                        match shuati_ai::produce_scripts(&client, &statement, lang, &gen_dir, &oracle_dir, &cpp_cfg, &py_cfg, |_| {}).await {
-                                            Ok((g, o)) => { let _ = ev.send(Event::ScriptsReady(g, o)); }
-                                            Err(e) => { let _ = ev.send(Event::AiText(format!("脚本生成失败: {e}"))); }
+                                        let dirs = shuati_ai::ScriptDirs { generator: &gen_dir, oracle: &oracle_dir };
+                                        match shuati_ai::produce_scripts(
+                                            &client,
+                                            &statement,
+                                            lang,
+                                            dirs,
+                                            &cpp_cfg,
+                                            &py_cfg,
+                                            |_| {},
+                                        )
+                                        .await
+                                        {
+                                            Ok((g, o)) => {
+                                                let _ = ev.send(Event::ScriptsReady(g, o));
+                                            }
+                                            Err(e) => {
+                                                let _ = ev.send(Event::AiText(format!("脚本生成失败: {e}")));
+                                            }
                                         }
                                     }
                                 }
@@ -349,17 +443,19 @@ async fn quick_run(
     Ok(QuickResult { stdout, stderr, status, cpu_ms: out.cpu_ms, mem_kb: out.peak_mem_kb })
 }
 
-async fn run_test(
+/// 一次评测的全部上下文（Task::RunTest 解包后原样打包）
+struct TestJob {
     problem_dir: PathBuf,
     problem_id: shuati_core::ProblemId,
     src: PathBuf,
     limits: shuati_core::Limits,
     checker: shuati_core::CheckerSpec,
     compiler_cfg: String,
-    cancel: Arc<AtomicBool>,
-    ev: std::sync::mpsc::Sender<Event>,
     cache_dir: PathBuf,
-) {
+}
+
+async fn run_test(job: TestJob, cancel: Arc<AtomicBool>, ev: std::sync::mpsc::Sender<Event>) {
+    let TestJob { problem_dir, problem_id, src, limits, checker, compiler_cfg, cache_dir } = job;
     let pd = match store::ProblemDir::open(&problem_dir) {
         Ok(p) => p,
         Err(e) => {
@@ -458,15 +554,24 @@ async fn run_gen_cases(
     };
     let gen_tc = match judge::Toolchain::detect(gen_src.lang, comp) {
         Ok(t) => t,
-        Err(e) => { let _ = ev.send(Event::GenFailed(e.to_string())); return; }
+        Err(e) => {
+            let _ = ev.send(Event::GenFailed(e.to_string()));
+            return;
+        }
     };
     let oracle_tc = match judge::Toolchain::detect(oracle_src.lang, ocomp) {
         Ok(t) => t,
-        Err(e) => { let _ = ev.send(Event::GenFailed(e.to_string())); return; }
+        Err(e) => {
+            let _ = ev.send(Event::GenFailed(e.to_string()));
+            return;
+        }
     };
     let gen_prog = match judge::compile_cached(&gen_src, &gen_tc, &cache_dir).await {
         Ok(p) => p,
-        Err(e) => { let _ = ev.send(Event::GenFailed(format!("gen 编译失败: {e}"))); return; }
+        Err(e) => {
+            let _ = ev.send(Event::GenFailed(format!("gen 编译失败: {e}")));
+            return;
+        }
     };
     let oracle_prog = match judge::compile_cached(&oracle_src, &oracle_tc, &cache_dir).await {
         Ok(p) => p,
@@ -570,7 +675,8 @@ async fn run_stress(
         Ok(report) => {
             // hack 落盘
             for h in &report.hacks {
-                let _ = pd.save_hack(h.seed, &h.input, &h.user_out, &h.oracle_out, &format!("{}: {}", h.kind, h.detail));
+                let _ =
+                    pd.save_hack(h.seed, &h.input, &h.user_out, &h.oracle_out, &format!("{}: {}", h.kind, h.detail));
             }
             let _ = ev.send(Event::StressDone(Box::new(report)));
         }

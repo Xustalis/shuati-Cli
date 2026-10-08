@@ -50,11 +50,7 @@ fn detect_cpp() -> Option<PathBuf> {
     // 3. macOS: xcode command line tools
     #[cfg(target_os = "macos")]
     {
-        let candidates = [
-            "/usr/bin/clang++",
-            "/opt/homebrew/bin/g++",
-            "/usr/local/bin/g++",
-        ];
+        let candidates = ["/usr/bin/clang++", "/opt/homebrew/bin/g++", "/usr/local/bin/g++"];
         for c in candidates {
             let p = PathBuf::from(c);
             if p.exists() {
@@ -81,8 +77,5 @@ pub struct EnvReport {
 }
 
 pub fn check_env(cfg_cpp: &str, cfg_py: &str) -> EnvReport {
-    EnvReport {
-        cpp: detect_toolchain(Lang::Cpp, cfg_cpp),
-        python: detect_toolchain(Lang::Python, cfg_py),
-    }
+    EnvReport { cpp: detect_toolchain(Lang::Cpp, cfg_cpp), python: detect_toolchain(Lang::Python, cfg_py) }
 }
