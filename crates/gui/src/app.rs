@@ -27,8 +27,8 @@ pub struct RunState {
     pub live_cases: Vec<(String, Verdict)>,
     pub report: Option<TestReport>,
     pub error: Option<String>,
-    /// diff 弹窗：选中哪个 case
-    pub diff_case: Option<usize>,
+    /// diff 弹窗：选中哪个 case（按名字——live_cases 完成顺序与报告顺序不同）
+    pub diff_case: Option<String>,
 }
 
 /// 对拍屏状态
@@ -75,6 +75,8 @@ pub struct AiState {
     pub busy: bool,
     pub text: String,
     pub show: bool,
+    /// SSE 流式中：首个 delta 到达时清掉"思考中"占位文本
+    pub streaming: bool,
 }
 
 /// 用例编辑器状态（评测屏下半区）
@@ -156,15 +158,19 @@ pub struct ShuatiApp {
     pub cfg_msg: String,
     pub ai_pinging: bool,
     pub env: Option<shuati_judge::EnvReport>,
+    /// watch 在评测运行中收到保存 → 跑完补一次重测
+    pub pending_retest: bool,
+    /// 删除题目二次确认（内存态，不落 state.json）
+    pub confirm_delete: Option<String>,
+    /// AI key 来源缓存：keyring 查询有 IPC 开销，不能每帧调，refresh_env 时刷新
+    pub key_src: store::secrets::KeySource,
 }
 
 impl ShuatiApp {
-    pub fn new(cc: &eframe::CreationContext) -> Self {
+    pub fn new(cc: &eframe::CreationContext, root: PathBuf) -> Self {
         // egui 默认字体无 CJK 字形，必须先装中文字体否则全屏豆腐块
         crate::fonts::install(&cc.egui_ctx);
         crate::fonts::tune_text_styles(&cc.egui_ctx);
-
-        let root = store::Workspace::default_dir();
         let (ws, init_err) = match store::Workspace::open(&root) {
             Ok(w) => (w, None),
             Err(e) => (store::Workspace { root: root.clone() }, Some(format!("工作区初始化失败: {e}"))),
@@ -208,6 +214,9 @@ impl ShuatiApp {
             ai: AiState::default(),
             prob_edit: ProblemEditor::default(),
             env: None,
+            pending_retest: false,
+            confirm_delete: None,
+            key_src: store::secrets::KeySource::None,
         };
         // 恢复 watch 状态
         if let Some(f) = app.state.watch_file.clone() {
@@ -220,6 +229,12 @@ impl ShuatiApp {
 
     pub fn refresh_env(&mut self) {
         self.env = Some(shuati_judge::check_env(&self.cfg.compiler_cpp, &self.cfg.compiler_python));
+        self.key_src = store::secrets::key_source(&self.cfg.ai.api_key);
+    }
+
+    /// AI 是否可用（按钮置灰判断用缓存的 key 来源，不每帧查钥匙串）
+    pub fn ai_ready(&self) -> bool {
+        self.key_src != store::secrets::KeySource::None
     }
 
     pub fn current_problem(&self) -> Option<&store::ProblemDir> {
@@ -273,18 +288,9 @@ impl ShuatiApp {
         let name = if let Some(n) = &self.cases.editing {
             n.clone()
         } else {
-            // 下一个编号
-            let next = self
-                .cases
-                .cases
-                .iter()
-                .filter_map(|(n, _, _)| n.parse::<u32>().ok())
-                .max()
-                .unwrap_or(0)
-                + 1;
-            format!("{next:04}")
+            pd.next_case_name()
         };
-        match pd.write_case(&name, input, output, shuati_core::CaseOrigin::Sample) {
+        match pd.write_case(&name, input, Some(output), shuati_core::CaseOrigin::Sample) {
             Ok(()) => {
                 self.cases.msg = format!("已{}用例 {name}", if self.cases.editing.is_some() { "更新" } else { "添加" });
                 self.cases.editing = None;
@@ -323,13 +329,32 @@ impl ShuatiApp {
         }
     }
 
-    /// 设置被监视文件（拖入或恢复）
+    /// 用户解路径：watch 文件 > 题目 solutions/ 下的 main.*
+    pub fn user_solution(&self) -> Option<PathBuf> {
+        self.state
+            .watch_file
+            .clone()
+            .or_else(|| self.current_problem().and_then(|pd| pd.find_solution()))
+    }
+
+    /// 设置被监视文件（拖入或恢复）。识别源文件头部的 `// shuati:` 绑定注释：
+    /// 绑定的题目存在时自动切换过去，防"拿上个题的代码测当前题"。
     pub fn set_watch_file(&mut self, path: PathBuf) {
         match shuati_judge::watch_file(path.clone()) {
             Ok((w, rx)) => {
                 self._watcher = Some(w);
                 self.watch_rx = Some(rx);
-                self.state.watch_file = Some(path);
+                self.state.watch_file = Some(path.clone());
+                // shuati: 绑定注释 → 切到绑定的题目
+                if let Some(bound) = shuati_judge::binding_comment(&path) {
+                    let bid = bound.to_string();
+                    if self.state.current_problem.as_deref() != Some(bid.as_str()) {
+                        if self.problems.iter().any(|p| p.meta.id.to_string() == bid) {
+                            self.lib_msg = format!("源文件绑定 {bid}（shuati: 注释），已切换题目");
+                            self.select_problem(bid);
+                        }
+                    }
+                }
             }
             Err(e) => {
                 self.run.error = Some(format!("watch 失败: {e}"));
@@ -345,7 +370,7 @@ impl ShuatiApp {
     pub fn trigger_test(&mut self) {
         let (Some(pd), Some(src)) = (
             self.current_problem().map(|p| p.dir.clone()),
-            self.state.watch_file.clone(),
+            self.user_solution(),
         ) else {
             self.run.error = Some("先选题目和源文件".into());
             return;
@@ -618,11 +643,13 @@ impl ShuatiApp {
             memory_mb: 512,
             output_mb: 16,
         });
+        let cancel = Arc::new(AtomicBool::new(false));
         self.bridge.request(Task::QuickRun {
             src: SourceFile { path: src_path, lang },
             input: self.quick.input.clone(),
             limits,
             compiler_cfg,
+            cancel,
         });
     }
 
@@ -646,9 +673,8 @@ impl ShuatiApp {
             self.quick.msg = "没有期望输出——先跑一次或手填".into();
             return;
         }
-        let existing = pd.load_cases().map(|c| c.len()).unwrap_or(0) as u32;
-        let name = format!("{:04}", existing + 1);
-        match pd.write_case(&name, &self.quick.input, &expected, shuati_core::CaseOrigin::Sample) {
+        let name = pd.next_case_name();
+        match pd.write_case(&name, &self.quick.input, Some(&expected), shuati_core::CaseOrigin::Sample) {
             Ok(()) => {
                 self.reload_cases();
                 self.quick.msg = format!("已存为用例 {name}");
@@ -657,17 +683,27 @@ impl ShuatiApp {
         }
     }
 
-    /// 测试 AI 连接（用输入框里的值，不要求先保存）
+    /// 实际生效的 AI key（SHUATI_API_KEY > 系统钥匙串 > config.toml）
+    pub fn ai_key(&self) -> Option<String> {
+        self.cfg.ai.resolved_key()
+    }
+
+    /// 测试 AI 连接（输入框优先，空则用已存的 key）
     pub fn trigger_ai_ping(&mut self) {
-        if self.cfg_api_key.trim().is_empty() {
+        let key = if self.cfg_api_key.trim().is_empty() {
+            self.ai_key()
+        } else {
+            Some(self.cfg_api_key.trim().to_string())
+        };
+        let Some(key) = key else {
             self.cfg_msg = "先填 API Key".into();
             return;
-        }
+        };
         self.ai_pinging = true;
         self.cfg_msg = "测试中…".into();
         self.bridge.request(Task::AiPing {
             api_base: self.cfg_api_base.trim().to_string(),
-            api_key: self.cfg_api_key.trim().to_string(),
+            api_key: key,
             model: self.cfg_model.trim().to_string(),
         });
     }
@@ -718,7 +754,7 @@ impl ShuatiApp {
         self.ai.text = "AI 思考中…".into();
         self.bridge.request(Task::AiAsk {
             api_base: self.cfg.ai.api_base.clone(),
-            api_key: self.cfg.ai.api_key.clone(),
+            api_key: self.ai_key().unwrap_or_default(),
             model: self.cfg.ai.model.clone(),
             statement,
             code,
@@ -734,7 +770,8 @@ impl ShuatiApp {
             return;
         };
         let statement = pd.read_statement().unwrap_or_default();
-        let dest = pd.dir.clone();
+        // 脚本落 gen/ 和 solutions/ 与自动探测位置一致
+        let (gen_dir, oracle_dir) = (pd.gen_dir(), pd.solutions_dir());
         // 脚本语言跟用户解一致
         let lang = self
             .state
@@ -747,11 +784,12 @@ impl ShuatiApp {
         self.ai.text = "AI 生成 + dry-run 验证中，可能要 1-2 分钟…".into();
         self.bridge.request(Task::AiScripts {
             api_base: self.cfg.ai.api_base.clone(),
-            api_key: self.cfg.ai.api_key.clone(),
+            api_key: self.ai_key().unwrap_or_default(),
             model: self.cfg.ai.model.clone(),
             statement,
             lang,
-            dest_dir: dest,
+            gen_dir,
+            oracle_dir,
             cpp_cfg: self.cfg.compiler_cpp.clone(),
             py_cfg: self.cfg.compiler_python.clone(),
         });
@@ -759,10 +797,18 @@ impl ShuatiApp {
 
     /// 处理后台事件（每帧调用）
     fn drain_events(&mut self, ctx: &egui::Context) {
-        // watch 事件 → 自动重测
+        // watch 事件 → 自动重测；运行中收到保存 → 排队，跑完补测最新版
         if self.state.watch_enabled {
+            let mut saved = false;
             if let Some(rx) = &self.watch_rx {
-                if rx.try_recv().is_ok() && !self.run.running {
+                while rx.try_recv().is_ok() {
+                    saved = true;
+                }
+            }
+            if saved {
+                if self.run.running {
+                    self.pending_retest = true;
+                } else {
                     self.trigger_test();
                 }
             }
@@ -784,12 +830,28 @@ impl ShuatiApp {
                         .insert(report.problem.to_string(), report.verdict.to_string());
                     self.save_state();
                     self.run.report = Some(*report);
+                    // 跑的时候又保存过 → 立刻补测最新版本
+                    if self.pending_retest && self.state.watch_enabled {
+                        self.pending_retest = false;
+                        self.trigger_test();
+                    }
                 }
                 Event::Failed(msg) => {
                     self.run.running = false;
                     self.run.compiling = false;
-                    self.stress.running = false;
                     self.run.error = Some(msg);
+                    if self.pending_retest && self.state.watch_enabled {
+                        self.pending_retest = false;
+                        self.trigger_test();
+                    }
+                }
+                Event::StressFailed(msg) => {
+                    self.stress.running = false;
+                    self.stress.msg = format!("失败: {msg}");
+                }
+                Event::GenFailed(msg) => {
+                    self.stress.genning = false;
+                    self.stress.msg = format!("生成失败: {msg}");
                 }
                 Event::FetchedOk(id) => {
                     self.fetching = false;
@@ -815,8 +877,18 @@ impl ShuatiApp {
                     self.stress.running = false;
                     self.stress.report = Some(*report);
                 }
+                Event::AiDelta(d) => {
+                    // 首个增量到达：清掉"思考中"占位，之后逐段追加
+                    if !self.ai.streaming {
+                        self.ai.text.clear();
+                        self.ai.streaming = true;
+                    }
+                    self.ai.text.push_str(&d);
+                    self.ai.show = true;
+                }
                 Event::AiText(t) => {
                     self.ai.busy = false;
+                    self.ai.streaming = false;
                     self.ai.text = t;
                     self.ai.show = true;
                 }
@@ -827,9 +899,13 @@ impl ShuatiApp {
                     self.stress.gen_path = g.display().to_string();
                     self.stress.oracle_path = o.display().to_string();
                 }
-                Event::GenDone(n) => {
+                Event::GenDone(n, failed) => {
                     self.stress.genning = false;
-                    self.stress.msg = format!("已生成 {n} 组用例 → 评测页可见");
+                    self.stress.msg = if failed.is_empty() {
+                        format!("已生成 {n} 组用例 → 评测页可见")
+                    } else {
+                        format!("已生成 {n} 组（{} 个 seed 失败: {}）", failed.len(), failed.join("; "))
+                    };
                     self.reload_cases();
                 }
                 Event::AiPong(Ok(s)) => {
@@ -900,20 +976,23 @@ impl eframe::App for ShuatiApp {
                     self.trigger_test();
                 }
             } else if p.extension().is_some_and(|e| e == "in") {
-                // 拖入 .in → 加到用例
+                // 拖入 .in → 加到用例（无 .out 则按无答案存）
                 if let (Ok(input), Some(pd)) = (
                     std::fs::read_to_string(p),
                     self.current_problem().map(|x| x.dir.clone()),
                 ) {
                     let out_p = p.with_extension("out");
-                    let output = std::fs::read_to_string(&out_p).unwrap_or_default();
-                    let next = self.cases.cases.len() as u32 + 1;
-                    let name = format!("{next:04}");
+                    let output = std::fs::read_to_string(&out_p).ok();
                     let pd2 = shuati_store::ProblemDir::open(&pd);
                     if let Ok(pd2) = pd2 {
-                        let _ = pd2.write_case(&name, &input, &output, shuati_core::CaseOrigin::Sample);
+                        let name = pd2.next_case_name();
+                        let _ = pd2.write_case(&name, &input, output.as_deref(), shuati_core::CaseOrigin::Sample);
                         self.reload_cases();
-                        self.cases.msg = format!("拖入用例 {name}");
+                        self.cases.msg = if output.is_none() {
+                            format!("拖入用例 {name}（无 .out 文件，按无答案运行）")
+                        } else {
+                            format!("拖入用例 {name}")
+                        };
                     }
                 }
             }

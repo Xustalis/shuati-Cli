@@ -36,8 +36,10 @@ shuati gen <id> -n 50                  # 批量生成用例 → tests/
 shuati gen <id> -n 50 --auto           # AI 写脚本再造用例
 shuati hint <id> [--explain]           # AI 提示/诊断
 shuati new <标题> / shuati list        # 本地题
-shuati setup                           # Dev-C++ 集成说明
+shuati setup                           # Dev-C++ 集成（Windows 自动写 tools.ini，其余打手动步骤）
 ```
+
+源文件首行写 `// shuati: luogu P1001` 可绑定题目——`test`/`stress` 拖错文件也不判错题。
 
 ## 题目目录
 
@@ -54,9 +56,11 @@ problems/<src>__<id>/
 
 ## 配置
 
-`<题库>/config.toml`：`compiler_cpp`、`compiler_python`、`ai.api_key/api_base/model`（默认 DeepSeek）。GUI 设置页可视化编辑。
+`<题库>/config.toml`：`compiler_cpp`、`compiler_python`、`ai.api_base/model`（默认 DeepSeek）。GUI 设置页可视化编辑。
+
+**API key 按优先级**：环境变量 `SHUATI_API_KEY` > 系统钥匙串（GUI 保存时自动写入）> `config.toml` 明文（旧配置兼容）。
 
 ## 注意
 
 - Codeforces 有 Cloudflare 防护：能拿到标题/难度/标签，题面样例被拦时需手动粘贴（GUI 评测页下方可加用例）
-- Windows 沙箱目前是简化实现（wall 超时杀进程，无内存硬限）；macOS/Linux 用 rlimit+rusage 完整隔离
+- 沙箱：macOS/Linux 用 rlimit+rusage；Windows 用 Job Object（CPU/内存硬限 + 进程树终止），无法创建 Job 时降级为 wall 超时 + kill

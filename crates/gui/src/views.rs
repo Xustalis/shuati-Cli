@@ -171,6 +171,7 @@ fn verdict_color(v: shuati_core::Verdict) -> Color32 {
         Wa => Color32::from_rgb(230, 90, 90),
         Tle => Color32::from_rgb(230, 180, 60),
         Mle => Color32::from_rgb(230, 140, 60),
+        Ole => Color32::from_rgb(230, 160, 80),
         Re => Color32::from_rgb(220, 90, 160),
         Ce | Se => Color32::from_rgb(160, 160, 160),
     }
@@ -414,7 +415,7 @@ fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
                 }
             });
             ui.horizontal(|ui| {
-                let can_run = app.current_problem().is_some() && app.state.watch_file.is_some() && !app.run.running;
+                let can_run = app.current_problem().is_some() && app.user_solution().is_some() && !app.run.running;
                 let btn = egui::Button::new(RichText::new("▶ 评测").size(15.0)).min_size(egui::vec2(80.0, 26.0));
                 if ui.add_enabled(can_run, btn).clicked() {
                     app.trigger_test();
@@ -423,7 +424,7 @@ fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
                     app.bridge.cancel_current();
                 }
                 ui.separator();
-                let ai_ok = app.cfg.ai.enabled() && !app.ai.busy;
+                let ai_ok = app.ai_ready() && !app.ai.busy;
                 if ui.add_enabled(ai_ok, egui::Button::new("AI 提示")).clicked() {
                     app.trigger_ai(false);
                 }
@@ -462,12 +463,13 @@ fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
         };
         let summary = app.run.report.as_ref().map(|r| (r.verdict, r.pass, r.total));
 
-        for (i, (name, v)) in rows.iter().enumerate() {
+        for (name, v) in &rows {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(format!("{name:12}")).monospace());
                 ui.label(RichText::new(v.to_string()).color(verdict_color(*v)).strong().monospace());
+                // 按用例名存——live_cases 是完成顺序，跟报告里的顺序不一样
                 if app.run.report.is_some() && ui.small_button("diff").clicked() {
-                    app.run.diff_case = Some(i);
+                    app.run.diff_case = Some(name.clone());
                 }
             });
         }
@@ -584,7 +586,7 @@ fn case_manager(app: &mut ShuatiApp, ui: &mut Ui) {
 
 fn input_preview(s: &str) -> String {
     let one = s.lines().next().unwrap_or("");
-    if one.len() > 40 { format!("{}…", &one[..40]) } else { one.to_string() }
+    if one.chars().count() > 40 { format!("{}…", one.chars().take(40).collect::<String>()) } else { one.to_string() }
 }
 
 /// 用例内容查看弹窗
@@ -619,12 +621,12 @@ fn case_view_window(app: &mut ShuatiApp, ctx: &egui::Context) {
 // ═══ diff 弹窗 ═════════════════════════════════════════
 
 fn diff_window(app: &mut ShuatiApp, ctx: &egui::Context) {
-    let Some(idx) = app.run.diff_case else { return };
+    let Some(name) = app.run.diff_case.clone() else { return };
     let Some(rep) = &app.run.report else {
         app.run.diff_case = None;
         return;
     };
-    let Some(case) = rep.cases.get(idx) else {
+    let Some(case) = rep.cases.iter().find(|c| c.name == name) else {
         app.run.diff_case = None;
         return;
     };
@@ -694,7 +696,12 @@ fn library_view(app: &mut ShuatiApp, ui: &mut Ui) {
         ui.text_edit_singleline(&mut app.new_title);
         if ui.button("创建").clicked() && !app.new_title.trim().is_empty() {
             let title = app.new_title.trim().to_string();
-            let slug = format!("{}", shuati_store::now_ts());
+            // 秒级 ts + 纳秒后缀：同秒连点/脚本批量建不撞目录
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0);
+            let slug = format!("{}{:03}", shuati_store::now_ts(), nanos % 1000);
             let id = shuati_core::ProblemId::new(shuati_core::Source::Local, &slug);
             let meta = shuati_core::Problem {
                 id: id.clone(),
@@ -756,14 +763,14 @@ fn library_view(app: &mut ShuatiApp, ui: &mut Ui) {
                         app.select_problem(id.clone());
                         app.tab = Tab::Test;
                     }
-                    // 删除：连点两次确认
-                    let confirming = app.state.last_verdicts.get("__confirm_del__").map(|v| v == &id).unwrap_or(false);
+                    // 删除：连点两次确认（内存态，不写进 state.json）
+                    let confirming = app.confirm_delete.as_deref() == Some(id.as_str());
                     if ui.small_button(if confirming { "确认删?" } else { "删" }).clicked() {
                         if confirming {
                             to_delete = Some(id.clone());
-                            app.state.last_verdicts.remove("__confirm_del__");
+                            app.confirm_delete = None;
                         } else {
-                            app.state.last_verdicts.insert("__confirm_del__".into(), id.clone());
+                            app.confirm_delete = Some(id.clone());
                         }
                     }
                 });
@@ -811,18 +818,19 @@ fn stress_view(app: &mut ShuatiApp, ui: &mut Ui) {
         });
     }
 
-    // ── 三个文件：缺什么一眼可见
+    // ── 三个文件：缺什么一眼可见（用户解 = watch 文件 > solutions/main.*，与对拍逻辑一致）
     let has_gen = !app.stress.gen_path.trim().is_empty();
     let has_oracle = !app.stress.oracle_path.trim().is_empty();
-    let has_user = app.state.watch_file.is_some();
+    let user_path = app.user_solution();
+    let has_user = user_path.is_some();
 
     egui::Grid::new("stress_files").num_columns(3).spacing([12.0, 6.0]).show(ui, |ui| {
         // 你的代码
         stress_file_status(ui, has_user);
         ui.label("你的代码:");
         ui.horizontal(|ui| {
-            match &app.state.watch_file {
-                Some(p) => { ui.monospace(p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()); }
+            match &user_path {
+                Some(p) => { ui.monospace(p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()).on_hover_text(p.display().to_string()); }
                 None => { ui.label(RichText::new("（未选择）").weak()); }
             }
             if ui.small_button("选择…").clicked() {
@@ -863,7 +871,7 @@ fn stress_view(app: &mut ShuatiApp, ui: &mut Ui) {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.label("还没有生成器/标程？");
-            let ai_ok = app.cfg.ai.enabled() && !app.ai.busy;
+            let ai_ok = app.ai_ready() && !app.ai.busy;
             if ui.add_enabled(ai_ok, egui::Button::new("AI 一键生成")).on_hover_text("AI 读题面写 gen+标程，自动验证能跑才给你（需配置 api_key）").clicked() {
                 app.trigger_ai_scripts();
             }
@@ -1013,18 +1021,21 @@ fn write_stress_templates(app: &mut ShuatiApp) {
     let sol_dir = pd.solutions_dir();
     let gen_path = gen_dir.join("gen.cpp");
     let brute_path = sol_dir.join("brute.cpp");
-    const GEN_TPL: &str = r#"#include <bits/stdc++.h>
+    // 只用标准头：bits/stdc++.h 是 GCC 私有，clang/MSVC 编译不过
+    const GEN_TPL: &str = r#"#include <cstdio>
+#include <cstdlib>
+#include <random>
 // 生成器：argv[1] = seed，向 stdout 打印一份合法测试输入
 int main(int argc, char** argv) {
-    unsigned seed = argc > 1 ? atoi(argv[1]) : 1;
-    mt19937 rng(seed);
+    unsigned seed = argc > 1 ? std::atoi(argv[1]) : 1;
+    std::mt19937 rng(seed);
     // TODO: 按题目格式生成输入，例如：
     // int n = rng() % 10 + 1;
-    // printf("%d\n", n);
+    // std::printf("%d\n", n);
     return 0;
 }
 "#;
-    const BRUTE_TPL: &str = r#"#include <bits/stdc++.h>
+    const BRUTE_TPL: &str = r#"#include <cstdio>
 // 标程/暴力解：读 stdin 打印正确答案，正确性优先
 int main() {
     // TODO: 最朴素的暴力实现
@@ -1095,6 +1106,16 @@ fn settings_view(app: &mut ShuatiApp, ui: &mut Ui) {
 
         ui.label("AI API Key:");
         ui.add(egui::TextEdit::singleline(&mut app.cfg_api_key).password(true).hint_text("sk-..."));
+        // key 现存的来源（缓存值，保存后 refresh_env 刷新；留空输入框 = 不改动已存 key）
+        let src_note = match app.key_src {
+            shuati_store::secrets::KeySource::Env => "（生效中：环境变量 SHUATI_API_KEY）",
+            shuati_store::secrets::KeySource::Keyring => "（生效中：系统钥匙串，留空则不改动）",
+            shuati_store::secrets::KeySource::File => "（生效中：config.toml 明文）",
+            shuati_store::secrets::KeySource::None => "",
+        };
+        if !src_note.is_empty() {
+            ui.label(RichText::new(src_note).weak().small());
+        }
         ui.end_row();
 
         ui.label("AI 接口地址:");
@@ -1106,7 +1127,7 @@ fn settings_view(app: &mut ShuatiApp, ui: &mut Ui) {
         ui.end_row();
 
         ui.label("");
-        ui.label(RichText::new("留空 api_key 时 AI 功能不可用；其余功能不受影响").weak().small());
+        ui.label(RichText::new("key 存系统钥匙串；也认环境变量 SHUATI_API_KEY；都不设则 AI 功能关闭").weak().small());
         ui.end_row();
 
         ui.label("题库目录:");
@@ -1119,13 +1140,29 @@ fn settings_view(app: &mut ShuatiApp, ui: &mut Ui) {
         if ui.button("保存").clicked() {
             app.cfg.compiler_cpp = app.cfg_cpp.trim().to_string();
             app.cfg.compiler_python = app.cfg_py.trim().to_string();
-            app.cfg.ai.api_key = app.cfg_api_key.trim().to_string();
+            // key 优先进系统钥匙串；输入框留空 = 不改动已存的 key
+            let new_key = app.cfg_api_key.trim().to_string();
+            let mut key_note = "";
+            if !new_key.is_empty() {
+                match shuati_store::secrets::store_api_key(&new_key) {
+                    Ok(()) => {
+                        // 进钥匙串了就别再落明文
+                        app.cfg.ai.api_key.clear();
+                        key_note = "（key 已存系统钥匙串）";
+                    }
+                    Err(e) => {
+                        tracing::warn!("keyring 不可用，回退 config.toml 明文存储: {e}");
+                        app.cfg.ai.api_key = new_key;
+                        key_note = "（此系统无钥匙串，key 存于 config.toml）";
+                    }
+                }
+            }
             app.cfg.ai.api_base = app.cfg_api_base.trim().to_string();
             app.cfg.ai.model = app.cfg_model.trim().to_string();
             app.cfg.editor = app.cfg_editor.trim().to_string();
             match app.cfg.save(&app.ws.config_path()) {
                 Ok(()) => {
-                    app.cfg_msg = "已保存".into();
+                    app.cfg_msg = format!("已保存{key_note}");
                     app.refresh_env();
                 }
                 Err(e) => app.run.error = Some(format!("配置保存失败: {e}")),

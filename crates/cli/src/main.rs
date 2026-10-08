@@ -98,9 +98,9 @@ enum Cmd {
         /// 生成几组
         #[arg(short = 'n', long, default_value = "20")]
         count: u32,
-        /// 起始 seed
-        #[arg(long, default_value = "1")]
-        seed: u64,
+        /// 起始 seed（默认随机）
+        #[arg(long)]
+        seed: Option<u64>,
         /// AI 自动生成 gen+oracle
         #[arg(long)]
         auto: bool,
@@ -122,14 +122,10 @@ enum Cmd {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_writer(std::io::stderr)
-        .init();
-
     let cli = Cli::parse();
     let root = cli.root.unwrap_or_else(store::Workspace::default_dir);
     let ws = store::Workspace::open(&root)?;
+    init_logging(&ws);
     let cfg = store::Config::load(&ws.config_path());
 
     match cli.cmd {
@@ -138,7 +134,7 @@ async fn main() -> Result<()> {
             eprintln!("用法: shuati <命令>（--help 查看全部）");
             eprintln!("GUI: 运行 shuati-gui");
         }
-        Some(Cmd::Doctor) => cmd_doctor(&cfg),
+        Some(Cmd::Doctor) => cmd_doctor(&ws, &cfg),
         Some(Cmd::List) => cmd_list(&ws)?,
         Some(Cmd::New { title, slug }) => cmd_new(&ws, &title, slug)?,
         Some(Cmd::Test { id, file, jobs }) => cmd_test(&ws, &cfg, id, file, jobs).await?,
@@ -156,6 +152,17 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// stderr + 滚动文件双写日志（<root>/logs/shuati.log）
+fn init_logging(ws: &store::Workspace) {
+    use tracing_subscriber::fmt::writer::MakeWriterExt;
+    let appender = tracing_appender::rolling::daily(ws.root.join("logs"), "shuati.log");
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_writer(std::io::stderr.and(appender))
+        .with_ansi(false)
+        .init();
+}
+
 /// 快速运行：编译 file → stdin 透传 → stdout/stderr 直接输出
 async fn cmd_run(ws: &store::Workspace, cfg: &store::Config, file: &PathBuf) -> Result<()> {
     let lang = Lang::from_path(file).context("不支持的文件类型（.cpp/.py）")?;
@@ -165,10 +172,11 @@ async fn cmd_run(ws: &store::Workspace, cfg: &store::Config, file: &PathBuf) -> 
     let prog = judge::compile_cached(&SourceFile { path: file.clone(), lang }, &tc, &ws.cache_dir()).await?;
 
     let tmp = tempfile::tempdir()?;
-    // 管道输入 → 读到临时文件喂给程序；TTY（交互终端）→ 直接给 EOF
+    // 管道输入 → 读到临时文件喂给程序；TTY（交互终端）→ 直接给 EOF（并提示）
     let stdin = {
         use std::io::IsTerminal;
         if std::io::stdin().is_terminal() {
+            eprintln!("提示: 程序拿不到键盘输入（stdin=EOF）。要喂数据用管道：`shuati run --file x.cpp < data.in`");
             None
         } else {
             use std::io::Read;
@@ -185,7 +193,7 @@ async fn cmd_run(ws: &store::Workspace, cfg: &store::Config, file: &PathBuf) -> 
         stderr: tmp.path().join("stderr"),
     };
     let limits = shuati_core::Limits { cpu_ms: 5000, wall_ms: 15000, memory_mb: 512, output_mb: 16 };
-    let out = judge::run_program(&prog, &io, &limits).await;
+    let out = judge::run_program(&prog, &io, &limits, None).await;
     judge::cleanup_program(&prog);
     let out = out?;
 
@@ -200,6 +208,8 @@ async fn cmd_run(ws: &store::Workspace, cfg: &store::Config, file: &PathBuf) -> 
         judge::RunStatus::Ok => format!("运行结束 · {}ms · {}KB", out.cpu_ms, out.peak_mem_kb),
         judge::RunStatus::TimeLimit => format!("TLE · {}ms", out.cpu_ms),
         judge::RunStatus::MemoryLimit => format!("MLE · {}KB", out.peak_mem_kb),
+        judge::RunStatus::OutputLimit => "OLE · 输出超限".into(),
+        judge::RunStatus::Cancelled => "已取消".into(),
         judge::RunStatus::RuntimeError => format!("RE · exit {}", out.exit_code),
         judge::RunStatus::InternalError => format!("SE · {}", out.internal),
     };
@@ -214,18 +224,23 @@ async fn auto_produce(
     lang_hint: Option<&str>,
 ) -> Result<(PathBuf, PathBuf)> {
     let ai = &cfg.ai;
-    let client = shuati_ai::AiClient::new(&ai.api_base, &ai.api_key, &ai.model)?;
+    let key = ai
+        .resolved_key()
+        .context("AI 未配置：设置页填 api_key，或设环境变量 SHUATI_API_KEY")?;
+    let client = shuati_ai::AiClient::new(&ai.api_base, &key, &ai.model)?;
     let statement = pd.read_statement().unwrap_or_default();
     let lang = match lang_hint.unwrap_or(&cfg.default_lang) {
         "python" | "py" => Lang::Python,
         _ => Lang::Cpp,
     };
     println!("[*] AI 正在生成对拍脚本（{lang:?}），自动 dry-run 验证…");
+    // 落 gen/ 和 solutions/——与 find_script 的探测目录一致，下次不再重生成
     let (gen_path, oracle_path) = shuati_ai::produce_scripts(
         &client,
         &statement,
         lang,
-        &pd.dir,
+        &pd.gen_dir(),
+        &pd.solutions_dir(),
         &cfg.compiler_cpp,
         &cfg.compiler_python,
         |s| println!("    {s}"),
@@ -244,7 +259,7 @@ async fn cmd_gen(
     generator: Option<PathBuf>,
     oracle: Option<PathBuf>,
     count: u32,
-    seed: u64,
+    seed: Option<u64>,
     auto: bool,
 ) -> Result<()> {
     let problems = store::load_all_problems(ws);
@@ -274,21 +289,30 @@ async fn cmd_gen(
     let gen_prog = judge::compile_cached(&gen_src, &gen_tc, &ws.cache_dir()).await?;
     let oracle_prog = judge::compile_cached(&oracle_src, &oracle_tc, &ws.cache_dir()).await?;
 
+    let seed = seed.unwrap_or_else(|| (store::now_ts() as u64 % 1_000_000) + 1);
     println!("[*] 生成 {} 组用例（seed {}..{}）…", count, seed, seed + count as u64 - 1);
     let glim = shuati_core::Limits { cpu_ms: 10000, wall_ms: 15000, memory_mb: 512, output_mb: 64 };
     let seeds = seed..seed + count as u64;
-    let made = judge::gen_cases(&gen_prog, &oracle_prog, seeds, &pd.meta.limits, &glim).await;
+    let batch = judge::gen_cases(&gen_prog, &oracle_prog, seeds, &pd.meta.limits, &glim).await;
     judge::cleanup_program(&gen_prog);
     judge::cleanup_program(&oracle_prog);
 
-    let existing = pd.load_cases()?.len() as u32;
-    for (i, (s, input, output)) in made.iter().enumerate() {
-        let name = format!("{:04}", existing + i as u32 + 1);
-        pd.write_case(&name, input, output, shuati_core::CaseOrigin::Generated)?;
-        eprint!("\r  {}/{} (seed={})", i + 1, made.len(), s);
+    // 失败明细不静默——报出来让用户知道哪几个 seed 没产出
+    for (s, reason) in &batch.failed {
+        eprintln!("  [seed {s} 失败] {reason}");
+    }
+    for (i, (s, input, output)) in batch.cases.iter().enumerate() {
+        let name = pd.next_case_name();
+        pd.write_case(&name, input, Some(output), shuati_core::CaseOrigin::Generated)?;
+        eprint!("\r  {}/{} (seed={})", i + 1, batch.cases.len(), s);
     }
     eprintln!();
-    println!("[+] 生成 {} 组 → {}/tests/", made.len(), pd.dir.display());
+    println!(
+        "[+] 生成 {} 组 → {}/tests/{}",
+        batch.cases.len(),
+        pd.dir.display(),
+        if batch.failed.is_empty() { String::new() } else { format!("（{} 个 seed 失败）", batch.failed.len()) }
+    );
     Ok(())
 }
 
@@ -320,9 +344,9 @@ async fn cmd_hint(
     explain: bool,
 ) -> Result<()> {
     let ai = &cfg.ai;
-    if !ai.enabled() {
-        anyhow::bail!("AI 未配置：在设置页或 config.toml 填 ai.api_key（DeepSeek 兼容接口）");
-    }
+    let Some(api_key) = ai.resolved_key() else {
+        anyhow::bail!("AI 未配置：设置页填 api_key，或设环境变量 SHUATI_API_KEY");
+    };
     let problems = store::load_all_problems(ws);
     let pd = match resolve_problem(&problems, id.as_deref(), ws)? {
         Some(p) => p,
@@ -355,20 +379,38 @@ async fn cmd_hint(
                         c.actual.lines().next().unwrap_or("")))
                     .take(3)
                     .collect();
-                format!("总判定 {}，{}/{}。失败点:\n{}", r.verdict, r.pass, r.total, fails.join("\n"))
+                // explain 需要失败用例的 IO 细节，取第一个失败点
+                let io_detail = r.cases.iter()
+                    .find(|c| c.verdict != shuati_core::Verdict::Ac)
+                    .map(|c| format!(
+                        "用例 {}:\n输入:\n{}\n期望:\n{}\n实际:\n{}",
+                        c.name, c.input, c.expected, c.actual
+                    ))
+                    .unwrap_or_default();
+                (format!("总判定 {}，{}/{}。失败点:\n{}", r.verdict, r.pass, r.total, fails.join("\n")), io_detail)
             }
-            None => "（尚未评测过）".into(),
+            None => ("（尚未评测过）".into(), String::new()),
         }
     };
 
-    let client = shuati_ai::AiClient::new(&ai.api_base, &ai.api_key, &ai.model)?;
-    println!("[*] AI 思考中…");
-    let text = if explain {
-        client.explain(&statement, &code, &verdict_info, "").await?
-    } else {
-        client.hint(&statement, &code, &verdict_info).await?
+    let client = shuati_ai::AiClient::new(&ai.api_base, &api_key, &ai.model)?;
+    let (verdict_info, io_detail) = verdict_info;
+    // SSE 流式：逐段打到 stderr（stdout 保持干净可管道）；服务端不吐流时退普通 chat
+    use std::io::Write;
+    let mut print_delta = |d: &str| {
+        eprint!("{d}");
+        let _ = std::io::stderr().flush();
     };
-    println!("{text}");
+    eprintln!("[*] AI 思考中…\n");
+    // 流式中途失败才回退：已打印的半截 + 完整回复一起呈现，不会没下文
+    if explain {
+        if client.explain_stream(&statement, &code, &verdict_info, &io_detail, &mut print_delta).await.is_err() {
+            eprintln!("{}", client.explain(&statement, &code, &verdict_info, &io_detail).await?);
+        }
+    } else if client.hint_stream(&statement, &code, &verdict_info, &mut print_delta).await.is_err() {
+        eprintln!("{}", client.hint(&statement, &code, &verdict_info).await?);
+    }
+    eprintln!();
     Ok(())
 }
 
@@ -388,20 +430,224 @@ fn cmd_setup() {
     }
     println!();
     println!("Dev-C++ 集成（手动方式，任何平台通用思路）:");
-    println!("  1. Dev-C++ → Tools → Configure Tools → Add");
-    println!("     Title:   shuati 评测");
-    println!("     Program: <shuati.exe 路径>");
-    println!("     Working: <PROJECTPATH>");
-    println!("     Params:  test --file <SOURCEPATH>");
-    println!("  2. 这样工具菜单里就有一键评测当前文件");
+    println!("  1. Dev-C++ → 工具 → 配置工具 → 添加");
+    println!("     标题:    shuati 评测");
+    println!("     程序:    <Dev-C++ 安装目录>\\ConsolePauser.exe");
+    println!("     工作目录: <SOURCEPATH>");
+    println!("     参数:    \"<shuati.exe 路径>\" test --file \"<SOURCENAME>\"");
+    println!("  2. 工具菜单里就会出现一键评测当前文件（ConsolePauser 让结果窗口停留）");
     println!();
     println!("或者：GUI 里打开『保存即评测』，Dev-C++ 里 Ctrl+S 即触发判题（推荐萌新）");
 }
 
+/// 一条 Dev-C++ 自定义工具项（对应 tools.ini 的 [ToolN] 段）
+#[cfg(any(target_os = "windows", test))]
+struct DevCppTool {
+    title: String,
+    program: String,
+    workdir: String,
+    params: String,
+}
+
+/// 往 Dev-C++ tools.ini 里 upsert shuati 工具项（纯函数，幂等）。
+/// 格式（Embarcadero 6.x / Orwell 5.x 一致）：
+///   [Tools] Count=N   [ToolK] Title=/Program=/WorkDir=/Params=
+#[cfg(any(target_os = "windows", test))]
+fn upsert_devcpp_tools(content: &str, tools: &[DevCppTool]) -> String {
+    // 切成 (段名, 行列表)；段名来自 [header]，段外的行归 preamble
+    let mut preamble: Vec<String> = Vec::new();
+    let mut sections: Vec<(String, Vec<String>)> = Vec::new();
+    for line in content.lines() {
+        let t = line.trim();
+        if t.starts_with('[') && t.ends_with(']') && t.len() > 2 {
+            sections.push((t[1..t.len() - 1].to_string(), vec![line.to_string()]));
+        } else if let Some(last) = sections.last_mut() {
+            last.1.push(line.to_string());
+        } else {
+            preamble.push(line.to_string());
+        }
+    }
+
+    // 现有 shuati 工具段名集合（Title/Params 含 shuati，大小写不敏感）
+    let is_ours = |lines: &[String]| {
+        lines.iter().any(|l| {
+            let l = l.trim();
+            (l.to_ascii_lowercase().starts_with("title=")
+                || l.to_ascii_lowercase().starts_with("params="))
+                && l.to_ascii_lowercase().contains("shuati")
+        })
+    };
+
+    // Count = [Tools].Count 或 ToolN 段数兜底
+    let mut count: usize = sections
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case("tools"))
+        .and_then(|(_, ls)| {
+            ls.iter().find_map(|l| {
+                l.trim()
+                    .split_once('=')
+                    .filter(|(k, _)| k.trim().eq_ignore_ascii_case("count"))
+                    .and_then(|(_, v)| v.trim().parse().ok())
+            })
+        })
+        .unwrap_or_else(|| {
+            sections
+                .iter()
+                .filter(|(n, _)| n.to_ascii_lowercase().starts_with("tool") && !n.eq_ignore_ascii_case("tools"))
+                .count()
+        });
+
+    // 已存在的 shuati 段：更新第一个，多余的删掉；不够就新开 Tool{count} 段
+    let mut updated: Vec<String> = Vec::new();
+    for tool in tools {
+        let sec_name = sections
+            .iter()
+            .find(|(n, l)| {
+                n.to_ascii_lowercase().starts_with("tool")
+                    && !n.eq_ignore_ascii_case("tools")
+                    && !updated.contains(n)
+                    && is_ours(l)
+            })
+            .map(|(n, _)| n.clone())
+            .unwrap_or_else(|| {
+                let n = format!("Tool{count}");
+                count += 1;
+                n
+            });
+        let body = vec![
+            format!("[{sec_name}]"),
+            format!("Title={}", tool.title),
+            format!("Program={}", tool.program),
+            format!("WorkDir={}", tool.workdir),
+            format!("Params={}", tool.params),
+        ];
+        if let Some(slot) = sections.iter_mut().find(|(n, _)| *n == sec_name) {
+            slot.1 = body;
+        } else {
+            sections.push((sec_name.clone(), body));
+        }
+        updated.push(sec_name);
+    }
+    // 没被复用的旧 shuati 段（比如上次装过、这次工具变少）直接抹掉
+    sections.retain(|(n, l)| {
+        !(n.to_ascii_lowercase().starts_with("tool")
+            && !n.eq_ignore_ascii_case("tools")
+            && is_ours(l)
+            && !updated.contains(n))
+    });
+
+    // Dev-C++ 按 Tool0..Count-1 连续读——删段后统一重编号，顺带压实用户手动删除留下的洞
+    let mut idx = 0usize;
+    for (name, lines) in sections.iter_mut() {
+        let ln = name.to_ascii_lowercase();
+        if ln.starts_with("tool") && ln.len() > 4 && ln[4..].bytes().all(|b| b.is_ascii_digit()) {
+            let new_name = format!("Tool{idx}");
+            if let Some(h) = lines.first_mut() {
+                *h = format!("[{new_name}]");
+            }
+            *name = new_name;
+            idx += 1;
+        }
+    }
+    let count = idx;
+
+    // 写回 [Tools] Count
+    let count_line = format!("Count={count}");
+    if let Some((_, ls)) = sections.iter_mut().find(|(n, _)| n.eq_ignore_ascii_case("tools")) {
+        if let Some(slot) = ls.iter_mut().find(|l| {
+            l.trim()
+                .split_once('=')
+                .is_some_and(|(k, _)| k.trim().eq_ignore_ascii_case("count"))
+        }) {
+            *slot = count_line;
+        } else {
+            ls.push(count_line);
+        }
+    } else {
+        sections.insert(0, ("Tools".into(), vec!["[Tools]".into(), count_line]));
+    }
+
+    let mut out = String::new();
+    for l in preamble.iter().chain(sections.iter().flat_map(|(_, ls)| ls.iter())) {
+        out.push_str(l);
+        out.push_str("\r\n");
+    }
+    out
+}
+
 #[cfg(target_os = "windows")]
 fn setup_windows() -> Result<Vec<String>> {
-    // Dev-C++ tools 存在 tools.ini / 注册表；稳妥做法只给提示不写注册表
-    Ok(vec!["Windows 下自动写 Dev-C++ 工具项尚未实现，请按下方手动步骤".to_string()])
+    let exe = std::env::current_exe()?.to_string_lossy().into_owned();
+    let gui_exe = std::env::current_exe()?
+        .parent()
+        .map(|p| p.join("shuati-gui.exe"))
+        .filter(|p| p.exists())
+        .map(|p| p.to_string_lossy().into_owned());
+
+    let mut tools = vec![
+        // ConsolePauser 包一层：跑完暂停，否则控制台一闪就关
+        DevCppTool {
+            title: "shuati 评测".into(),
+            program: "<EXECPATH>\\ConsolePauser.exe".into(),
+            workdir: "<SOURCEPATH>".into(),
+            params: format!("\"{exe}\" test --file \"<SOURCENAME>\""),
+        },
+        DevCppTool {
+            title: "shuati 对拍".into(),
+            program: "<EXECPATH>\\ConsolePauser.exe".into(),
+            workdir: "<SOURCEPATH>".into(),
+            params: format!("\"{exe}\" stress --file \"<SOURCENAME>\" -n 50"),
+        },
+    ];
+    if let Some(g) = gui_exe {
+        tools.push(DevCppTool {
+            title: "shuati 面板".into(),
+            program: g,
+            workdir: String::new(),
+            params: String::new(),
+        });
+    }
+
+    let mut msgs = Vec::new();
+    let mut wrote = false;
+    for dir in devcpp_config_dirs() {
+        let ini = dir.join("tools.ini");
+        let old = std::fs::read_to_string(&ini).unwrap_or_default();
+        let new = upsert_devcpp_tools(&old, &tools);
+        store::atomic_write(&ini, new.as_bytes())?;
+        msgs.push(format!("已写入 {}", ini.display()));
+        wrote = true;
+    }
+    if !wrote {
+        msgs.push("没找到 Dev-C++ 配置目录（%APPDATA%\\Dev-Cpp 等），请按下方手动步骤".into());
+    }
+    Ok(msgs)
+}
+
+/// Dev-C++ 各版本的配置目录候选（只返回真实存在的）
+#[cfg(target_os = "windows")]
+fn devcpp_config_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let mut push = |d: PathBuf| {
+        if d.is_dir() && !dirs.contains(&d) {
+            dirs.push(d);
+        }
+    };
+    if let Some(a) = std::env::var_os("APPDATA") {
+        let a = PathBuf::from(a);
+        push(a.join("Embarcadero\\Dev-Cpp")); // Dev-C++ 6.x
+        push(a.join("Dev-Cpp")); // Orwell 5.x
+    }
+    // 便携模式：<安装目录>\config
+    for env in ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"] {
+        if let Some(p) = std::env::var_os(env) {
+            let p = PathBuf::from(p);
+            push(p.join("Dev-Cpp\\config"));
+            push(p.join("Embarcadero\\Dev-Cpp\\config"));
+        }
+    }
+    push(PathBuf::from("C:\\Dev-Cpp\\config"));
+    dirs
 }
 
 async fn cmd_add(ws: &store::Workspace, url: &str) -> Result<()> {
@@ -466,7 +712,9 @@ async fn cmd_stress(
     let user_src = mk_src(&user_path)?;
     let oracle_src = mk_src(&oracle_path)?;
 
-    println!("[*] 对拍 {} · {} 轮", pd.meta.id, rounds);
+    // 没指定 seed 时随机给一个，否则每次对拍的都是同一批数据
+    let seed_start = seed.unwrap_or_else(|| (store::now_ts() as u64 % 1_000_000) + 1);
+    println!("[*] 对拍 {} · {} 轮 · seed={}", pd.meta.id, rounds, seed_start);
     println!("    gen    = {}", gen_path.display());
     println!("    user   = {}", user_path.display());
     println!("    oracle = {}", oracle_path.display());
@@ -490,7 +738,7 @@ async fn cmd_stress(
         user_src: &user_src,
         oracle_src: &oracle_src,
         rounds,
-        seed_start: seed.unwrap_or(1),
+        seed_start,
         jobs,
         limits_run: &pd.meta.limits,
         limits_gen: &gen_limits,
@@ -520,7 +768,7 @@ async fn cmd_stress(
     Ok(())
 }
 
-fn cmd_doctor(cfg: &store::Config) {
+fn cmd_doctor(ws: &store::Workspace, cfg: &store::Config) {
     let rep = judge::check_env(&cfg.compiler_cpp, &cfg.compiler_python);
     println!("== 环境自检 ==");
     match &rep.cpp {
@@ -531,8 +779,15 @@ fn cmd_doctor(cfg: &store::Config) {
         Some(p) => println!("  python: {} ✓", p.display()),
         None => println!("  python: 未找到（只用 C++ 可忽略）"),
     }
-    println!("  AI:     {}", if cfg.ai.enabled() { "已配置 ✓" } else { "未配置（hint/自动脚本不可用）" });
-    println!("  题库:   {}", store::Workspace::default_dir().display());
+    let ai_note = match store::secrets::key_source(&cfg.ai.api_key) {
+        store::secrets::KeySource::Env => "已配置（环境变量 SHUATI_API_KEY）✓",
+        store::secrets::KeySource::Keyring => "已配置（系统钥匙串）✓",
+        store::secrets::KeySource::File => "已配置（config.toml 明文）✓",
+        store::secrets::KeySource::None => "未配置（hint/自动脚本不可用）",
+    };
+    println!("  AI:     {ai_note}");
+    println!("  题库:   {}", ws.root.display());
+    println!("  日志:   {}", ws.root.join("logs").display());
 }
 
 fn cmd_list(ws: &store::Workspace) -> Result<()> {
@@ -577,9 +832,20 @@ async fn cmd_test(
     file: Option<PathBuf>,
     jobs: usize,
 ) -> Result<()> {
-    // 解析题目：参数 > state.current > 唯一题目
+    // 解析题目：参数 > --file 绑定注释 > state.current > 唯一题目
     let problems = store::load_all_problems(ws);
-    let pd = match resolve_problem(&problems, id.as_deref(), ws)? {
+    let mut bound_hit = None;
+    if id.is_none() {
+        if let Some(f) = &file {
+            if let Some(bound) = judge::binding_comment(f) {
+                bound_hit = problems.iter().find(|p| p.meta.id == bound);
+                if bound_hit.is_some() {
+                    println!("[*] 源文件绑定 {bound}（`// shuati:` 注释）");
+                }
+            }
+        }
+    }
+    let mut pd = match bound_hit.or(resolve_problem(&problems, id.as_deref(), ws)?) {
         Some(p) => p,
         None => anyhow::bail!("找不到题目（用 `shuati list` 查看，或先 `shuati new`）"),
     };
@@ -588,6 +854,17 @@ async fn cmd_test(
         Some(f) => f,
         None => pd.find_solution().context("solutions/ 下没有源文件")?,
     };
+    // solutions/ 下发现的源文件也过一遍绑定注释（与已选不同时显式切题）
+    if id.is_none() {
+        if let Some(bound) = judge::binding_comment(&src_path) {
+            if let Some(p) = problems.iter().find(|p| p.meta.id == bound) {
+                if p.meta.id != pd.meta.id {
+                    println!("[*] 源文件绑定 {}（`// shuati:` 注释）", bound);
+                    pd = p;
+                }
+            }
+        }
+    }
     let lang = Lang::from_path(&src_path).context("不支持的文件类型（需 .cpp/.py）")?;
 
     let cases = pd.load_cases()?;
@@ -630,7 +907,8 @@ async fn cmd_test(
     for c in &report.cases {
         let mark = if c.verdict == shuati_core::Verdict::Ac { "✓" } else { "✗" };
         println!("  {} {:12} {:3} {:>6}ms {:>8}KB", mark, c.name, c.verdict, c.cpu_ms, c.memory_kb);
-        if c.verdict != shuati_core::Verdict::Ac && !c.message.is_empty() {
+        // 有 message 就打（AC 的 smoke 提示、WA/RE 的错误详情）
+        if !c.message.is_empty() {
             let first = c.message.lines().next().unwrap_or("");
             println!("      {}", first.chars().take(80).collect::<String>());
         }
@@ -688,4 +966,58 @@ fn resolve_problem<'a>(
         return Ok(problems.first());
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool(title: &str) -> DevCppTool {
+        DevCppTool {
+            title: title.into(),
+            program: "<EXECPATH>\\ConsolePauser.exe".into(),
+            workdir: "<SOURCEPATH>".into(),
+            params: "\"C:\\bin\\shuati.exe\" test --file \"<SOURCENAME>\"".into(),
+        }
+    }
+
+    #[test]
+    fn upsert_empty_ini() {
+        let out = upsert_devcpp_tools("", &[tool("shuati 评测")]);
+        assert!(out.contains("[Tools]"), "{out}");
+        assert!(out.contains("Count=1"), "{out}");
+        assert!(out.contains("[Tool0]"), "{out}");
+        assert!(out.contains("Title=shuati 评测"), "{out}");
+    }
+
+    #[test]
+    fn upsert_preserves_other_tools() {
+        let old = "[Tools]\r\nCount=1\r\n\r\n[Tool0]\r\nTitle=Existing\r\nProgram=C:\\x.exe\r\nWorkDir=\r\nParams=\r\n";
+        let out = upsert_devcpp_tools(old, &[tool("shuati 评测")]);
+        assert!(out.contains("Count=2"), "{out}");
+        assert!(out.contains("Title=Existing"), "{out}");
+        assert!(out.contains("[Tool1]"), "{out}");
+        assert!(out.contains("Title=shuati 评测"), "{out}");
+    }
+
+    #[test]
+    fn upsert_idempotent() {
+        let tools = [tool("shuati 评测"), tool("shuati 对拍")];
+        let once = upsert_devcpp_tools("", &tools);
+        let twice = upsert_devcpp_tools(&once, &tools);
+        // 第二次不产生新段：shuati 段数稳定
+        assert_eq!(once.matches("Title=shuati").count(), 2);
+        assert_eq!(twice.matches("Title=shuati").count(), 2);
+        assert!(twice.contains("Count=2"), "{twice}");
+    }
+
+    #[test]
+    fn upsert_removes_stale_shuati() {
+        // 上次装过 3 个 shuati 工具，这次只装 2 个 → Tool2 该被删掉
+        let old = "[Tools]\r\nCount=3\r\n[Tool0]\r\nTitle=shuati 评测\r\nProgram=old\r\n[Tool1]\r\nTitle=shuati 对拍\r\nProgram=old\r\n[Tool2]\r\nTitle=shuati 旧项\r\nProgram=old\r\n";
+        let out = upsert_devcpp_tools(old, &[tool("shuati 评测"), tool("shuati 对拍")]);
+        assert!(!out.contains("[Tool2]"), "{out}");
+        assert!(!out.contains("shuati 旧项"), "{out}");
+        assert!(out.contains("Count=2"), "{out}");
+    }
 }

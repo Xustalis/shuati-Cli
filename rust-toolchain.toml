@@ -1,0 +1,4 @@
+# edition 2024 需要 Rust 1.85+；钉 stable 避免不同机器工具链漂移
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

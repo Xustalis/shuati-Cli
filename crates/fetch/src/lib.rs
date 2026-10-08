@@ -66,31 +66,55 @@ pub async fn fetch_to_dir(url: &str, ws: &shuati_store::Workspace) -> Result<shu
     materialize(fp, ws).map_err(|e| FetchError::Parse(e.to_string()))
 }
 
-/// FetchedProblem → 磁盘
+/// FetchedProblem → 磁盘。
+/// 题目已存在（重复拉取）时：更新标题/难度/标签，保留用户自定义的
+/// limits/checker/题面；样例只补缺失文件，不覆盖用户改过的用例。
 pub fn materialize(fp: FetchedProblem, ws: &shuati_store::Workspace) -> shuati_store::Result<shuati_store::ProblemDir> {
-    let mut meta = shuati_core::Problem {
-        id: fp.id.clone(),
-        title: fp.title,
-        url: fp.url,
-        difficulty: fp.difficulty,
-        tags: fp.tags,
-        limits: shuati_core::Limits::default(),
-        statement: "statement.md".into(),
-        checker: Default::default(),
-        created_at: shuati_store::now_ts(),
-    };
-    if let Some(ms) = fp.time_limit_ms {
-        meta.limits.cpu_ms = ms;
-        meta.limits.wall_ms = (ms * 3).max(2000);
-    }
-    if let Some(mb) = fp.memory_limit_mb {
-        meta.limits.memory_mb = mb;
-    }
     let dir = ws.problem_dir(&fp.id);
-    let pd = shuati_store::ProblemDir::create(&dir, &meta)?;
-    pd.write_statement(&fp.statement)?;
+    let pd = match shuati_store::ProblemDir::open(&dir) {
+        Ok(existing) => {
+            let mut pd = existing;
+            pd.meta.title = fp.title;
+            pd.meta.url = fp.url;
+            pd.meta.difficulty = fp.difficulty;
+            pd.meta.tags = fp.tags;
+            pd.save_meta()?;
+            if pd.read_statement().unwrap_or_default().trim().is_empty() {
+                pd.write_statement(&fp.statement)?;
+            }
+            pd
+        }
+        Err(_) => {
+            let mut meta = shuati_core::Problem {
+                id: fp.id.clone(),
+                title: fp.title,
+                url: fp.url,
+                difficulty: fp.difficulty,
+                tags: fp.tags,
+                limits: shuati_core::Limits::default(),
+                statement: "statement.md".into(),
+                checker: Default::default(),
+                created_at: shuati_store::now_ts(),
+            };
+            if let Some(ms) = fp.time_limit_ms {
+                meta.limits.cpu_ms = ms;
+                meta.limits.wall_ms = (ms * 3).max(2000);
+            }
+            if let Some(mb) = fp.memory_limit_mb {
+                meta.limits.memory_mb = mb;
+            }
+            let pd = shuati_store::ProblemDir::create(&dir, &meta)?;
+            pd.write_statement(&fp.statement)?;
+            pd
+        }
+    };
     for (i, (input, output)) in fp.samples.iter().enumerate() {
-        pd.write_case(&format!("{:04}", i + 1), input, output, shuati_core::CaseOrigin::Sample)?;
+        let name = format!("{:04}", i + 1);
+        // 已存在的用例文件不覆盖（用户可能改过数据）
+        if pd.tests_dir().join(format!("{name}.in")).exists() {
+            continue;
+        }
+        pd.write_case(&name, input, Some(output), shuati_core::CaseOrigin::Sample)?;
     }
     Ok(pd)
 }

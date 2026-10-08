@@ -18,8 +18,12 @@ pub enum Event {
     CaseDone(usize, usize, String, Verdict),
     /// 全部完成
     RunDone(Box<TestReport>),
-    /// 错误（编译/环境）
+    /// 评测任务失败（编译/环境）
     Failed(String),
+    /// 对拍任务失败——错误显示在对拍页，不动评测页状态
+    StressFailed(String),
+    /// 批量造例失败——复位 genning 并提示
+    GenFailed(String),
     /// 拉题完成（problem id 字符串）
     FetchedOk(String),
     /// 拉题失败
@@ -30,12 +34,14 @@ pub enum Event {
     StressHack(Box<judge::HackCase>),
     /// 对拍完成
     StressDone(Box<judge::StressReport>),
-    /// AI 文本响应（hint/explain）
+    /// AI 文本增量（SSE 流式，逐段追加到面板）
+    AiDelta(String),
+    /// AI 文本响应（hint/explain 的完整文本/错误）
     AiText(String),
     /// AI 脚本就绪：gen 路径、oracle 路径
     ScriptsReady(PathBuf, PathBuf),
-    /// 批量造例完成（生成组数）
-    GenDone(usize),
+    /// 批量造例完成（生成组数, 失败原因列表）
+    GenDone(usize, Vec<String>),
     /// AI 连接测试结果
     AiPong(Result<String, String>),
     /// 快速运行完成
@@ -102,7 +108,10 @@ pub enum Task {
         model: String,
         statement: String,
         lang: shuati_core::Lang,
-        dest_dir: PathBuf,
+        /// gen 落点（题目 gen/ 目录）
+        gen_dir: PathBuf,
+        /// oracle 落点（题目 solutions/ 目录）
+        oracle_dir: PathBuf,
         cpp_cfg: String,
         py_cfg: String,
     },
@@ -112,6 +121,7 @@ pub enum Task {
         input: String,
         limits: shuati_core::Limits,
         compiler_cfg: String,
+        cancel: Arc<AtomicBool>,
     },
     /// AI 连接测试（最小请求）
     AiPing {
@@ -203,10 +213,25 @@ impl Bridge {
                                 match r {
                                     Err(e) => { let _ = ev.send(Event::AiText(format!("AI 未配置: {e}"))); }
                                     Ok(client) => {
+                                        // SSE 流式：delta 实时进面板；流挂掉才退非流式整段
+                                        let ev2 = ev.clone();
+                                        let mut on_delta = move |d: &str| {
+                                            let _ = ev2.send(Event::AiDelta(d.to_string()));
+                                        };
                                         let out = if explain {
-                                            client.explain(&statement, &code, &verdict_info, "").await
+                                            client.explain_stream(&statement, &code, &verdict_info, "", &mut on_delta).await
                                         } else {
-                                            client.hint(&statement, &code, &verdict_info).await
+                                            client.hint_stream(&statement, &code, &verdict_info, &mut on_delta).await
+                                        };
+                                        let out = match out {
+                                            Ok(t) => Ok(t),
+                                            Err(_) => {
+                                                if explain {
+                                                    client.explain(&statement, &code, &verdict_info, "").await
+                                                } else {
+                                                    client.hint(&statement, &code, &verdict_info).await
+                                                }
+                                            }
                                         };
                                         match out {
                                             Ok(t) => { let _ = ev.send(Event::AiText(t)); }
@@ -216,11 +241,12 @@ impl Bridge {
                                 }
                             });
                         }
-                        Task::QuickRun { src, input, limits, compiler_cfg } => {
+                        Task::QuickRun { src, input, limits, compiler_cfg, cancel } => {
+                            *slot.lock().unwrap() = Some(cancel.clone());
                             let ev = ev_tx.clone();
                             let cd = cache_dir.clone();
                             tokio::spawn(async move {
-                                match quick_run(src, input, limits, compiler_cfg, cd).await {
+                                match quick_run(src, input, limits, compiler_cfg, cancel, cd).await {
                                     Ok(qr) => { let _ = ev.send(Event::QuickDone(Box::new(qr))); }
                                     Err(e) => { let _ = ev.send(Event::QuickFailed(e)); }
                                 }
@@ -247,14 +273,14 @@ impl Bridge {
                                 run_gen_cases(problem_dir, gen_src, oracle_src, count, seed_start, limits, cpp_cfg, py_cfg, ev, cd).await;
                             });
                         }
-                        Task::AiScripts { api_base, api_key, model, statement, lang, dest_dir, cpp_cfg, py_cfg } => {
+                        Task::AiScripts { api_base, api_key, model, statement, lang, gen_dir, oracle_dir, cpp_cfg, py_cfg } => {
                             let ev = ev_tx.clone();
                             tokio::spawn(async move {
                                 let r = shuati_ai::AiClient::new(&api_base, &api_key, &model);
                                 match r {
                                     Err(e) => { let _ = ev.send(Event::AiText(format!("AI 未配置: {e}"))); }
                                     Ok(client) => {
-                                        match shuati_ai::produce_scripts(&client, &statement, lang, &dest_dir, &cpp_cfg, &py_cfg, |_| {}).await {
+                                        match shuati_ai::produce_scripts(&client, &statement, lang, &gen_dir, &oracle_dir, &cpp_cfg, &py_cfg, |_| {}).await {
                                             Ok((g, o)) => { let _ = ev.send(Event::ScriptsReady(g, o)); }
                                             Err(e) => { let _ = ev.send(Event::AiText(format!("脚本生成失败: {e}"))); }
                                         }
@@ -293,6 +319,7 @@ async fn quick_run(
     input: String,
     limits: shuati_core::Limits,
     compiler_cfg: String,
+    cancel: Arc<AtomicBool>,
     cache_dir: PathBuf,
 ) -> std::result::Result<QuickResult, String> {
     let tc = judge::Toolchain::detect(src.lang, &compiler_cfg).map_err(|e| e.to_string())?;
@@ -305,7 +332,7 @@ async fn quick_run(
         stdout: tmp.path().join("stdout.txt"),
         stderr: tmp.path().join("stderr.txt"),
     };
-    let out = judge::run_program(&prog, &io, &limits).await.map_err(|e| e.to_string());
+    let out = judge::run_program(&prog, &io, &limits, Some(cancel)).await.map_err(|e| e.to_string());
     judge::cleanup_program(&prog);
     let out = out?;
     let stdout = std::fs::read_to_string(&out.stdout_path).unwrap_or_default();
@@ -314,6 +341,8 @@ async fn quick_run(
         judge::RunStatus::Ok => None,
         judge::RunStatus::TimeLimit => Some(Verdict::Tle),
         judge::RunStatus::MemoryLimit => Some(Verdict::Mle),
+        judge::RunStatus::OutputLimit => Some(Verdict::Ole),
+        judge::RunStatus::Cancelled => Some(Verdict::Se),
         judge::RunStatus::RuntimeError => Some(Verdict::Re),
         judge::RunStatus::InternalError => Some(Verdict::Se),
     };
@@ -429,43 +458,44 @@ async fn run_gen_cases(
     };
     let gen_tc = match judge::Toolchain::detect(gen_src.lang, comp) {
         Ok(t) => t,
-        Err(e) => { let _ = ev.send(Event::Failed(e.to_string())); return; }
+        Err(e) => { let _ = ev.send(Event::GenFailed(e.to_string())); return; }
     };
     let oracle_tc = match judge::Toolchain::detect(oracle_src.lang, ocomp) {
         Ok(t) => t,
-        Err(e) => { let _ = ev.send(Event::Failed(e.to_string())); return; }
+        Err(e) => { let _ = ev.send(Event::GenFailed(e.to_string())); return; }
     };
     let gen_prog = match judge::compile_cached(&gen_src, &gen_tc, &cache_dir).await {
         Ok(p) => p,
-        Err(e) => { let _ = ev.send(Event::Failed(format!("gen 编译失败: {e}"))); return; }
+        Err(e) => { let _ = ev.send(Event::GenFailed(format!("gen 编译失败: {e}"))); return; }
     };
     let oracle_prog = match judge::compile_cached(&oracle_src, &oracle_tc, &cache_dir).await {
         Ok(p) => p,
         Err(e) => {
             judge::cleanup_program(&gen_prog);
-            let _ = ev.send(Event::Failed(format!("oracle 编译失败: {e}")));
+            let _ = ev.send(Event::GenFailed(format!("oracle 编译失败: {e}")));
             return;
         }
     };
 
     let glim = shuati_core::Limits { cpu_ms: 10000, wall_ms: 15000, memory_mb: 512, output_mb: 64 };
-    let made = judge::gen_cases(&gen_prog, &oracle_prog, seed_start..seed_start + count as u64, &limits, &glim).await;
+    let batch = judge::gen_cases(&gen_prog, &oracle_prog, seed_start..seed_start + count as u64, &limits, &glim).await;
     judge::cleanup_program(&gen_prog);
     judge::cleanup_program(&oracle_prog);
 
-    if made.is_empty() {
-        let _ = ev.send(Event::Failed("没有产出生效例（gen/oracle 可能运行失败）".into()));
+    if batch.cases.is_empty() {
+        let first = batch.failed.first().map(|(_, r)| r.clone()).unwrap_or_default();
+        let _ = ev.send(Event::GenFailed(format!("没有产出生效例（gen/oracle 可能运行失败）{first}")));
         return;
     }
-    let existing = pd.load_cases().map(|c| c.len()).unwrap_or(0) as u32;
     let mut n = 0;
-    for (i, (_s, input, output)) in made.iter().enumerate() {
-        let name = format!("{:04}", existing + i as u32 + 1);
-        if pd.write_case(&name, input, output, shuati_core::CaseOrigin::Generated).is_ok() {
+    for (_s, input, output) in &batch.cases {
+        let name = pd.next_case_name();
+        if pd.write_case(&name, input, Some(output), shuati_core::CaseOrigin::Generated).is_ok() {
             n += 1;
         }
     }
-    let _ = ev.send(Event::GenDone(n));
+    let failed_msgs: Vec<String> = batch.failed.iter().map(|(s, r)| format!("seed {s}: {r}")).collect();
+    let _ = ev.send(Event::GenDone(n, failed_msgs));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -532,7 +562,7 @@ async fn run_stress(
     let engine = match judge::StressEngine::new(&params, &cpp_cfg, &py_cfg).map(|e| e.with_cache(cache_dir.clone())) {
         Ok(e) => e,
         Err(e) => {
-            let _ = ev.send(Event::Failed(e.to_string()));
+            let _ = ev.send(Event::StressFailed(e.to_string()));
             return;
         }
     };
@@ -545,10 +575,10 @@ async fn run_stress(
             let _ = ev.send(Event::StressDone(Box::new(report)));
         }
         Err(judge::JudgeError::Compile(msg)) => {
-            let _ = ev.send(Event::Failed(format!("编译失败:\n{msg}")));
+            let _ = ev.send(Event::StressFailed(format!("编译失败:\n{msg}")));
         }
         Err(e) => {
-            let _ = ev.send(Event::Failed(e.to_string()));
+            let _ = ev.send(Event::StressFailed(e.to_string()));
         }
     }
 }

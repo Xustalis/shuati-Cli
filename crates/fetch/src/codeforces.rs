@@ -93,35 +93,35 @@ struct PageData {
     mem_mb: Option<u64>,
 }
 
-/// 尝试爬 HTML 题面（可能被 Cloudflare 403）
-async fn fetch_page(contest: &str, index: &str) -> Result<PageData, FetchError> {
-    let url = format!("https://codeforces.com/problemset/problem/{contest}/{index}");
-    let html = http::get_text(&url).await?;
-    if html.contains("Your browser is being checked") || html.len() < 20000 {
-        return Err(FetchError::Network("Cloudflare 拦截".into()));
-    }
-    let doc = Html::parse_document(&html);
+/// 元素文本节点拼接（带空格分隔，避免相邻节点粘连）
+fn el_text(el: &scraper::ElementRef) -> String {
+    el.text().collect::<Vec<_>>().join(" ").trim().to_string()
+}
+
+/// 纯函数：从 problem-statement HTML 提取 limits/样例/题面段落（可单测）
+fn parse_page(html: &str) -> Result<PageData, FetchError> {
+    let doc = Html::parse_document(html);
     let stmt_el = doc
         .select(&Selector::parse("div.problem-statement").unwrap())
         .next()
         .ok_or(FetchError::NotFound)?;
 
-    let mut time_ms = None;
-    let mut mem_mb = None;
-    for div in stmt_el.select(&Selector::parse("div").unwrap()) {
-        let t = div.text().collect::<String>();
-        let t = t.trim().to_string();
-        if t.starts_with("time limit") {
-            if let Some(sec) = t.split_whitespace().nth(4).and_then(|s| s.parse::<f64>().ok()) {
-                time_ms = Some((sec * 1000.0) as u64);
-            }
-        }
-        if t.starts_with("memory limit") {
-            if let Some(mb) = t.split_whitespace().nth(4).and_then(|s| s.parse::<u64>().ok()) {
-                mem_mb = Some(mb);
-            }
-        }
-    }
+    static NUM_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d+\.?\d*)").unwrap());
+    let first_num = |el: &scraper::ElementRef| -> Option<f64> {
+        let t = el_text(el);
+        NUM_RE.find(&t).and_then(|m| m.as_str().parse::<f64>().ok())
+    };
+
+    let time_ms = stmt_el
+        .select(&Selector::parse("div.time-limit").unwrap())
+        .next()
+        .and_then(|el| first_num(&el))
+        .map(|sec| (sec * 1000.0) as u64);
+    let mem_mb = stmt_el
+        .select(&Selector::parse("div.memory-limit").unwrap())
+        .next()
+        .and_then(|el| first_num(&el))
+        .map(|mb| mb as u64);
 
     let ins: Vec<String> = stmt_el
         .select(&Selector::parse("div.sample-test div.input pre").unwrap())
@@ -145,6 +145,61 @@ async fn fetch_page(contest: &str, index: &str) -> Result<PageData, FetchError> 
     }
 
     Ok(PageData { statement, samples, time_ms, mem_mb })
+}
+
+/// 尝试爬 HTML 题面（可能被 Cloudflare 403）
+async fn fetch_page(contest: &str, index: &str) -> Result<PageData, FetchError> {
+    let url = format!("https://codeforces.com/problemset/problem/{contest}/{index}");
+    let html = http::get_text(&url).await?;
+    if html.contains("Your browser is being checked") || html.len() < 20000 {
+        return Err(FetchError::Network("Cloudflare 拦截".into()));
+    }
+    parse_page(&html)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 模拟 CF problem-statement 的真实 DOM 结构（文本节点在 div 下混杂排布）
+    const FIXTURE: &str = r##"
+<html><body>
+<div class="problem-statement">
+  <div class="header">
+    <div class="title">A. Add Two Numbers</div>
+    <div class="time-limit"><div class="property-title">time limit per test</div>2 seconds</div>
+    <div class="memory-limit"><div class="property-title">memory limit per test</div>256 megabytes</div>
+  </div>
+  <div><p>Given two integers, print their sum.</p></div>
+  <div class="sample-test">
+    <div class="input"><div class="title">Input</div>
+      <pre><div class="test-example-line">1 2</div></pre>
+    </div>
+    <div class="output"><div class="title">Output</div>
+      <pre><div class="test-example-line">3</div></pre>
+    </div>
+  </div>
+</div>
+</body></html>"##;
+
+    #[test]
+    fn parses_limits_from_property_divs() {
+        let d = parse_page(FIXTURE).unwrap();
+        assert_eq!(d.time_ms, Some(2000));
+        assert_eq!(d.mem_mb, Some(256));
+    }
+
+    #[test]
+    fn parses_samples_and_statement() {
+        let d = parse_page(FIXTURE).unwrap();
+        assert_eq!(d.samples, vec![("1 2\n".to_string(), "3\n".to_string())]);
+        assert!(d.statement.contains("print their sum"));
+    }
+
+    #[test]
+    fn missing_statement_is_notfound() {
+        assert!(matches!(parse_page("<html><body></body></html>"), Err(FetchError::NotFound)));
+    }
 }
 
 #[async_trait::async_trait]
