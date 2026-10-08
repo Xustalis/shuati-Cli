@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: fmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+      - run: cargo build --workspace
+
+  windows-smoke:
+    # 主用户平台：Job Object 沙箱 / Dev-C++ 探测只在这跑真机
+    name: windows smoke
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p shuati-cli -p shuati-gui
+      - name: doctor + 判题冒烟
+        shell: pwsh
+        run: |
+          $B = "target\debug\shuati.exe"
+          & $B --root "$env:TEMP\s2ws" doctor
+          New-Item -ItemType Directory -Force "$env:TEMP\s2ws\problems\local__ab\tests" | Out-Null
+          Set-Content "$env:TEMP\s2ws\problems\local__ab\tests\0001.in" "1 2"
+          Set-Content "$env:TEMP\s2ws\problems\local__ab\tests\0001.out" "3"
+          @(
+            'id = "local:ab"',
+            'title = "A+B"',
+            'url = ""',
+            'tags = []',
+            'created_at = 0',
+            '[limits]',
+            'cpu_ms = 2000',
+            'wall_ms = 5000',
+            'memory_mb = 256',
+            'output_mb = 16',
+            '[checker]',
+            'kind = "tokens"'
+          ) | Set-Content "$env:TEMP\s2ws\problems\local__ab\problem.toml"
+          Set-Content "$env:TEMP\a+b.cpp" 'int main(){long long a,b;scanf("%lld %lld",&a,&b);printf("%lld\n",a+b);}'
+          & $B --root "$env:TEMP\s2ws" test local:ab --file "$env:TEMP\a+b.cpp"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
