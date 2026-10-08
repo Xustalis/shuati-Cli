@@ -127,6 +127,8 @@ pub struct ShuatiApp {
     pub watch_rx: Option<std::sync::mpsc::Receiver<PathBuf>>,
     /// 题面是否展开
     pub show_statement: bool,
+    /// 题面缓存（题目id, 内容）：展开态每帧渲染，不能每帧读盘
+    pub stmt_cache: Option<(String, String)>,
     /// 用例编辑器
     pub cases: CaseEditor,
 
@@ -204,6 +206,7 @@ impl ShuatiApp {
             _watcher: None,
             watch_rx: None,
             show_statement: false,
+            stmt_cache: None,
             cases: CaseEditor::default(),
             new_title: String::new(),
             url_input: String::new(),
@@ -240,6 +243,22 @@ impl ShuatiApp {
     pub fn current_problem(&self) -> Option<&store::ProblemDir> {
         let cur = self.state.current_problem.as_ref()?;
         self.problems.iter().find(|p| &p.meta.id.to_string() == cur)
+    }
+
+    /// 当前题题面（带缓存）。换题/编辑器保存后按 id 失效。
+    pub fn statement_cached(&mut self) -> &str {
+        let (pid, text) = match self.current_problem() {
+            Some(pd) => {
+                let pid = pd.meta.id.to_string();
+                let hit = self.stmt_cache.as_ref().is_some_and(|(id, _)| id == &pid);
+                (pid, if hit { None } else { Some(pd.read_statement().unwrap_or_default()) })
+            }
+            None => return "",
+        };
+        if let Some(t) = text {
+            self.stmt_cache = Some((pid, t));
+        }
+        self.stmt_cache.as_ref().map(|(_, t)| t.as_str()).unwrap_or("")
     }
 
     pub fn select_problem(&mut self, id: String) {
@@ -516,6 +535,7 @@ impl ShuatiApp {
             self.prob_edit.msg = format!("题面保存失败: {e}");
             return;
         }
+        self.stmt_cache = None; // 题面可能刚被编辑器改过
         self.reload_problems();
         self.prob_edit.show = false;
     }
@@ -824,9 +844,14 @@ impl ShuatiApp {
                 }
                 Event::FetchedOk(id) => {
                     self.fetching = false;
-                    self.lib_msg = format!("已拉取 {id}");
                     self.reload_problems();
-                    self.select_problem(id);
+                    self.select_problem(id.clone());
+                    let n = self.current_problem().and_then(|p| p.load_cases().ok()).map(|c| c.len()).unwrap_or(0);
+                    self.lib_msg = if n > 0 {
+                        format!("已拉取 {id} · {n} 组样例")
+                    } else {
+                        format!("已拉取 {id}，但没抓到样例——评测页下方可手动粘贴")
+                    };
                 }
                 Event::FetchFailed(msg) => {
                     self.fetching = false;

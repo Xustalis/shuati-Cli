@@ -35,8 +35,11 @@ shuati stress <id> --auto -n 100       # AI 自动生成 gen+oracle（先验证�
 shuati gen <id> -n 50                  # 批量生成用例 → tests/
 shuati gen <id> -n 50 --auto           # AI 写脚本再造用例
 shuati hint <id> [--explain]           # AI 提示/诊断
-shuati new <标题> / shuati list        # 本地题
+shuati new <标题> / shuati list        # 本地题（list 显示用例数和上次评测结果）
+shuati case <id> --in a.in --out a.out # 手动加用例（CF 抓不到样例时用）
+shuati open <id>                       # 文件管理器打开题目目录
 shuati setup                           # Dev-C++ 集成（Windows 自动写 tools.ini，其余打手动步骤）
+shuati                                 # 无参 → 拉起同目录 shuati-gui
 ```
 
 源文件首行写 `// shuati: luogu P1001` 可绑定题目——`test`/`stress` 拖错文件也不判错题。

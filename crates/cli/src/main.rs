@@ -48,6 +48,25 @@ enum Cmd {
         /// 题目链接
         url: String,
     },
+    /// 给题目加用例：shuati case luogu:P1001 --in 1.in --out 1.out
+    Case {
+        /// 题目 id（可省略用当前题目）
+        id: Option<String>,
+        /// 输入文件
+        #[arg(long = "in")]
+        input: PathBuf,
+        /// 期望输出文件（缺省则按可运行性 smoke）
+        #[arg(long = "out")]
+        output: Option<PathBuf>,
+        /// 用例名（默认自动编号）
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// 在文件管理器中打开题目目录（改 tests/、看 stress/hack_*）
+    Open {
+        /// 题目 id（省略用当前题目）
+        id: Option<String>,
+    },
     /// 快速运行：编译源文件，stdin 透传跑一次（不需要题目）
     Run {
         /// 源文件（.cpp/.py）
@@ -139,6 +158,8 @@ async fn main() -> Result<()> {
         Some(Cmd::New { title, slug }) => cmd_new(&ws, &title, slug)?,
         Some(Cmd::Test { id, file, jobs }) => cmd_test(&ws, &cfg, id, file, jobs).await?,
         Some(Cmd::Add { url }) => cmd_add(&ws, &url).await?,
+        Some(Cmd::Case { id, input, output, name }) => cmd_case(&ws, id, input, output, name)?,
+        Some(Cmd::Open { id }) => cmd_open(&ws, id)?,
         Some(Cmd::Run { file }) => cmd_run(&ws, &cfg, &file).await?,
         Some(Cmd::Stress { id, generator, oracle, file, rounds, seed, jobs, keep_going, auto, auto_lang }) => {
             cmd_stress(&ws, &cfg, id, generator, oracle, file, rounds, seed, jobs, keep_going, auto, auto_lang).await?
@@ -655,10 +676,54 @@ async fn cmd_add(ws: &store::Workspace, url: &str) -> Result<()> {
     println!("[+] {}  {}", pd.meta.id, pd.meta.title);
     let cases = pd.load_cases()?;
     println!("    样例 {} 组 → {}", cases.len(), pd.dir.display());
+    if cases.is_empty() {
+        eprintln!("    注意：没拉到样例（题面抓取被拦？）。评测页下方/statement.md 可手动补。");
+    }
     // 设为当前题目
     let mut state = store::AppState::load(&ws.state_path());
     state.current_problem = Some(pd.meta.id.to_string());
     state.save(&ws.state_path())?;
+    Ok(())
+}
+
+/// `shuati case <id> --in f --out f`：把文件内容存成 tests/ 用例
+fn cmd_case(
+    ws: &store::Workspace,
+    id: Option<String>,
+    input: PathBuf,
+    output: Option<PathBuf>,
+    name: Option<String>,
+) -> Result<()> {
+    let problems = store::load_all_problems(ws);
+    let pd = match resolve_problem(&problems, id.as_deref(), ws)? {
+        Some(p) => p,
+        None => anyhow::bail!("找不到题目（用 `shuati list` 查看，或先 `shuati new`）"),
+    };
+    let input = std::fs::read_to_string(&input).with_context(|| format!("读输入文件失败: {}", input.display()))?;
+    let output = output
+        .map(|p| std::fs::read_to_string(&p).with_context(|| format!("读输出文件失败: {}", p.display())))
+        .transpose()?;
+    let name = name.unwrap_or_else(|| pd.next_case_name());
+    pd.write_case(&name, &input, output.as_deref(), shuati_core::CaseOrigin::Sample)?;
+    println!("[+] 用例 {name} → {}", pd.dir.join("tests").display());
+    Ok(())
+}
+
+/// `shuati open [id]`：文件管理器打开题目目录
+fn cmd_open(ws: &store::Workspace, id: Option<String>) -> Result<()> {
+    let problems = store::load_all_problems(ws);
+    let pd = match resolve_problem(&problems, id.as_deref(), ws)? {
+        Some(p) => p,
+        None => anyhow::bail!("找不到题目"),
+    };
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(target_os = "windows")]
+    let opener = "explorer";
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let opener = "xdg-open";
+    let _ = std::process::Command::new(opener).arg(&pd.dir).spawn();
+    println!("{}", pd.dir.display());
     Ok(())
 }
 
@@ -805,8 +870,13 @@ fn cmd_list(ws: &store::Workspace) -> Result<()> {
         println!("（题库为空）使用 `shuati new <标题>` 创建本地题，或 GUI 题库页拉取");
         return Ok(());
     }
+    let state = store::AppState::load(&ws.state_path());
     for p in &problems {
-        println!("  {:22} {}", p.meta.id, p.meta.title);
+        let id = p.meta.id.to_string();
+        let n = p.load_cases().map(|c| c.len()).unwrap_or(0);
+        let last = state.last_verdicts.get(&id).map(|s| s.as_str()).unwrap_or("-");
+        let cur = if state.current_problem.as_deref() == Some(id.as_str()) { "*" } else { " " };
+        println!("{cur} {id:22} 上次:{last:4} {n:3}组  {}", p.meta.title);
     }
     Ok(())
 }
@@ -908,6 +978,8 @@ async fn cmd_test(
     };
     eprintln!();
 
+    // WA 展示数量：多了刷屏，萌新只需要看第一组错在哪
+    let mut shown_diff = 0;
     for c in &report.cases {
         let mark = if c.verdict == shuati_core::Verdict::Ac { "✓" } else { "✗" };
         println!("  {} {:12} {:3} {:>6}ms {:>8}KB", mark, c.name, c.verdict, c.cpu_ms, c.memory_kb);
@@ -916,6 +988,13 @@ async fn cmd_test(
             let first = c.message.lines().next().unwrap_or("");
             println!("      {}", first.chars().take(80).collect::<String>());
         }
+        if c.verdict == shuati_core::Verdict::Wa && shown_diff < 3 {
+            shown_diff += 1;
+            print_case_diff(c);
+        }
+    }
+    if shown_diff == 3 && report.cases.iter().filter(|c| c.verdict == shuati_core::Verdict::Wa).count() > 3 {
+        println!("      …（更多 WA 的 diff 见报告 json 或 GUI diff 弹窗）");
     }
     println!("[结果] {} · {}/{}", report.verdict, report.pass, report.total);
 
@@ -931,6 +1010,36 @@ async fn cmd_test(
         std::process::exit(1);
     }
     Ok(())
+}
+
+/// WA 的期望/实际紧凑对比：单行内联，多行块式（各截断到 ~6 行/300 字符）
+fn print_case_diff(c: &shuati_core::CaseResult) {
+    fn clipped(s: &str) -> Vec<String> {
+        const MAX_LINES: usize = 6;
+        const MAX_CHARS: usize = 300;
+        let over_chars = s.chars().count() > MAX_CHARS;
+        let s: String = s.chars().take(MAX_CHARS).collect();
+        let mut lines: Vec<String> = s.trim_end().lines().map(|l| l.to_string()).collect();
+        let truncated = over_chars || lines.len() > MAX_LINES;
+        lines.truncate(MAX_LINES);
+        if truncated {
+            lines.push("…".into());
+        }
+        lines
+    }
+    let (exp, act) = (c.expected.trim_end(), c.actual.trim_end());
+    if !exp.contains('\n') && !act.contains('\n') && exp.len() <= 60 && act.len() <= 60 {
+        println!("      期望: {exp} · 实际: {act}");
+        return;
+    }
+    println!("      期望:");
+    for l in clipped(exp) {
+        println!("        {l}");
+    }
+    println!("      实际:");
+    for l in clipped(act) {
+        println!("        {l}");
+    }
 }
 
 fn cfg_cpp_for(cfg: &store::Config, lang: Lang) -> &str {

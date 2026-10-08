@@ -368,15 +368,13 @@ fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
             }
         });
 
-        // 题面（可折叠）
-        if app.show_statement
-            && let Some(pd) = app.current_problem()
-        {
-            let stmt = pd.read_statement().unwrap_or_default();
+        // 题面（可折叠）。读盘结果进缓存——这里每帧都渲染
+        if app.show_statement && app.current_problem().is_some() {
+            let stmt = app.statement_cached();
             ui.group(|ui| {
                 egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
                     ui.add(
-                        egui::Label::new(RichText::new(if stmt.is_empty() { "（无题面）" } else { &stmt }).monospace())
+                        egui::Label::new(RichText::new(if stmt.is_empty() { "（无题面）" } else { stmt }).monospace())
                             .wrap(),
                     );
                 });
