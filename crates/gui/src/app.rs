@@ -156,6 +156,7 @@ pub struct ShuatiApp {
     pub cfg_api_base: String,
     pub cfg_model: String,
     pub cfg_editor: String,
+    pub cfg_lanqiao_cookie: String,
     /// AI 连接测试状态
     pub cfg_msg: String,
     pub ai_pinging: bool,
@@ -194,6 +195,7 @@ impl ShuatiApp {
             },
             cfg_model: if cfg.ai.model.is_empty() { "deepseek-chat".into() } else { cfg.ai.model.clone() },
             cfg_editor: cfg.editor.clone(),
+            cfg_lanqiao_cookie: cfg.lanqiao_cookie.clone(),
             cfg_msg: String::new(),
             ai_pinging: false,
             ws,

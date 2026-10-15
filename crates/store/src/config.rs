@@ -17,6 +17,9 @@ pub struct Config {
     /// 编辑器命令（可选，用于"打开题面"）
     #[serde(default)]
     pub editor: String,
+    /// 蓝桥云课登录 Cookie（拉取完整题面需要；也可用 SHUATI_LANQIAO_COOKIE 环境变量）
+    #[serde(default)]
+    pub lanqiao_cookie: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +56,7 @@ impl Default for Config {
             default_lang: default_lang(),
             ai: AiConfig::default(),
             editor: String::new(),
+            lanqiao_cookie: String::new(),
         }
     }
 }

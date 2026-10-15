@@ -2,7 +2,7 @@
 
 给 Dev-C++ 萌新的本地评测小助手。**把你的 .cpp 给我，我告诉你对不对。**
 
-- 拉题（洛谷/Codeforces）→ 拖入源文件 → 保存即自动判题 → 红绿结果 + diff
+- 拉题（洛谷/Codeforces/LeetCode/蓝桥云课）→ 拖入源文件 → 保存即自动判题 → 红绿结果 + diff
 - 真对拍：seed 驱动循环，抓到反例自动存盘、可精确重放
 - AI 提示/诊断 + AI 自动生成对拍脚本（生成后自动验证能跑才交付）
 - 单 exe GUI（egui），三平台；同引擎精简 CLI
@@ -67,4 +67,6 @@ problems/<src>__<id>/
 ## 注意
 
 - Codeforces 有 Cloudflare 防护：能拿到标题/难度/标签，题面样例被拦时需手动粘贴（GUI 评测页下方可加用例）
+- LeetCode 是函数式题目：样例输入存的是判题参数格式（每行一个参数），程序要自己从 stdin 解析
+- 蓝桥云课需登录：config.toml 配 `lanqiao_cookie`（或环境变量 `SHUATI_LANQIAO_COOKIE`，GUI 设置页可填），未配则只落题目标题+指引
 - 沙箱：macOS/Linux 用 rlimit+rusage；Windows 用 Job Object（CPU/内存硬限 + 进程树终止），无法创建 Job 时降级为 wall 超时 + kill

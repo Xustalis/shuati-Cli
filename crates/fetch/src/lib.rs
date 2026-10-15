@@ -3,7 +3,10 @@
 
 pub mod codeforces;
 mod http;
+pub mod lanqiao;
+pub mod leetcode;
 pub mod luogu;
+mod util;
 
 use shuati_core::ProblemId;
 use thiserror::Error;
@@ -42,13 +45,20 @@ pub trait Provider: Send + Sync {
     fn name(&self) -> &'static str;
     /// 该 URL 是否归本平台管
     fn matches(&self, url: &str) -> bool;
+    /// 拉取前注入工作区配置（凭据等）。默认无操作。
+    fn configure(&mut self, _config: &shuati_store::Config) {}
     /// 拉取题目
     async fn fetch(&self, url: &str) -> Result<FetchedProblem, FetchError>;
 }
 
 /// 全部 Provider 注册表
 pub fn providers() -> Vec<Box<dyn Provider>> {
-    vec![Box::new(luogu::LuoguProvider::new()), Box::new(codeforces::CodeforcesProvider::new())]
+    vec![
+        Box::new(luogu::LuoguProvider::new()),
+        Box::new(codeforces::CodeforcesProvider::new()),
+        Box::new(leetcode::LeetCodeProvider::new()),
+        Box::new(lanqiao::LanqiaoProvider::new()),
+    ]
 }
 
 /// URL → Provider 路由
@@ -58,7 +68,8 @@ pub fn route(url: &str) -> Option<Box<dyn Provider>> {
 
 /// 一站式服务：URL → 落盘 ProblemDir
 pub async fn fetch_to_dir(url: &str, ws: &shuati_store::Workspace) -> Result<shuati_store::ProblemDir, FetchError> {
-    let provider = route(url).ok_or_else(|| FetchError::UnsupportedUrl(url.to_string()))?;
+    let mut provider = route(url).ok_or_else(|| FetchError::UnsupportedUrl(url.to_string()))?;
+    provider.configure(&shuati_store::Config::load(&ws.config_path()));
     let fp = provider.fetch(url).await?;
     materialize(fp, ws).map_err(|e| FetchError::Parse(e.to_string()))
 }

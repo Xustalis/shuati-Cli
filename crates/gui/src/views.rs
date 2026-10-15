@@ -1199,6 +1199,15 @@ fn settings_view(app: &mut ShuatiApp, ui: &mut Ui) {
         ui.label(RichText::new("key 存系统钥匙串；也认环境变量 SHUATI_API_KEY；都不设则 AI 功能关闭").weak().small());
         ui.end_row();
 
+        ui.label("蓝桥 Cookie:");
+        ui.add(
+            egui::TextEdit::singleline(&mut app.cfg_lanqiao_cookie)
+                .password(true)
+                .desired_width(340.0)
+                .hint_text("拉蓝桥题需登录，粘浏览器 Cookie"),
+        );
+        ui.end_row();
+
         ui.label("题库目录:");
         ui.monospace(app.ws.root.display().to_string());
         ui.end_row();
@@ -1229,6 +1238,7 @@ fn settings_view(app: &mut ShuatiApp, ui: &mut Ui) {
             app.cfg.ai.api_base = app.cfg_api_base.trim().to_string();
             app.cfg.ai.model = app.cfg_model.trim().to_string();
             app.cfg.editor = app.cfg_editor.trim().to_string();
+            app.cfg.lanqiao_cookie = app.cfg_lanqiao_cookie.trim().to_string();
             match app.cfg.save(&app.ws.config_path()) {
                 Ok(()) => {
                     app.cfg_msg = format!("已保存{key_note}");

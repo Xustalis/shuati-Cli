@@ -21,8 +21,10 @@ crates/
 ├── judge   判题引擎：Compiler→Program / Runner(wait4 rusage) / Checker(4种)
 │           TestEngine(并行+进度+cancel) StressEngine(gen(seed)→user∥oracle→checker)
 │           所有进程调用走 argv，绝不拼 shell
-├── fetch   Provider trait + URL 路由。luogu=lentille-context JSON；
-│           cf=API 元数据 + HTML 样例（Cloudflare 拦则降级仅元数据）
+├── fetch   Provider trait + URL 路由 + configure(cfg) 凭据注入。luogu=lentille-context JSON；
+│           cf=API 元数据 + HTML 样例（Cloudflare 拦则降级仅元数据）；
+│           leetcode=GraphQL（样例输入=exampleTestcaseList，输出从题面 pre 解析）；
+│           lanqiao=api/v2 JSON（需 cookie：env SHUATI_LANQIAO_COOKIE > cfg.lanqiao_cookie，未登录降级为指引）
 ├── ai      OpenAI 兼容客户端（DeepSeek 默认）。hint/explain/gen_scripts+repair
 │           autogen.rs = 生成→落盘→dry_run→失败回喂重试 ≤3 轮
 ├── cli     clap。命令：doctor/list/new/add/case/open/run/test/stress/gen/hint/setup
