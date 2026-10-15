@@ -13,7 +13,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum FetchError {
-    #[error("unsupported url: {0}")]
+    #[error("不支持的链接（目前支持：洛谷 / Codeforces / LeetCode / 蓝桥云课）: {0}")]
     UnsupportedUrl(String),
     #[error("network: {0}")]
     Network(String),
