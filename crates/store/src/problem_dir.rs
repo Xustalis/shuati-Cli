@@ -184,6 +184,7 @@ impl ProblemDir {
 
     /// 写入用例文件。output=None 时不写 .out（无答案的 smoke 用例）
     pub fn write_case(&self, name: &str, input: &str, output: Option<&str>, origin: CaseOrigin) -> Result<()> {
+        check_case_name(&self.dir, name)?;
         let tests = self.tests_dir();
         atomic_write(&tests.join(format!("{name}.in")), input.as_bytes())?;
         if let Some(out) = output {
@@ -217,6 +218,7 @@ impl ProblemDir {
 
     /// 删除用例（.in/.out + manifest 记录）
     pub fn delete_case(&self, name: &str) -> Result<()> {
+        check_case_name(&self.dir, name)?;
         for ext in ["in", "out"] {
             let p = self.tests_dir().join(format!("{name}.{ext}"));
             if p.exists() {
@@ -295,6 +297,15 @@ impl ProblemDir {
 
 pub fn now_ts() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+
+/// 用例名合法性：拒绝路径分隔符/父目录引用，防 `../` 逃逸出 tests/
+fn check_case_name(dir: &std::path::Path, name: &str) -> Result<()> {
+    let bad = name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']);
+    if bad {
+        return Err(StoreError::Invalid(dir.join("tests").join(name), "用例名不能含路径分隔符".into()));
+    }
+    Ok(())
 }
 
 /// 扫描工作区，加载全部题目（损坏的目录跳过并记日志）
@@ -394,5 +405,17 @@ mod tests {
         let text = std::fs::read_to_string(pd.dir.join("problem.toml")).unwrap();
         assert!(text.contains("checkers/wcmp"), "{text}");
         assert!(!text.contains(pd.dir.to_str().unwrap()), "{text}");
+    }
+
+    #[test]
+    fn case_name_rejects_path_traversal() {
+        let (_d, pd) = tmp_pd();
+        for bad in ["../evil", "..", ".", "", "a/b", "a\\b", "..\\x"] {
+            assert!(pd.write_case(bad, "in", Some("out"), CaseOrigin::Sample).is_err(), "write_case 应拒绝 {bad:?}");
+            assert!(pd.delete_case(bad).is_err(), "delete_case 应拒绝 {bad:?}");
+        }
+        // 正常名不受影响，且没东西逃逸出 tests/
+        pd.write_case("0001", "in", Some("out"), CaseOrigin::Sample).unwrap();
+        assert!(!pd.dir.join("..").join("evil.in").exists());
     }
 }

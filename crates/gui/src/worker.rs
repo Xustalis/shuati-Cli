@@ -540,7 +540,7 @@ async fn run_gen_cases(
     let pd = match store::ProblemDir::open(&problem_dir) {
         Ok(p) => p,
         Err(e) => {
-            let _ = ev.send(Event::Failed(format!("题目目录错误: {e}")));
+            let _ = ev.send(Event::GenFailed(format!("题目目录错误: {e}")));
             return;
         }
     };
@@ -624,7 +624,7 @@ async fn run_stress(
     let pd = match store::ProblemDir::open(&problem_dir) {
         Ok(p) => p,
         Err(e) => {
-            let _ = ev.send(Event::Failed(format!("题目目录错误: {e}")));
+            let _ = ev.send(Event::StressFailed(format!("题目目录错误: {e}")));
             return;
         }
     };

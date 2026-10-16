@@ -215,7 +215,7 @@ async fn cmd_run(ws: &store::Workspace, cfg: &store::Config, file: &Path) -> Res
     let stdin = {
         use std::io::IsTerminal;
         if std::io::stdin().is_terminal() {
-            eprintln!("提示: 程序拿不到键盘输入（stdin=EOF）。要喂数据用管道：`shuati run --file x.cpp < data.in`");
+            eprintln!("提示: 程序拿不到键盘输入（stdin=EOF）。要喂数据用管道：`shuati run x.cpp < data.in`");
             None
         } else {
             use std::io::Read;

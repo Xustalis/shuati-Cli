@@ -507,7 +507,7 @@ impl ShuatiApp {
         meta.title = self.prob_edit.title.trim().to_string();
         if let Ok(v) = self.prob_edit.cpu_ms.trim().parse::<u64>() {
             meta.limits.cpu_ms = v;
-            meta.limits.wall_ms = (v * 3).max(2000);
+            meta.limits.wall_ms = v.saturating_mul(3).max(2000);
         }
         if let Ok(v) = self.prob_edit.mem_mb.trim().parse::<u64>() {
             meta.limits.memory_mb = v;
@@ -544,8 +544,13 @@ impl ShuatiApp {
 
     /// 删除题目（整个目录）
     pub fn delete_problem(&mut self, id: &str) {
-        // id 形如 "luogu:P1001"，目录名 "luogu__P1001"
-        let dir = self.ws.problems_dir().join(id.replace(':', "__"));
+        // slug 里可能含 ':'（load_all 宽容放行），replace(':', "__") 不可靠——直接用已加载的目录
+        let dir = self
+            .problems
+            .iter()
+            .find(|p| p.meta.id.to_string() == id)
+            .map(|p| p.dir.clone())
+            .unwrap_or_else(|| self.ws.problems_dir().join(id.replace(':', "__")));
         match std::fs::remove_dir_all(&dir) {
             Ok(()) => {
                 if self.state.current_problem.as_deref() == Some(id) {
@@ -809,9 +814,10 @@ impl ShuatiApp {
         while let Some(ev) = self.bridge.try_recv() {
             match ev {
                 Event::Compiling => self.run.compiling = true,
-                Event::CaseDone(i, total, name, v) => {
+                Event::CaseDone(_i, total, name, v) => {
                     self.run.compiling = false;
-                    self.run.done = i + 1;
+                    // i 是分派下标（并行时乱序），完成数用 live_cases.len() 更准
+                    self.run.done = self.run.live_cases.len() + 1;
                     self.run.total = total;
                     self.run.live_cases.push((name, v));
                 }

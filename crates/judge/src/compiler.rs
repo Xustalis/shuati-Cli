@@ -101,10 +101,12 @@ async fn compile_cpp(src: &SourceFile, tc: &Toolchain, cache_dir: Option<&std::p
         if artifact.exists() {
             let _ = std::fs::remove_file(&artifact);
         }
+        let mut cmd = Command::new(&tc.executable);
+        // 超时返回后 drop 会杀掉子进程，不留编译器孤儿
+        cmd.kill_on_drop(true);
         let output = timeout(
             COMPILE_TIMEOUT,
-            Command::new(&tc.executable)
-                .arg("-O2")
+            cmd.arg("-O2")
                 .arg(std_flag)
                 .arg(&src_path)
                 .arg("-o")
@@ -142,10 +144,11 @@ async fn compile_cpp(src: &SourceFile, tc: &Toolchain, cache_dir: Option<&std::p
 async fn prepare_python(src: &SourceFile, tc: &Toolchain) -> Result<Program> {
     let src_path = src.path.canonicalize().unwrap_or_else(|_| src.path.clone());
     // 语法快速检查：python -B -m py_compile（-B 避免在用户目录产 __pycache__）
+    let mut cmd = Command::new(&tc.executable);
+    cmd.kill_on_drop(true);
     let output = timeout(
         COMPILE_TIMEOUT,
-        Command::new(&tc.executable)
-            .arg("-B")
+        cmd.arg("-B")
             .arg("-m")
             .arg("py_compile")
             .arg(&src_path)

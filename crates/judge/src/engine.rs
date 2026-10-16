@@ -152,7 +152,9 @@ async fn run_one(
             None => (Verdict::Ac, "（无 .out 答案，仅验证可运行）".into()),
             Some(expected) => {
                 let ctx = shuati_core::CheckCtx { input: &tc.input, actual: &actual, expected };
-                match check_async(checker, &ctx, tmpdir).await {
+                // spj 往 tmpdir 写固定文件名（spj_input.txt 等）——并行用例必须各有各的目录
+                let case_tmp = tmpdir.join(format!("case_{idx}_spj"));
+                match check_async(checker, &ctx, &case_tmp).await {
                     Ok(v) => (v, String::new()),
                     Err(e) => (Verdict::Se, e.to_string()),
                 }
