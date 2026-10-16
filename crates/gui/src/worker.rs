@@ -190,8 +190,8 @@ impl Bridge {
                                     }
                                 };
                                 match shuati_fetch::fetch_to_dir(&url, &ws).await {
-                                    Ok(pd) => {
-                                        let _ = ev.send(Event::FetchedOk(pd.meta.id.to_string()));
+                                    Ok(out) => {
+                                        let _ = ev.send(Event::FetchedOk(out.pd.meta.id.to_string()));
                                     }
                                     Err(e) => {
                                         let _ = ev.send(Event::FetchFailed(e.to_string()));

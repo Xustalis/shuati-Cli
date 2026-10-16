@@ -734,11 +734,15 @@ fn devcpp_config_dirs() -> Vec<PathBuf> {
 
 async fn cmd_add(ws: &store::Workspace, url: &str) -> Result<()> {
     println!("[*] 正在拉取 {url} …");
-    let pd = shuati_fetch::fetch_to_dir(url, ws).await?;
+    let out = shuati_fetch::fetch_to_dir(url, ws).await?;
+    let pd = out.pd;
     println!("[+] {}  {}", pd.meta.id, pd.meta.title);
-    let cases = pd.load_cases()?;
-    println!("    样例 {} 组 → {}", cases.len(), pd.dir.display());
-    if cases.is_empty() {
+    if out.added == out.samples {
+        println!("    样例 {} 组 → {}", out.samples, pd.dir.display());
+    } else {
+        println!("    样例 {} 组（新增 {}，已有用例不覆盖）→ {}", out.samples, out.added, pd.dir.display());
+    }
+    if out.samples == 0 {
         eprintln!("    注意：没拉到样例（题面抓取被拦？）。评测页下方/statement.md 可手动补。");
     }
     // 设为当前题目

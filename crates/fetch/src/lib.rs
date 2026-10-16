@@ -66,8 +66,17 @@ pub fn route(url: &str) -> Option<Box<dyn Provider>> {
     providers().into_iter().find(|p| p.matches(url))
 }
 
-/// 一站式服务：URL → 落盘 ProblemDir
-pub async fn fetch_to_dir(url: &str, ws: &shuati_store::Workspace) -> Result<shuati_store::ProblemDir, FetchError> {
+/// 拉题落盘的回执：目录 + 抓到的样例数 + 本次新写入数
+pub struct FetchOutcome {
+    pub pd: shuati_store::ProblemDir,
+    /// provider 抓到的样例组数
+    pub samples: usize,
+    /// 实际新写入 tests/ 的组数（重复拉取时可能 < samples）
+    pub added: usize,
+}
+
+/// 一站式服务：URL → 落盘 ProblemDir + 回执
+pub async fn fetch_to_dir(url: &str, ws: &shuati_store::Workspace) -> Result<FetchOutcome, FetchError> {
     let mut provider = route(url).ok_or_else(|| FetchError::UnsupportedUrl(url.to_string()))?;
     provider.configure(&shuati_store::Config::load(&ws.config_path()));
     let fp = provider.fetch(url).await?;
@@ -77,7 +86,7 @@ pub async fn fetch_to_dir(url: &str, ws: &shuati_store::Workspace) -> Result<shu
 /// FetchedProblem → 磁盘。
 /// 题目已存在（重复拉取）时：更新标题/难度/标签，保留用户自定义的
 /// limits/checker/题面；样例只补缺失文件，不覆盖用户改过的用例。
-pub fn materialize(fp: FetchedProblem, ws: &shuati_store::Workspace) -> shuati_store::Result<shuati_store::ProblemDir> {
+pub fn materialize(fp: FetchedProblem, ws: &shuati_store::Workspace) -> shuati_store::Result<FetchOutcome> {
     let dir = ws.problem_dir(&fp.id);
     let pd = match shuati_store::ProblemDir::open(&dir) {
         Ok(existing) => {
@@ -116,6 +125,7 @@ pub fn materialize(fp: FetchedProblem, ws: &shuati_store::Workspace) -> shuati_s
             pd
         }
     };
+    let mut added = 0;
     for (i, (input, output)) in fp.samples.iter().enumerate() {
         let name = format!("{:04}", i + 1);
         // 已存在的用例文件不覆盖（用户可能改过数据）
@@ -123,6 +133,7 @@ pub fn materialize(fp: FetchedProblem, ws: &shuati_store::Workspace) -> shuati_s
             continue;
         }
         pd.write_case(&name, input, Some(output), shuati_core::CaseOrigin::Sample)?;
+        added += 1;
     }
-    Ok(pd)
+    Ok(FetchOutcome { pd, samples: fp.samples.len(), added })
 }
