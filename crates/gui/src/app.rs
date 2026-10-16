@@ -137,6 +137,8 @@ pub struct ShuatiApp {
     pub url_input: String,
     pub lib_msg: String,
     pub fetching: bool,
+    /// 题库列表过滤词（按 id/标题模糊搜）
+    pub lib_filter: String,
 
     // ── 快速运行屏
     pub quick: QuickState,
@@ -214,6 +216,7 @@ impl ShuatiApp {
             url_input: String::new(),
             lib_msg: String::new(),
             fetching: false,
+            lib_filter: String::new(),
             stress: StressState { rounds_input: "100".into(), gen_count_input: "20".into(), ..Default::default() },
             quick: QuickState::default(),
             ai: AiState::default(),

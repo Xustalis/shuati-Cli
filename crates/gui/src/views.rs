@@ -29,6 +29,13 @@ pub fn render(app: &mut ShuatiApp, ctx: &egui::Context) {
                 env_item(ui, "g++", env.cpp.is_some(), env.cpp.as_ref().map(|p| p.display().to_string()));
                 env_item(ui, "python", env.python.is_some(), env.python.as_ref().map(|p| p.display().to_string()));
             }
+            let ai_tip = match app.key_src {
+                shuati_store::secrets::KeySource::Env => "key 来自环境变量".to_string(),
+                shuati_store::secrets::KeySource::Keyring => "key 在系统钥匙串".to_string(),
+                shuati_store::secrets::KeySource::File => "key 在 config.toml".to_string(),
+                shuati_store::secrets::KeySource::None => "未配置 api_key（设置页可配）".to_string(),
+            };
+            env_item(ui, "AI", app.ai_ready(), Some(ai_tip));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(RichText::new(app.ws.root.display().to_string()).weak().small());
             });
@@ -193,6 +200,11 @@ fn quick_view(app: &mut ShuatiApp, ui: &mut Ui) {
             && let Some(p) = rfd::FileDialog::new().add_filter("源代码", &["cpp", "cc", "cxx", "c++", "py"]).pick_file()
         {
             app.set_watch_file(p);
+        }
+        if let Some(p) = app.state.watch_file.clone()
+            && ui.small_button("编辑").on_hover_text("用设置里的编辑器打开（留空=系统默认程序）").clicked()
+        {
+            open_source_file(app, &p);
         }
         let can_run = app.state.watch_file.is_some() && !app.quick.running;
         if ui.add_enabled(can_run, egui::Button::new("▶ 运行").min_size(egui::vec2(76.0, 0.0))).clicked() {
@@ -401,6 +413,11 @@ fn test_view(app: &mut ShuatiApp, ui: &mut Ui) {
                         rfd::FileDialog::new().add_filter("源代码", &["cpp", "cc", "cxx", "c++", "py"]).pick_file()
                 {
                     app.set_watch_file(p);
+                }
+                if let Some(p) = app.state.watch_file.clone()
+                    && ui.small_button("编辑").on_hover_text("用设置里的编辑器打开（留空=系统默认程序）").clicked()
+                {
+                    open_source_file(app, &p);
                 }
                 let mut watch = app.state.watch_enabled;
                 if ui
@@ -769,7 +786,12 @@ fn library_view(app: &mut ShuatiApp, ui: &mut Ui) {
         }
     });
 
-    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.label("搜索:");
+        ui.add(egui::TextEdit::singleline(&mut app.lib_filter).desired_width(220.0).hint_text("按题号或标题过滤"));
+    });
+
+    ui.add_space(4.0);
 
     egui::ScrollArea::vertical().show(ui, |ui| {
         egui::Grid::new("prob_grid").striped(true).show(ui, |ui| {
@@ -779,9 +801,15 @@ fn library_view(app: &mut ShuatiApp, ui: &mut Ui) {
             ui.label(RichText::new("最近").strong());
             ui.label("");
             ui.end_row();
+            let needle = app.lib_filter.trim().to_lowercase();
             let items: Vec<(String, String, String, String)> = app
                 .problems
                 .iter()
+                .filter(|p| {
+                    needle.is_empty()
+                        || p.meta.id.to_string().to_lowercase().contains(&needle)
+                        || p.meta.title.to_lowercase().contains(&needle)
+                })
                 .map(|p| {
                     (
                         p.meta.id.to_string(),
@@ -1070,6 +1098,34 @@ fn stress_view(app: &mut ShuatiApp, ui: &mut Ui) {
     }
 }
 
+/// 用设置的编辑器打开源文件；未配置走系统默认关联程序
+fn open_source_file(app: &mut ShuatiApp, path: &std::path::Path) {
+    let editor = app.cfg_editor.trim();
+    let spawned = if editor.is_empty() {
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("open").arg(path).spawn().is_ok()
+        }
+        #[cfg(target_os = "windows")]
+        {
+            std::process::Command::new("explorer").arg(path).spawn().is_ok()
+        }
+        #[cfg(target_os = "linux")]
+        {
+            std::process::Command::new("xdg-open").arg(path).spawn().is_ok()
+        }
+    } else {
+        std::process::Command::new(editor).arg(path).spawn().is_ok()
+    };
+    if !spawned {
+        app.run.error = Some(if editor.is_empty() {
+            "打开失败：系统默认程序不可用".into()
+        } else {
+            format!("打开失败：{editor}")
+        });
+    }
+}
+
 /// 在系统文件管理器中打开目录
 fn open_in_explorer(path: &std::path::Path) {
     #[cfg(target_os = "macos")]
@@ -1152,6 +1208,17 @@ fn settings_view(app: &mut ShuatiApp, ui: &mut Ui) {
         });
         ui.end_row();
 
+        ui.label("编辑器:");
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut app.cfg_editor)
+                    .desired_width(300.0)
+                    .hint_text("例: devcpp.exe / code / notepad++（留空=系统默认打开）"),
+            );
+            ui.label(RichText::new("评测页源文件旁的「编辑」按钮用它打开").weak().small());
+        });
+        ui.end_row();
+
         ui.label("AI 服务商:");
         ui.horizontal(|ui| {
             for (name, base, model) in [
@@ -1170,17 +1237,36 @@ fn settings_view(app: &mut ShuatiApp, ui: &mut Ui) {
         ui.end_row();
 
         ui.label("AI API Key:");
-        ui.add(egui::TextEdit::singleline(&mut app.cfg_api_key).password(true).hint_text("sk-..."));
-        // key 现存的来源（缓存值，保存后 refresh_env 刷新；留空输入框 = 不改动已存 key）
-        let src_note = match app.key_src {
-            shuati_store::secrets::KeySource::Env => "（生效中：环境变量 SHUATI_API_KEY）",
-            shuati_store::secrets::KeySource::Keyring => "（生效中：系统钥匙串，留空则不改动）",
-            shuati_store::secrets::KeySource::File => "（生效中：config.toml 明文）",
-            shuati_store::secrets::KeySource::None => "",
-        };
-        if !src_note.is_empty() {
-            ui.label(RichText::new(src_note).weak().small());
-        }
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut app.cfg_api_key).password(true).hint_text("sk-..."));
+            // key 现存的来源（缓存值，保存后 refresh_env 刷新；留空输入框 = 不改动已存 key）
+            let src_note = match app.key_src {
+                shuati_store::secrets::KeySource::Env => "（生效中：环境变量 SHUATI_API_KEY）",
+                shuati_store::secrets::KeySource::Keyring => "（生效中：系统钥匙串，留空则不改动）",
+                shuati_store::secrets::KeySource::File => "（生效中：config.toml 明文）",
+                shuati_store::secrets::KeySource::None => "",
+            };
+            if !src_note.is_empty() {
+                ui.label(RichText::new(src_note).weak().small());
+            }
+            if app.key_src != shuati_store::secrets::KeySource::None
+                && ui
+                    .small_button("清除已存 key")
+                    .on_hover_text("删掉钥匙串和 config.toml 里存的 key（环境变量仍生效）")
+                    .clicked()
+            {
+                shuati_store::secrets::delete_api_key();
+                app.cfg.ai.api_key.clear();
+                app.cfg_api_key.clear();
+                match app.cfg.save(&app.ws.config_path()) {
+                    Ok(()) => {
+                        app.cfg_msg = "已清除存储的 key".into();
+                        app.refresh_env();
+                    }
+                    Err(e) => app.cfg_msg = format!("清除失败: {e}"),
+                }
+            }
+        });
         ui.end_row();
 
         ui.label("AI 接口地址:");
