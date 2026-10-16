@@ -24,8 +24,8 @@ pub enum Event {
     StressFailed(String),
     /// 批量造例失败——复位 genning 并提示
     GenFailed(String),
-    /// 拉题完成（problem id 字符串）
-    FetchedOk(String),
+    /// 拉题完成：(题目id, 抓到样例数, 新写入数)
+    FetchedOk(String, usize, usize),
     /// 拉题失败
     FetchFailed(String),
     /// 对拍：单轮进度（done, matched, hacks, gen_fail, oracle_fail）
@@ -191,7 +191,11 @@ impl Bridge {
                                 };
                                 match shuati_fetch::fetch_to_dir(&url, &ws).await {
                                     Ok(out) => {
-                                        let _ = ev.send(Event::FetchedOk(out.pd.meta.id.to_string()));
+                                        let _ = ev.send(Event::FetchedOk(
+                                            out.pd.meta.id.to_string(),
+                                            out.samples,
+                                            out.added,
+                                        ));
                                     }
                                     Err(e) => {
                                         let _ = ev.send(Event::FetchFailed(e.to_string()));

@@ -853,15 +853,16 @@ impl ShuatiApp {
                     self.stress.genning = false;
                     self.stress.msg = format!("生成失败: {msg}");
                 }
-                Event::FetchedOk(id) => {
+                Event::FetchedOk(id, samples, added) => {
                     self.fetching = false;
                     self.reload_problems();
                     self.select_problem(id.clone());
-                    let n = self.current_problem().map(|p| p.count_cases()).unwrap_or(0);
-                    self.lib_msg = if n > 0 {
-                        format!("已拉取 {id} · {n} 组样例")
-                    } else {
+                    self.lib_msg = if samples == 0 {
                         format!("已拉取 {id}，但没抓到样例——评测页下方可手动粘贴")
+                    } else if added < samples {
+                        format!("已更新 {id} · 样例 {samples} 组（新增 {added}，已有用例不覆盖）")
+                    } else {
+                        format!("已拉取 {id} · {samples} 组样例")
                     };
                 }
                 Event::FetchFailed(msg) => {
